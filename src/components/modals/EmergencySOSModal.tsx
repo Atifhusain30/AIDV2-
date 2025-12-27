@@ -24,7 +24,7 @@ export default function EmergencySOSModal() {
   const isOpen = activeModal === 'emergency_sos'
 
   useEffect(() => {
-    let timer: NodeJS.Timeout
+    let timer: ReturnType<typeof setTimeout>
     if (countdown !== null && countdown > 0) {
       timer = setTimeout(() => setCountdown(countdown - 1), 1000)
     } else if (countdown === 0) {
