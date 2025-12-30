@@ -292,3 +292,4 @@ export const batteryTypes: Record<string, string> = {
   default: 'Lithium-ion',
 }
 
+
