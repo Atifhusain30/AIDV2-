@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-  X, 
   ChevronLeft, 
   ChevronRight, 
   MapPin, 
@@ -88,7 +87,7 @@ function ServiceCard({ service, isExpanded, onToggle }: {
     <motion.div
       layout
       onClick={onToggle}
-      className="bg-white/5 backdrop-blur rounded-2xl overflow-hidden cursor-pointer border border-white/5 hover:border-white/10 transition-colors"
+      className="bg-white/5 backdrop-blur-sm rounded-2xl overflow-hidden cursor-pointer border border-white/10 hover:border-emerald-500/30 transition-colors"
       whileHover={{ scale: 1.01 }}
       whileTap={{ scale: 0.99 }}
     >
@@ -97,18 +96,18 @@ function ServiceCard({ service, isExpanded, onToggle }: {
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             {/* Service icon */}
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${
               isCompleted ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
             }`}>
-              <ServiceIcon size={20} />
+              <ServiceIcon size={22} strokeWidth={1.5} />
             </div>
             
             <div>
-              <h4 className="font-semibold text-white">{service.type}</h4>
+              <h4 className="font-semibold text-white text-sm">{service.type}</h4>
               <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full mt-1 ${
                 isCompleted ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
               }`}>
-                {isCompleted ? <CheckCircle2 size={12} /> : <Clock3 size={12} />}
+                {isCompleted ? <CheckCircle2 size={10} /> : <Clock3 size={10} />}
                 <span className="capitalize">{service.status}</span>
               </span>
             </div>
@@ -128,19 +127,19 @@ function ServiceCard({ service, isExpanded, onToggle }: {
             >
               <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
                 <div className="flex items-center gap-2 text-gray-400">
-                  <MapPin size={14} />
+                  <MapPin size={14} strokeWidth={1.5} />
                   <span className="text-sm">{service.address}</span>
                 </div>
                 <div className="flex items-center gap-2 text-gray-400">
-                  <Calendar size={14} />
+                  <Calendar size={14} strokeWidth={1.5} />
                   <span className="text-sm">{formatDate(service.date)}</span>
                 </div>
                 <div className="flex items-center gap-3 pt-2">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-sm font-semibold text-white">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-sm font-semibold text-white">
                     {service.initials}
                   </div>
                   <div>
-                    <p className="font-medium text-white">{service.provider}</p>
+                    <p className="font-medium text-white text-sm">{service.provider}</p>
                     <div className="flex items-center gap-1">
                       <Star size={12} className="text-amber-400 fill-amber-400" />
                       <span className="text-sm text-gray-400">{service.rating}</span>
@@ -180,7 +179,7 @@ function CalendarView({
   const todayDate = today.getDate()
 
   // Create array of days
-  const days = []
+  const days: (number | null)[] = []
   for (let i = 0; i < firstDay; i++) {
     days.push(null)
   }
@@ -195,7 +194,6 @@ function CalendarView({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
       transition={{ duration: 0.3 }}
-      className="px-6"
     >
       {/* Calendar Header */}
       <div className="flex items-center justify-between mb-4">
@@ -205,7 +203,7 @@ function CalendarView({
           onClick={() => onNavigateMonth(-1)}
           className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={20} strokeWidth={1.5} />
         </motion.button>
         
         <motion.h3
@@ -223,7 +221,7 @@ function CalendarView({
           onClick={() => onNavigateMonth(1)}
           className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
         >
-          <ChevronRight size={20} />
+          <ChevronRight size={20} strokeWidth={1.5} />
         </motion.button>
       </div>
 
@@ -242,7 +240,7 @@ function CalendarView({
         initial="hidden"
         animate="visible"
         variants={{
-          visible: { transition: { staggerChildren: 0.02 } }
+          visible: { transition: { staggerChildren: 0.015 } }
         }}
       >
         {days.map((day, index) => {
@@ -265,11 +263,11 @@ function CalendarView({
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => onSelectDate(isSelected ? null : day)}
-              className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-colors ${
+              className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all ${
                 isSelected 
-                  ? 'bg-gradient-to-br from-emerald-500 to-teal-500 text-white' 
+                  ? 'bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/30' 
                   : isToday
-                    ? 'bg-white/10 text-white'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     : 'bg-white/5 hover:bg-white/10 text-gray-300'
               }`}
             >
@@ -277,7 +275,7 @@ function CalendarView({
               
               {/* Service indicators */}
               {hasServices && (
-                <div className="absolute bottom-1.5 flex gap-0.5">
+                <div className="absolute bottom-1 flex gap-0.5">
                   {dayServices.slice(0, 3).map((s, idx) => (
                     <div 
                       key={idx}
@@ -306,7 +304,7 @@ function CalendarView({
               const selectedServices = getServicesForDate(selectedDate, month, year, filteredServices)
               if (selectedServices.length === 0) {
                 return (
-                  <p className="text-center text-gray-400 text-sm py-4">
+                  <p className="text-center text-gray-400 text-sm py-4 bg-white/5 rounded-xl">
                     No services on this date
                   </p>
                 )
@@ -321,15 +319,15 @@ function CalendarView({
                       key={service.id}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="flex items-center justify-between bg-white/5 rounded-xl p-3"
+                      className="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/5"
                     >
                       <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
                           service.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
                         }`}>
                           {(() => {
                             const Icon = serviceIcons[service.type]
-                            return <Icon size={16} />
+                            return <Icon size={18} strokeWidth={1.5} />
                           })()}
                         </div>
                         <div>
@@ -367,7 +365,7 @@ function ListView({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
       transition={{ duration: 0.3 }}
-      className="px-6 space-y-3"
+      className="space-y-3"
     >
       {filteredServices.length === 0 ? (
         <motion.div
@@ -376,7 +374,7 @@ function ListView({
           className="text-center py-12"
         >
           <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
-            <FileText size={28} className="text-gray-500" />
+            <FileText size={28} strokeWidth={1.5} className="text-gray-500" />
           </div>
           <h3 className="text-white/70 font-medium mb-2">No services found</h3>
           <p className="text-gray-500 text-sm">Try adjusting your filter</p>
@@ -411,20 +409,20 @@ function StatsBar({ filteredServices }: { filteredServices: Service[] }) {
 
   return (
     <motion.div 
-      className="px-6 mt-6 grid grid-cols-3 gap-3"
+      className="grid grid-cols-3 gap-3"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.3 }}
+      transition={{ delay: 0.2 }}
     >
-      <div className="bg-white/5 rounded-2xl p-4 text-center">
+      <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/5">
         <p className="text-2xl font-bold text-emerald-400">{completedCount}</p>
         <p className="text-xs text-gray-400 mt-1">Completed</p>
       </div>
-      <div className="bg-white/5 rounded-2xl p-4 text-center">
+      <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/5">
         <p className="text-2xl font-bold text-amber-400">{pendingCount}</p>
         <p className="text-xs text-gray-400 mt-1">Pending</p>
       </div>
-      <div className="bg-white/5 rounded-2xl p-4 text-center">
+      <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/5">
         <p className="text-2xl font-bold text-white">${totalSpent}</p>
         <p className="text-xs text-gray-400 mt-1">Total Spent</p>
       </div>
@@ -434,7 +432,6 @@ function StatsBar({ filteredServices }: { filteredServices: Service[] }) {
 
 // Main History Screen Component
 export default function HistoryScreen() {
-  const [isSheetOpen, setIsSheetOpen] = useState(true)
   const [activeFilter, setActiveFilter] = useState<'All' | 'Completed' | 'Pending'>('All')
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('list')
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -462,157 +459,107 @@ export default function HistoryScreen() {
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
-      {/* Background */}
+    <div className="max-w-md mx-auto px-5 py-6">
+      {/* Header */}
       <motion.div
-        className="absolute inset-0"
-        animate={{ 
-          filter: isSheetOpen ? 'blur(0px)' : 'blur(0px)',
-          scale: 1
-        }}
-        transition={{ duration: 0.3 }}
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mb-6"
       >
-        {/* Gradient orbs */}
-        <div className="absolute top-20 left-1/4 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-40 right-1/4 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl" />
+        <h1 className="text-xl font-semibold text-white mb-1">Service History</h1>
+        <p className="text-white/40 text-sm">Track your past and pending services</p>
       </motion.div>
 
-      {/* Bottom Sheet */}
-      <AnimatePresence>
-        {isSheetOpen && (
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            drag="y"
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.5 }}
-            onDragEnd={(_, info) => {
-              if (info.offset.y > 100) setIsSheetOpen(false)
-            }}
-            className="absolute inset-x-0 bottom-0 top-0 bg-gradient-to-b from-[#12122a] to-[#0a0a1a] rounded-t-[32px] overflow-hidden flex flex-col"
-            style={{ touchAction: 'none' }}
-          >
-            {/* Drag handle */}
-            <div className="flex justify-center pt-3 pb-2">
-              <motion.div 
-                className="w-12 h-1.5 bg-white/20 rounded-full"
-                whileHover={{ backgroundColor: 'rgba(255,255,255,0.4)' }}
-              />
-            </div>
+      {/* Stats Bar */}
+      <div className="mb-6">
+        <StatsBar filteredServices={filteredServices} />
+      </div>
 
-            {/* Header */}
-            <div className="px-6 pb-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold tracking-tight text-white">Service History</h2>
-              <motion.button
-                whileHover={{ scale: 1.1, rotate: 90 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => setIsSheetOpen(false)}
-                className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white"
-                aria-label="Close"
-              >
-                <X size={18} />
-              </motion.button>
-            </div>
+      {/* View Toggle */}
+      <motion.div 
+        className="mb-4"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <div className="bg-white/5 rounded-2xl p-1 flex border border-white/5">
+          {(['calendar', 'list'] as const).map((mode) => (
+            <motion.button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium capitalize flex items-center justify-center gap-2 relative"
+              whileTap={{ scale: 0.98 }}
+            >
+              {viewMode === mode && (
+                <motion.div
+                  layoutId="viewToggle"
+                  className="absolute inset-0 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 rounded-xl border border-emerald-500/30"
+                  transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                />
+              )}
+              <span className={`relative z-10 flex items-center gap-2 ${
+                viewMode === mode ? 'text-emerald-400' : 'text-gray-400'
+              }`}>
+                {mode === 'calendar' ? <Calendar size={16} strokeWidth={1.5} /> : <Clock size={16} strokeWidth={1.5} />}
+                {mode}
+              </span>
+            </motion.button>
+          ))}
+        </div>
+      </motion.div>
 
-            {/* View Toggle */}
-            <div className="px-6 mb-4">
-              <div className="bg-white/5 rounded-2xl p-1 flex">
-                {(['calendar', 'list'] as const).map((mode) => (
-                  <motion.button
-                    key={mode}
-                    onClick={() => setViewMode(mode)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium capitalize flex items-center justify-center gap-2 relative"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    {viewMode === mode && (
-                      <motion.div
-                        layoutId="viewToggle"
-                        className="absolute inset-0 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 rounded-xl border border-emerald-500/30"
-                        transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-                      />
-                    )}
-                    <span className={`relative z-10 flex items-center gap-2 ${
-                      viewMode === mode ? 'text-emerald-400' : 'text-gray-400'
-                    }`}>
-                      {mode === 'calendar' ? <Calendar size={16} /> : <Clock size={16} />}
-                      {mode}
-                    </span>
-                  </motion.button>
-                ))}
-              </div>
-            </div>
-
-            {/* Filter Pills */}
-            <div className="px-6 mb-4 flex gap-2">
-              {(['All', 'Completed', 'Pending'] as const).map((filter) => (
-                <motion.button
-                  key={filter}
-                  onClick={() => setActiveFilter(filter)}
-                  className="px-4 py-2 rounded-full text-sm font-medium relative overflow-hidden"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  {activeFilter === filter && (
-                    <motion.div
-                      layoutId="filterPill"
-                      className="absolute inset-0 bg-emerald-500"
-                      transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-                    />
-                  )}
-                  <span className={`relative z-10 ${
-                    activeFilter === filter ? 'text-white' : 'text-gray-400'
-                  }`}>
-                    {filter}
-                  </span>
-                </motion.button>
-              ))}
-            </div>
-
-            {/* Content Area */}
-            <div className="flex-1 overflow-y-auto pb-6 hide-scrollbar">
-              <AnimatePresence mode="wait">
-                {viewMode === 'calendar' ? (
-                  <CalendarView
-                    key="calendar-view"
-                    currentDate={currentDate}
-                    selectedDate={selectedDate}
-                    onSelectDate={setSelectedDate}
-                    filteredServices={filteredServices}
-                    onNavigateMonth={handleNavigateMonth}
-                  />
-                ) : (
-                  <ListView
-                    key="list-view"
-                    filteredServices={sortedServices}
-                    expandedId={expandedId}
-                    setExpandedId={setExpandedId}
-                  />
-                )}
-              </AnimatePresence>
-
-              {/* Stats Bar */}
-              <StatsBar filteredServices={filteredServices} />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Closed state - tap to reopen */}
-      <AnimatePresence>
-        {!isSheetOpen && (
+      {/* Filter Pills */}
+      <motion.div 
+        className="mb-5 flex gap-2"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+      >
+        {(['All', 'Completed', 'Pending'] as const).map((filter) => (
           <motion.button
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            onClick={() => setIsSheetOpen(true)}
-            className="absolute bottom-24 left-1/2 -translate-x-1/2 px-6 py-3 bg-emerald-500 rounded-full text-white font-medium shadow-lg shadow-emerald-500/30"
+            key={filter}
+            onClick={() => setActiveFilter(filter)}
+            className="px-4 py-2 rounded-full text-sm font-medium relative overflow-hidden border border-transparent"
+            style={{
+              borderColor: activeFilter !== filter ? 'rgba(255,255,255,0.1)' : 'transparent'
+            }}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
-            View Service History
+            {activeFilter === filter && (
+              <motion.div
+                layoutId="filterPill"
+                className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-teal-500"
+                transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+              />
+            )}
+            <span className={`relative z-10 ${
+              activeFilter === filter ? 'text-white' : 'text-gray-400'
+            }`}>
+              {filter}
+            </span>
           </motion.button>
+        ))}
+      </motion.div>
+
+      {/* Content Area */}
+      <AnimatePresence mode="wait">
+        {viewMode === 'calendar' ? (
+          <CalendarView
+            key="calendar-view"
+            currentDate={currentDate}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            filteredServices={filteredServices}
+            onNavigateMonth={handleNavigateMonth}
+          />
+        ) : (
+          <ListView
+            key="list-view"
+            filteredServices={sortedServices}
+            expandedId={expandedId}
+            setExpandedId={setExpandedId}
+          />
         )}
       </AnimatePresence>
     </div>
