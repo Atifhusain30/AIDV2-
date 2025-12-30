@@ -13,11 +13,8 @@ export default function BottomNav() {
   const { currentScreen, setCurrentScreen, setActiveModal } = useAppStore()
 
   const handleNavClick = (id: typeof navItems[number]['id']) => {
-    if (id === 'history') {
-      setActiveModal('history')
-    } else {
-      setCurrentScreen(id as 'home' | 'history' | 'chat' | 'profile')
-    }
+    setCurrentScreen(id as 'home' | 'history' | 'chat' | 'profile')
+    setActiveModal(null) // Close any open modals when navigating
   }
 
   return (
