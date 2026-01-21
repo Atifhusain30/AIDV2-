@@ -29,9 +29,11 @@ import {
   Newspaper,
   Loader2,
   Check,
+  Phone,
 } from 'lucide-react'
+import { useAppStore, UserVehicle } from '../store/useAppStore'
 
-// Types
+// Legacy types for non-persisted local data
 interface UserData {
   id: string
   firstName: string
@@ -41,7 +43,8 @@ interface UserData {
   createdAt: Date
 }
 
-interface Vehicle {
+// Legacy vehicle type for non-persisted local state components
+interface LegacyVehicle {
   id: string
   nickname: string
   make: string
@@ -95,7 +98,7 @@ const initialUser: UserData = {
   createdAt: new Date('2024-06-15'),
 }
 
-const initialVehicles: Vehicle[] = [
+const initialVehicles: LegacyVehicle[] = [
   {
     id: 'veh_1',
     nickname: 'My Tesla',
@@ -507,17 +510,17 @@ function EditProfileScreen({ user, onBack, onSave }: { user: UserData; onBack: (
   )
 }
 
-// Vehicle Form Modal
+// Vehicle Form Modal (Legacy - non-persisted)
 function VehicleFormModal({ 
   vehicle, 
   onClose, 
   onSave 
 }: { 
-  vehicle: Vehicle | null
+  vehicle: LegacyVehicle | null
   onClose: () => void
-  onSave: (vehicle: Vehicle) => void 
+  onSave: (vehicle: LegacyVehicle) => void 
 }) {
-  const [formData, setFormData] = useState<Omit<Vehicle, 'id'>>(
+  const [formData, setFormData] = useState<Omit<LegacyVehicle, 'id'>>(
     vehicle || {
       nickname: '',
       make: '',
@@ -643,14 +646,14 @@ function VehicleFormModal({
   )
 }
 
-// Vehicle Card
+// Vehicle Card (Legacy - non-persisted)
 function VehicleCard({ 
   vehicle, 
   onEdit, 
   onSetDefault, 
   onDelete 
 }: { 
-  vehicle: Vehicle
+  vehicle: LegacyVehicle
   onEdit: () => void
   onSetDefault: () => void
   onDelete: () => void 
@@ -695,18 +698,18 @@ function VehicleCard({
   )
 }
 
-// Vehicles Screen
+// Vehicles Screen (Legacy - non-persisted, kept for addresses/payments sections)
 function VehiclesScreen({ 
   vehicles, 
   onBack, 
   onUpdate 
 }: { 
-  vehicles: Vehicle[]
+  vehicles: LegacyVehicle[]
   onBack: () => void
-  onUpdate: (vehicles: Vehicle[]) => void 
+  onUpdate: (vehicles: LegacyVehicle[]) => void 
 }) {
   const [showAddModal, setShowAddModal] = useState(false)
-  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
+  const [editingVehicle, setEditingVehicle] = useState<LegacyVehicle | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
 
   const handleSetDefault = (id: string) => {
@@ -718,7 +721,7 @@ function VehiclesScreen({
     setShowDeleteConfirm(null)
   }
 
-  const handleSave = (vehicle: Vehicle) => {
+  const handleSave = (vehicle: LegacyVehicle) => {
     if (editingVehicle) {
       onUpdate(vehicles.map(v => v.id === vehicle.id ? vehicle : v))
     } else {
@@ -1387,11 +1390,457 @@ function MenuItem({
   )
 }
 
+// Sign In Card - shown when not authenticated
+function SignInCard({ onSignIn }: { onSignIn: (payload: { name: string; phone: string; email?: string }) => void }) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  
+  const handleSubmit = async () => {
+    if (!name.trim() || !phone.trim()) return
+    setIsSubmitting(true)
+    await new Promise(r => setTimeout(r, 800))
+    onSignIn({ name: name.trim(), phone: phone.trim(), email: email.trim() || undefined })
+    setIsSubmitting(false)
+  }
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white/5 rounded-3xl p-6 border border-white/10"
+    >
+      <div className="text-center mb-6">
+        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mx-auto mb-4">
+          <User size={32} className="text-white" />
+        </div>
+        <h2 className="text-xl font-semibold text-white">Sign In</h2>
+        <p className="text-gray-400 text-sm mt-1">Enter your details to continue</p>
+      </div>
+      
+      <div className="space-y-4">
+        <FormInput
+          label="Name"
+          placeholder="Your name"
+          value={name}
+          onChange={setName}
+        />
+        <FormInput
+          label="Phone"
+          placeholder="+1 (555) 123-4567"
+          value={phone}
+          onChange={setPhone}
+          type="tel"
+        />
+        <FormInput
+          label="Email (optional)"
+          placeholder="email@example.com"
+          value={email}
+          onChange={setEmail}
+          type="email"
+        />
+      </div>
+      
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        disabled={!name.trim() || !phone.trim() || isSubmitting}
+        onClick={handleSubmit}
+        className="w-full mt-6 py-4 rounded-2xl font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 text-white flex items-center justify-center disabled:opacity-50"
+      >
+        {isSubmitting ? <Loader2 size={20} className="animate-spin" /> : 'Continue'}
+      </motion.button>
+    </motion.div>
+  )
+}
+
+// Persisted Vehicle Form Modal
+function PersistedVehicleFormModal({ 
+  vehicle, 
+  onClose, 
+  onSave 
+}: { 
+  vehicle: UserVehicle | null
+  onClose: () => void
+  onSave: (data: { make: string; model: string; year: number; color: string; plate: string }) => void 
+}) {
+  const [formData, setFormData] = useState({
+    make: vehicle?.make || '',
+    model: vehicle?.model || '',
+    year: vehicle?.year || new Date().getFullYear(),
+    color: vehicle?.color || 'White',
+    plate: vehicle?.plate || '',
+  })
+  const [isSaving, setIsSaving] = useState(false)
+
+  const colors = ['White', 'Black', 'Silver', 'Red', 'Blue', 'Green', 'Gray']
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    await new Promise(r => setTimeout(r, 800))
+    onSave(formData)
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end"
+    >
+      <motion.div
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        className="w-full bg-[#12122a] rounded-t-3xl max-h-[90vh] overflow-hidden"
+      >
+        <div className="flex items-center justify-between p-4 border-b border-white/5">
+          <h3 className="text-lg font-semibold text-white">
+            {vehicle ? 'Edit Vehicle' : 'Add Vehicle'}
+          </h3>
+          <motion.button
+            whileHover={{ scale: 1.1, rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white"
+          >
+            <X size={18} />
+          </motion.button>
+        </div>
+        
+        <div className="p-6 space-y-4 overflow-y-auto max-h-[60vh]">
+          <div className="grid grid-cols-2 gap-4">
+            <FormInput
+              label="Make"
+              placeholder="Toyota"
+              value={formData.make}
+              onChange={(v) => setFormData({...formData, make: v})}
+            />
+            <FormInput
+              label="Model"
+              placeholder="Camry"
+              value={formData.model}
+              onChange={(v) => setFormData({...formData, model: v})}
+            />
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <FormInput
+              label="Year"
+              type="number"
+              value={formData.year}
+              onChange={(v) => {
+                const year = parseInt(v) || new Date().getFullYear()
+                setFormData({...formData, year: Math.max(1900, Math.min(2100, year))})
+              }}
+            />
+            <FormInput
+              label="License Plate"
+              placeholder="ABC-1234"
+              value={formData.plate}
+              onChange={(v) => setFormData({...formData, plate: v.toUpperCase()})}
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-3">Color</label>
+            <div className="flex gap-2 flex-wrap">
+              {colors.map((color) => (
+                <motion.button
+                  key={color}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setFormData({...formData, color})}
+                  className={`w-10 h-10 rounded-full border-2 ${
+                    formData.color === color ? 'border-emerald-500' : 'border-transparent'
+                  }`}
+                  style={{ backgroundColor: getVehicleColor(color) }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+        
+        <div className="p-4 border-t border-white/5">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={handleSave}
+            disabled={isSaving || !formData.make || !formData.model}
+            className="w-full py-4 rounded-2xl font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 text-white flex items-center justify-center disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 size={20} className="animate-spin" /> : 'Save Vehicle'}
+          </motion.button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// Persisted Vehicle Card
+function PersistedVehicleCard({ 
+  vehicle, 
+  isActive,
+  onEdit, 
+  onSetActive, 
+  onDelete 
+}: { 
+  vehicle: UserVehicle
+  isActive: boolean
+  onEdit: () => void
+  onSetActive: () => void
+  onDelete: () => void 
+}) {
+  return (
+    <motion.div
+      whileHover={{ scale: 1.01 }}
+      className="bg-white/5 rounded-2xl p-4 border border-white/5"
+    >
+      <div className="flex items-start gap-4">
+        <div 
+          className="w-12 h-12 rounded-xl flex items-center justify-center"
+          style={{ backgroundColor: getVehicleColor(vehicle.color) }}
+        >
+          <Car size={24} className="text-white" />
+        </div>
+        
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-white truncate">
+              {vehicle.year} {vehicle.make} {vehicle.model}
+            </h3>
+            {isActive && (
+              <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
+                Active
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-gray-400">{vehicle.color}</p>
+          <p className="text-xs text-gray-500 mt-1">{vehicle.plate}</p>
+        </div>
+        
+        <DropdownMenu
+          items={[
+            { label: 'Edit', icon: Edit2, onPress: onEdit },
+            ...(!isActive ? [{ label: 'Set as Active', icon: Star, onPress: onSetActive }] : []),
+            { label: 'Delete', icon: Trash2, onPress: onDelete, destructive: true },
+          ]}
+        />
+      </div>
+    </motion.div>
+  )
+}
+
+// Persisted Vehicles Screen - uses Zustand
+function PersistedVehiclesScreen({ onBack }: { onBack: () => void }) {
+  const { vehicles, activeVehicleId, addVehicle, updateVehicle, removeVehicle, setActiveVehicle } = useAppStore()
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingVehicle, setEditingVehicle] = useState<UserVehicle | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
+
+  const handleSave = (data: { make: string; model: string; year: number; color: string; plate: string }) => {
+    if (editingVehicle) {
+      updateVehicle(editingVehicle.id, data)
+    } else {
+      addVehicle(data)
+    }
+    setShowAddModal(false)
+    setEditingVehicle(null)
+  }
+
+  const handleDelete = (id: string) => {
+    removeVehicle(id)
+    setShowDeleteConfirm(null)
+  }
+
+  return (
+    <SubScreen
+      title="My Vehicles"
+      onBack={onBack}
+      actionButton={
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => setShowAddModal(true)}
+          className="w-full py-4 rounded-2xl font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 text-white flex items-center justify-center gap-2"
+        >
+          <Plus size={20} />
+          Add Vehicle
+        </motion.button>
+      }
+    >
+      <div className="p-6 space-y-3">
+        <AnimatePresence>
+          {vehicles.map((vehicle, index) => (
+            <motion.div
+              key={vehicle.id}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20, height: 0 }}
+              transition={{ delay: index * 0.05 }}
+              layout
+            >
+              <PersistedVehicleCard
+                vehicle={vehicle}
+                isActive={vehicle.id === activeVehicleId}
+                onEdit={() => setEditingVehicle(vehicle)}
+                onSetActive={() => setActiveVehicle(vehicle.id)}
+                onDelete={() => setShowDeleteConfirm(vehicle.id)}
+              />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        
+        {vehicles.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center py-12"
+          >
+            <Car size={48} className="mx-auto text-gray-600 mb-4" />
+            <p className="text-gray-400">No vehicles added yet</p>
+            <p className="text-gray-500 text-sm mt-1">Add a vehicle to use with your bookings</p>
+          </motion.div>
+        )}
+      </div>
+      
+      <AnimatePresence>
+        {(showAddModal || editingVehicle) && (
+          <PersistedVehicleFormModal
+            vehicle={editingVehicle}
+            onClose={() => { setShowAddModal(false); setEditingVehicle(null); }}
+            onSave={handleSave}
+          />
+        )}
+      </AnimatePresence>
+      
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <DeleteConfirmModal
+            title="Delete Vehicle?"
+            message="This action cannot be undone."
+            onConfirm={() => handleDelete(showDeleteConfirm)}
+            onCancel={() => setShowDeleteConfirm(null)}
+          />
+        )}
+      </AnimatePresence>
+    </SubScreen>
+  )
+}
+
+// Edit Profile Screen using Zustand
+function EditPersistedProfileScreen({ onBack }: { onBack: () => void }) {
+  const { user, updateUserProfile } = useAppStore()
+  const [formData, setFormData] = useState({
+    name: user?.name || '',
+    phone: user?.phone || '',
+    email: user?.email || '',
+  })
+  const [isSaving, setIsSaving] = useState(false)
+  const [hasChanges, setHasChanges] = useState(false)
+
+  const handleChange = (field: string, value: string) => {
+    setFormData({ ...formData, [field]: value })
+    setHasChanges(true)
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    await new Promise(r => setTimeout(r, 1000))
+    updateUserProfile({
+      name: formData.name,
+      phone: formData.phone,
+      email: formData.email || undefined,
+    })
+    setIsSaving(false)
+    onBack()
+  }
+
+  if (!user) return null
+
+  return (
+    <SubScreen
+      title="Edit Profile"
+      onBack={onBack}
+      actionButton={
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          disabled={!hasChanges || isSaving}
+          onClick={handleSave}
+          className={`w-full py-4 rounded-2xl font-semibold flex items-center justify-center ${
+            hasChanges
+              ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white'
+              : 'bg-white/10 text-gray-500'
+          }`}
+        >
+          {isSaving ? (
+            <Loader2 size={20} className="animate-spin" />
+          ) : (
+            'Save Changes'
+          )}
+        </motion.button>
+      }
+    >
+      <div className="p-6 space-y-6">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col items-center"
+        >
+          <div className="relative">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-2xl font-bold text-white">
+              {formData.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+            </div>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              className="absolute bottom-0 right-0 w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white"
+            >
+              <Camera size={16} />
+            </motion.button>
+          </div>
+        </motion.div>
+        
+        <div className="space-y-4">
+          <FormInput
+            label="Name"
+            value={formData.name}
+            onChange={(v) => handleChange('name', v)}
+          />
+          <FormInput
+            label="Phone"
+            type="tel"
+            value={formData.phone}
+            onChange={(v) => handleChange('phone', v)}
+          />
+          <FormInput
+            label="Email (optional)"
+            type="email"
+            value={formData.email}
+            onChange={(v) => handleChange('email', v)}
+          />
+        </div>
+      </div>
+    </SubScreen>
+  )
+}
+
 // Main Profile Screen
 export default function ProfileScreen() {
+  const { 
+    isAuthed, 
+    user, 
+    signInMock, 
+    signOut, 
+    vehicles, 
+    bookingHistory 
+  } = useAppStore()
+  
   const [activeSection, setActiveSection] = useState<string | null>(null)
-  const [user, setUser] = useState(initialUser)
-  const [vehicles, setVehicles] = useState(initialVehicles)
+  // Legacy local state for non-persisted features
   const [addresses, setAddresses] = useState(initialAddresses)
   const [payments, setPayments] = useState(initialPayments)
   const [notifications, setNotifications] = useState(initialNotifications)
@@ -1405,6 +1854,36 @@ export default function ProfileScreen() {
     { id: 'privacy', icon: Shield, label: 'Privacy & Security' },
     { id: 'help', icon: HelpCircle, label: 'Help & Support' },
   ]
+
+  // Not authenticated - show sign in
+  if (!isAuthed || !user) {
+    return (
+      <div className="max-w-md mx-auto px-5 py-6">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
+        >
+          <h1 className="text-xl font-semibold text-white mb-1">Profile</h1>
+          <p className="text-white/40 text-sm">Sign in to manage your account</p>
+        </motion.div>
+        
+        <SignInCard onSignIn={signInMock} />
+        
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="text-center text-white/20 text-xs mt-6"
+        >
+          AID v1.0.0
+        </motion.p>
+      </div>
+    )
+  }
+
+  // Get user initials
+  const initials = user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
 
   return (
     <div className="max-w-md mx-auto px-5 py-6">
@@ -1425,12 +1904,20 @@ export default function ProfileScreen() {
         className="mb-6 bg-white/5 rounded-3xl p-5 flex items-center gap-4 border border-white/5"
       >
         <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-xl font-bold text-white">
-          {user.firstName[0]}{user.lastName[0]}
+          {initials}
         </div>
         <div className="flex-1">
-          <h2 className="text-lg font-semibold text-white">{user.firstName} {user.lastName}</h2>
-          <p className="text-sm text-gray-400">{user.email}</p>
-          <p className="text-xs text-gray-500 mt-1">Member since {formatDate(user.createdAt)}</p>
+          <h2 className="text-lg font-semibold text-white">{user.name}</h2>
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Phone size={14} />
+            <span>{user.phone}</span>
+          </div>
+          {user.email && (
+            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+              <Mail size={12} />
+              <span>{user.email}</span>
+            </div>
+          )}
         </div>
       </motion.div>
       
@@ -1442,7 +1929,7 @@ export default function ProfileScreen() {
         className="mb-6 grid grid-cols-3 gap-3"
       >
         <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/5">
-          <p className="text-2xl font-bold text-emerald-400">12</p>
+          <p className="text-2xl font-bold text-emerald-400">{bookingHistory.length}</p>
           <p className="text-xs text-gray-400 mt-1">Services</p>
         </div>
         <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/5">
@@ -1477,10 +1964,11 @@ export default function ProfileScreen() {
         <motion.button
           whileHover={{ scale: 1.01, backgroundColor: 'rgba(239,68,68,0.15)' }}
           whileTap={{ scale: 0.98 }}
+          onClick={signOut}
           className="w-full bg-red-500/10 text-red-400 font-medium py-4 rounded-2xl flex items-center justify-center gap-2 border border-red-500/20"
         >
           <LogOut size={20} />
-          Log Out
+          Sign Out
         </motion.button>
       </motion.div>
       
@@ -1497,17 +1985,13 @@ export default function ProfileScreen() {
       {/* Sub-screens */}
       <AnimatePresence>
         {activeSection === 'editProfile' && (
-          <EditProfileScreen 
-            user={user} 
+          <EditPersistedProfileScreen 
             onBack={() => setActiveSection(null)} 
-            onSave={setUser}
           />
         )}
         {activeSection === 'vehicles' && (
-          <VehiclesScreen 
-            vehicles={vehicles} 
+          <PersistedVehiclesScreen 
             onBack={() => setActiveSection(null)} 
-            onUpdate={setVehicles}
           />
         )}
         {activeSection === 'addresses' && (

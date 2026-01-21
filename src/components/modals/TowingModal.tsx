@@ -13,6 +13,8 @@ import {
   Route
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
+import { Booking } from '../../types'
+import { services } from '../../data/mockData'
 import { calculateTowingEstimate } from '../../utils/estimates'
 import Modal, { 
   StepIndicator, 
@@ -48,6 +50,9 @@ export default function TowingModal() {
     showSuccess,
     setShowSuccess,
     userLocation,
+    setActiveBooking,
+    addToBookingHistory,
+    setCurrentScreen,
   } = useAppStore()
 
   const [estimate, setEstimate] = useState<ReturnType<typeof calculateTowingEstimate> | null>(null)
@@ -92,6 +97,33 @@ export default function TowingModal() {
   const handleSubmit = async () => {
     setIsSubmitting(true)
     await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    // Create the booking object for towing
+    const towingService = services.find(s => s.id === 'towing') || services[4]
+    const booking: Booking = {
+      id: crypto.randomUUID(),
+      customerId: 'demo_user',
+      service: towingService,
+      status: 'searching',
+      location: {
+        address: towingFormData.pickupAddress || 'Current Location',
+        lat: towingFormData.pickupCoords?.lat || userLocation.lat,
+        lng: towingFormData.pickupCoords?.lng || userLocation.lng,
+      },
+      dropoffLocation: towingFormData.dropoffAddress ? {
+        address: towingFormData.dropoffAddress,
+        lat: towingFormData.dropoffCoords?.lat || userLocation.lat,
+        lng: towingFormData.dropoffCoords?.lng || userLocation.lng,
+      } : undefined,
+      estimatedPrice: estimate?.total || towingService.basePrice,
+      notes: towingFormData.specialRequirements || undefined,
+      createdAt: new Date(),
+    }
+    
+    // Save booking to store
+    setActiveBooking(booking)
+    addToBookingHistory(booking)
+    
     setIsSubmitting(false)
     setShowSuccess(true)
   }
@@ -130,8 +162,15 @@ export default function TowingModal() {
               transition={{ delay: 0.5 }}
               className="mt-6 w-full"
             >
-              <AnimatedButton onClick={handleClose}>
-                Done
+              <AnimatedButton onClick={() => {
+                setActiveModal(null)
+                resetModalStep()
+                resetTowingFormData()
+                setEstimate(null)
+                setShowSuccess(false)
+                setCurrentScreen('chat')
+              }}>
+                Track Service
               </AnimatedButton>
             </motion.div>
           </motion.div>
@@ -464,5 +503,7 @@ export default function TowingModal() {
     </Modal>
   )
 }
+
+
 
 

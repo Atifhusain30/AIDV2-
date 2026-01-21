@@ -1,3 +1,4 @@
+// Service Types
 export type ServiceType = 
   | 'oil_change'
   | 'battery_jump'
@@ -6,17 +7,35 @@ export type ServiceType =
   | 'towing'
   | 'ev_charging'
   | 'fuel_delivery'
+  | 'detailing'
+  | 'window_tinting'
 
+// Booking Status Flow
 export type BookingStatus = 
-  | 'pending'
-  | 'searching'
-  | 'accepted'
-  | 'en_route'
-  | 'arrived'
-  | 'in_progress'
-  | 'completed'
-  | 'cancelled'
+  | 'pending'          // Request created, waiting for driver
+  | 'searching'        // Actively searching for driver
+  | 'accepted'         // Driver accepted
+  | 'en_route'         // Driver on the way
+  | 'arrived'          // Driver arrived at location
+  | 'in_progress'      // Service being performed
+  | 'completed'        // Service completed
+  | 'cancelled'        // Request cancelled
 
+// Payment Status
+export type PaymentStatus = 
+  | 'pending'
+  | 'processing'
+  | 'succeeded'
+  | 'failed'
+  | 'refunded'
+
+// User Roles
+export type UserRole = 'customer' | 'driver' | 'admin'
+
+// Driver Verification Status
+export type VerificationStatus = 'pending' | 'under_review' | 'verified' | 'rejected'
+
+// Service Definition
 export interface Service {
   id: ServiceType
   name: string
@@ -25,6 +44,68 @@ export interface Service {
   estimatedTime: number
 }
 
+// Location with optional address
+export interface Location {
+  lat: number
+  lng: number
+  address?: string
+  timestamp?: number
+}
+
+// User Base Interface
+export interface UserBase {
+  id: string
+  email: string
+  phone: string
+  firstName: string
+  lastName: string
+  role: UserRole
+  createdAt: Date
+}
+
+// Customer Profile
+export interface Customer extends UserBase {
+  role: 'customer'
+  savedAddresses: SavedAddress[]
+  vehicles: Vehicle[]
+  paymentMethods: PaymentMethod[]
+}
+
+// Driver Profile
+export interface Driver extends UserBase {
+  role: 'driver'
+  isOnline: boolean
+  isVerified: boolean
+  verificationStatus: VerificationStatus
+  documents: DriverDocument[]
+  rating: number
+  totalJobs: number
+  specializations: ServiceType[]
+  currentLocation?: Location
+  vehicleInfo?: DriverVehicle
+}
+
+// Driver Document (DL, ID, etc.)
+export interface DriverDocument {
+  id: string
+  type: 'drivers_license' | 'identification' | 'insurance' | 'vehicle_registration'
+  fileUrl: string
+  fileName: string
+  uploadedAt: Date
+  status: 'pending' | 'approved' | 'rejected'
+  rejectionReason?: string
+}
+
+// Driver's Vehicle Info
+export interface DriverVehicle {
+  make: string
+  model: string
+  year: number
+  color: string
+  licensePlate: string
+}
+
+// Mechanic (legacy, alias for Driver)
 export interface Mechanic {
   id: string
   name: string
@@ -32,14 +113,12 @@ export interface Mechanic {
   rating: number
   totalJobs: number
   specializations: ServiceType[]
-  location: {
-    lat: number
-    lng: number
-  }
+  location: Location
   eta: number
   isOnline: boolean
 }
 
+// Customer Vehicle
 export interface Vehicle {
   id: string
   make: string
@@ -50,23 +129,7 @@ export interface Vehicle {
   isElectric: boolean
 }
 
-export interface Booking {
-  id: string
-  service: Service
-  status: BookingStatus
-  mechanic?: Mechanic
-  vehicle?: Vehicle
-  location: {
-    address: string
-    lat: number
-    lng: number
-  }
-  estimatedPrice: number
-  estimatedArrival?: number
-  createdAt: Date
-  notes?: string
-}
-
+// Saved Address
 export interface SavedAddress {
   id: string
   label: string
@@ -75,22 +138,151 @@ export interface SavedAddress {
   lng: number
 }
 
+// Payment Method
+export interface PaymentMethod {
+  id: string
+  type: 'card' | 'apple_pay' | 'google_pay'
+  brand?: 'visa' | 'mastercard' | 'amex' | 'discover'
+  last4?: string
+  expiryMonth?: number
+  expiryYear?: number
+  isDefault: boolean
+}
+
+// Payment Intent
+export interface PaymentIntent {
+  id: string
+  clientSecret: string
+  amount: number
+  currency: string
+  status: PaymentStatus
+}
+
+// Price breakdown for receipts
+export interface PriceBreakdown {
+  baseFee: number
+  distanceFee: number
+  surgeFee?: number
+  total: number
+}
+
+// Booking vehicle snapshot (stored with booking for historical record)
+export interface BookingVehicleSnapshot {
+  vehicleId: string
+  label: string  // e.g. "2019 Honda Civic"
+  plate?: string
+}
+
+// Service Request (Booking)
+export interface Booking {
+  id: string
+  customerId: string
+  driverId?: string
+  service: Service
+  status: BookingStatus
+  mechanic?: Mechanic  // Legacy
+  vehicle?: BookingVehicleSnapshot  // Vehicle snapshot at time of booking
+  location: {
+    address: string
+    lat: number
+    lng: number
+  }
+  dropoffLocation?: {
+    address: string
+    lat: number
+    lng: number
+  }
+  estimatedPrice: number
+  finalPrice?: number
+  estimatedArrival?: number
+  payment?: {
+    intentId: string
+    status: PaymentStatus
+    amount: number
+  }
+  driverLocation?: Location
+  // Provider tracking coordinates (for live tracking)
+  providerCoords?: { lat: number; lng: number }
+  // Live ETA in minutes (updates during tracking)
+  providerETA?: number
+  // Price breakdown for receipt
+  priceBreakdown?: PriceBreakdown
+  // Payment method display label (e.g., "Visa •••• 4242")
+  paymentMethodLabel?: string
+  // Optional tip amount added by user
+  tipAmount?: number
+  // Whether receipt has been viewed
+  receiptViewed?: boolean
+  notes?: string
+  createdAt: Date
+  acceptedAt?: Date
+  completedAt?: Date
+}
+
+// Service Request (incoming to driver)
+export interface ServiceRequest {
+  id: string
+  customerId: string
+  customerName: string
+  customerPhone: string
+  service: Service
+  location: Location
+  dropoffLocation?: Location
+  vehicle?: Vehicle
+  estimatedPrice: number
+  notes?: string
+  createdAt: Date
+  expiresAt: Date // Request expires if not accepted
+}
+
+// Chat Message
 export interface Message {
   id: string
+  bookingId: string
   senderId: string
+  senderType: 'customer' | 'driver' | 'system'
   content: string
   timestamp: Date
   isRead: boolean
 }
 
+// Notification
 export interface Notification {
   id: string
-  type: 'booking' | 'promo' | 'system'
+  userId: string
+  type: 'booking' | 'promo' | 'system' | 'driver_request'
   title: string
   body: string
+  data?: Record<string, unknown>
   timestamp: Date
   isRead: boolean
 }
 
+// Auth State
+export interface AuthState {
+  isAuthenticated: boolean
+  user: Customer | Driver | null
+  token: string | null
+}
 
+// API Response wrapper
+export interface ApiResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+  message?: string
+}
 
+// Geolocation Position
+export interface GeoPosition {
+  coords: {
+    latitude: number
+    longitude: number
+    accuracy: number
+    altitude: number | null
+    altitudeAccuracy: number | null
+    heading: number | null
+    speed: number | null
+  }
+  timestamp: number
+}

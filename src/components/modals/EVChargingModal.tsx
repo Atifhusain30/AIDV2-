@@ -10,6 +10,8 @@ import {
   ChevronDown
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
+import { Booking } from '../../types'
+import { services } from '../../data/mockData'
 import { calculateEVChargingEstimate, evMakesModels, batteryTypes } from '../../utils/estimates'
 import Modal, { 
   StepIndicator, 
@@ -36,6 +38,9 @@ export default function EVChargingModal() {
     showSuccess,
     setShowSuccess,
     userLocation,
+    setActiveBooking,
+    addToBookingHistory,
+    setCurrentScreen,
   } = useAppStore()
 
   const [estimate, setEstimate] = useState<ReturnType<typeof calculateEVChargingEstimate> | null>(null)
@@ -80,6 +85,28 @@ export default function EVChargingModal() {
   const handleSubmit = async () => {
     setIsSubmitting(true)
     await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    // Create the booking object for EV charging
+    const evService = services.find(s => s.id === 'ev_charging') || services[5]
+    const booking: Booking = {
+      id: crypto.randomUUID(),
+      customerId: 'demo_user',
+      service: evService,
+      status: 'searching',
+      location: {
+        address: evChargingFormData.address || 'Current Location',
+        lat: evChargingFormData.coords?.lat || userLocation.lat,
+        lng: evChargingFormData.coords?.lng || userLocation.lng,
+      },
+      estimatedPrice: estimate?.total || evService.basePrice,
+      notes: `${evChargingFormData.evMake} ${evChargingFormData.evModel} - Charge from ${evChargingFormData.currentCharge}% to ${evChargingFormData.desiredCharge}%`,
+      createdAt: new Date(),
+    }
+    
+    // Save booking to store
+    setActiveBooking(booking)
+    addToBookingHistory(booking)
+    
     setIsSubmitting(false)
     setShowSuccess(true)
   }
@@ -145,8 +172,15 @@ export default function EVChargingModal() {
               transition={{ delay: 0.5 }}
               className="mt-6 w-full"
             >
-              <AnimatedButton onClick={handleClose}>
-                Done
+              <AnimatedButton onClick={() => {
+                setActiveModal(null)
+                resetModalStep()
+                resetEVChargingFormData()
+                setEstimate(null)
+                setShowSuccess(false)
+                setCurrentScreen('chat')
+              }}>
+                Track Service
               </AnimatedButton>
             </motion.div>
           </motion.div>

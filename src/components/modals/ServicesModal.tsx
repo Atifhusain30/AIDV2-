@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Droplets, 
@@ -11,18 +11,24 @@ import {
   Bike,
   Camera,
   ChevronRight,
-  Clock
+  Clock,
+  Sparkles,
+  Sun,
+  MapPin,
+  ExternalLink
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { ServiceType } from '../../types'
 import { services } from '../../data/mockData'
 import { calculateServiceEstimate, serviceEstimates } from '../../utils/estimates'
+import { getMapsUrl } from '../../lib/geolocation'
 import Modal, { 
   StepIndicator, 
   AnimatedButton,
   TextareaField,
   SuccessCheckmark
 } from '../ui/Modal'
+import * as bookingService from '../../services/bookingService'
 
 const serviceIcons: Record<ServiceType, React.ElementType> = {
   oil_change: Droplets,
@@ -32,6 +38,8 @@ const serviceIcons: Record<ServiceType, React.ElementType> = {
   towing: Truck,
   ev_charging: Battery,
   fuel_delivery: Fuel,
+  detailing: Sparkles,
+  window_tinting: Sun,
 }
 
 const vehicleTypes = [
@@ -59,6 +67,13 @@ export default function ServicesModal() {
     setIsSubmitting,
     showSuccess,
     setShowSuccess,
+    setCurrentScreen,
+    userLocation,
+    // Location confirmation
+    userLocationLabel,
+    userCoords,
+    setPendingReturnModal,
+    setActiveModalPreserveStep,
   } = useAppStore()
 
   const [estimate, setEstimate] = useState<ReturnType<typeof calculateServiceEstimate> | null>(null)
@@ -94,10 +109,41 @@ export default function ServicesModal() {
     nextModalStep()
   }
 
+  const openLocationModal = () => {
+    // Save current modal and step to return to after location confirm
+    setPendingReturnModal('services', modalStep)
+    setActiveModalPreserveStep('locationConfirm')
+  }
+
   const handleSubmit = async () => {
+    // Check if location is confirmed
+    if (!userLocationLabel) {
+      // Open location confirmation modal (will return here after)
+      openLocationModal()
+      return
+    }
+
     setIsSubmitting(true)
-    // Simulate booking
+    // Simulate booking delay
     await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    // Get selected service
+    const selectedService = services.find(s => s.id === serviceFormData.selectedService)
+    
+    // Create booking via service
+    const booking = bookingService.createBookingFromServiceRequest({
+      service: selectedService || services[0],
+      notes: serviceFormData.problemDescription || undefined,
+      locationLabel: userLocationLabel,
+      locationCoords: {
+        lat: userCoords?.lat ?? userLocation.lat,
+        lng: userCoords?.lng ?? userLocation.lng,
+      },
+    })
+    
+    // Start booking (sets active, adds to history, creates chat thread)
+    bookingService.startBooking(booking)
+    
     setIsSubmitting(false)
     setShowSuccess(true)
   }
@@ -140,8 +186,15 @@ export default function ServicesModal() {
               transition={{ delay: 0.5 }}
               className="mt-6 w-full"
             >
-              <AnimatedButton onClick={handleClose}>
-                Done
+              <AnimatedButton onClick={() => {
+                setActiveModal(null)
+                resetModalStep()
+                resetServiceFormData()
+                setEstimate(null)
+                setShowSuccess(false)
+                setCurrentScreen('chat')
+              }}>
+                Track Service
               </AnimatedButton>
             </motion.div>
           </motion.div>
@@ -301,6 +354,38 @@ export default function ServicesModal() {
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-4"
               >
+                {/* Location Card */}
+                <motion.button
+                  onClick={openLocationModal}
+                  className="w-full glass rounded-2xl p-4 text-left hover:bg-white/5 transition-colors"
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                      <MapPin size={20} className="text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white/60 text-xs mb-0.5">Service Location</p>
+                      <p className="text-white font-medium truncate">
+                        {userLocationLabel || 'Tap to set location'}
+                      </p>
+                    </div>
+                    {userCoords && (
+                      <a
+                        href={getMapsUrl(userCoords)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                      >
+                        <ExternalLink size={16} className="text-blue-400" />
+                      </a>
+                    )}
+                    <ChevronRight size={18} className="text-white/40" />
+                  </div>
+                </motion.button>
+
                 <div className="glass-elevated rounded-2xl p-5">
                   <h3 className="text-white/90 font-semibold mb-4">Estimate Breakdown</h3>
                   

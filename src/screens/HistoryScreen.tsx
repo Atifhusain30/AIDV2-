@@ -14,56 +14,59 @@ import {
   CircleDot, 
   Car, 
   Fuel,
-  FileText
+  FileText,
+  Droplets,
+  Key,
+  Truck,
+  Sparkles,
+  Sun,
+  Zap,
+  Plus,
+  RefreshCw
 } from 'lucide-react'
-
-// Service type definitions
-type ServiceStatus = 'completed' | 'pending'
-type ServiceTypeKey = 'Battery Jump' | 'Flat Tire' | 'Towing' | 'Fuel Delivery' | 'Lockout'
-
-interface Service {
-  id: number
-  type: ServiceTypeKey
-  price: number
-  status: ServiceStatus
-  address: string
-  date: string
-  provider: string
-  initials: string
-  rating: number
-}
-
-// Sample service history data
-const services: Service[] = [
-  { id: 1, type: 'Battery Jump', price: 45, status: 'completed', address: '789 Elm St, Dallas, TX', date: '2025-12-27', provider: 'Mike Rodriguez', initials: 'MR', rating: 4.9 },
-  { id: 2, type: 'Flat Tire', price: 65, status: 'completed', address: '456 Oak Ave, Dallas, TX', date: '2025-12-22', provider: 'Sarah Chen', initials: 'SC', rating: 4.8 },
-  { id: 3, type: 'Towing', price: 120, status: 'completed', address: '123 Main St, Plano, TX', date: '2025-12-15', provider: 'James Wilson', initials: 'JW', rating: 5.0 },
-  { id: 4, type: 'Fuel Delivery', price: 35, status: 'pending', address: '321 Pine Rd, Irving, TX', date: '2025-12-30', provider: 'Alex Thompson', initials: 'AT', rating: 4.7 },
-  { id: 5, type: 'Lockout', price: 55, status: 'completed', address: '555 Cedar Ln, Arlington, TX', date: '2025-12-10', provider: 'Maria Garcia', initials: 'MG', rating: 4.9 },
-  { id: 6, type: 'Battery Jump', price: 50, status: 'completed', address: '222 Maple Dr, Frisco, TX', date: '2025-12-05', provider: 'David Lee', initials: 'DL', rating: 4.6 },
-  { id: 7, type: 'Flat Tire', price: 70, status: 'pending', address: '888 Birch Blvd, McKinney, TX', date: '2025-12-31', provider: 'Emma White', initials: 'EW', rating: 4.9 },
-]
+import { useAppStore } from '../store/useAppStore'
+import { Booking, ServiceType, BookingStatus } from '../types'
 
 // Service type to icon mapping
-const serviceIcons: Record<ServiceTypeKey, React.ElementType> = {
-  'Battery Jump': Battery,
-  'Flat Tire': CircleDot,
-  'Towing': Car,
-  'Fuel Delivery': Fuel,
-  'Lockout': Wrench,
+const serviceIcons: Record<ServiceType, React.ElementType> = {
+  oil_change: Droplets,
+  battery_jump: Battery,
+  flat_tire: CircleDot,
+  lockout: Key,
+  towing: Truck,
+  ev_charging: Zap,
+  fuel_delivery: Fuel,
+  detailing: Sparkles,
+  window_tinting: Sun,
+}
+
+// Status display config
+const statusDisplay: Record<BookingStatus, { label: string; colorClass: string; bgClass: string }> = {
+  pending: { label: 'Pending', colorClass: 'text-gray-400', bgClass: 'bg-gray-500/20' },
+  searching: { label: 'Searching', colorClass: 'text-amber-400', bgClass: 'bg-amber-500/20' },
+  accepted: { label: 'Accepted', colorClass: 'text-blue-400', bgClass: 'bg-blue-500/20' },
+  en_route: { label: 'En Route', colorClass: 'text-blue-400', bgClass: 'bg-blue-500/20' },
+  arrived: { label: 'Arrived', colorClass: 'text-purple-400', bgClass: 'bg-purple-500/20' },
+  in_progress: { label: 'In Progress', colorClass: 'text-amber-400', bgClass: 'bg-amber-500/20' },
+  completed: { label: 'Completed', colorClass: 'text-emerald-400', bgClass: 'bg-emerald-500/20' },
+  cancelled: { label: 'Cancelled', colorClass: 'text-red-400', bgClass: 'bg-red-500/20' },
 }
 
 // Helper functions
 const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate()
 const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay()
 
-const getServicesForDate = (day: number, month: number, year: number, serviceList: Service[]) => {
-  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-  return serviceList.filter(s => s.date === dateStr)
+const getBookingsForDate = (day: number, month: number, year: number, bookings: Booking[]) => {
+  return bookings.filter(b => {
+    const bookingDate = new Date(b.createdAt)
+    return bookingDate.getDate() === day && 
+           bookingDate.getMonth() === month && 
+           bookingDate.getFullYear() === year
+  })
 }
 
-const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleDateString('en-US', { 
+const formatDate = (date: Date) => {
+  return new Date(date).toLocaleDateString('en-US', { 
     weekday: 'short', 
     month: 'short', 
     day: 'numeric', 
@@ -71,22 +74,38 @@ const formatDate = (dateString: string) => {
   })
 }
 
+const formatTime = (date: Date) => {
+  return new Date(date).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
 const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-// Service Card Component
-function ServiceCard({ service, isExpanded, onToggle }: { 
-  service: Service
+// Booking Card Component
+function BookingCard({ booking, isExpanded, onToggle, onViewDetails, onRebook }: { 
+  booking: Booking
   isExpanded: boolean
-  onToggle: () => void 
+  onToggle: () => void
+  onViewDetails: () => void
+  onRebook: () => void
 }) {
-  const ServiceIcon = serviceIcons[service.type]
-  const isCompleted = service.status === 'completed'
+  const ServiceIcon = serviceIcons[booking.service.id] || Wrench
+  const isCompleted = booking.status === 'completed'
+  const statusInfo = statusDisplay[booking.status]
+
+  // Open detail modal when clicking the card
+  const handleCardClick = () => {
+    onViewDetails()
+  }
 
   return (
     <motion.div
       layout
-      onClick={onToggle}
+      onClick={handleCardClick}
       className="bg-white/5 backdrop-blur-sm rounded-2xl overflow-hidden cursor-pointer border border-white/10 hover:border-emerald-500/30 transition-colors"
       whileHover={{ scale: 1.01 }}
       whileTap={{ scale: 0.99 }}
@@ -97,23 +116,29 @@ function ServiceCard({ service, isExpanded, onToggle }: {
           <div className="flex items-center gap-3">
             {/* Service icon */}
             <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${
-              isCompleted ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+              isCompleted ? 'bg-emerald-500/20 text-emerald-400' : statusInfo.bgClass + ' ' + statusInfo.colorClass
             }`}>
               <ServiceIcon size={22} strokeWidth={1.5} />
             </div>
             
             <div>
-              <h4 className="font-semibold text-white text-sm">{service.type}</h4>
-              <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full mt-1 ${
-                isCompleted ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
-              }`}>
-                {isCompleted ? <CheckCircle2 size={10} /> : <Clock3 size={10} />}
-                <span className="capitalize">{service.status}</span>
-              </span>
+              <h4 className="font-semibold text-white text-sm">{booking.service.name}</h4>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${statusInfo.bgClass} ${statusInfo.colorClass}`}>
+                  {isCompleted ? <CheckCircle2 size={10} /> : <Clock3 size={10} />}
+                  <span>{statusInfo.label}</span>
+                </span>
+                {/* Show provider name for non-searching statuses */}
+                {booking.mechanic && booking.status !== 'searching' && (
+                  <span className="text-xs text-gray-400">
+                    • {booking.mechanic.name}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           
-          <p className="text-lg font-bold text-emerald-400">${service.price}</p>
+          <p className="text-lg font-bold text-emerald-400">${booking.estimatedPrice}</p>
         </div>
 
         {/* Expandable details */}
@@ -128,23 +153,83 @@ function ServiceCard({ service, isExpanded, onToggle }: {
               <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
                 <div className="flex items-center gap-2 text-gray-400">
                   <MapPin size={14} strokeWidth={1.5} />
-                  <span className="text-sm">{service.address}</span>
+                  <span className="text-sm">{booking.location.address}</span>
                 </div>
                 <div className="flex items-center gap-2 text-gray-400">
                   <Calendar size={14} strokeWidth={1.5} />
-                  <span className="text-sm">{formatDate(service.date)}</span>
+                  <span className="text-sm">{formatDate(booking.createdAt)}</span>
                 </div>
-                <div className="flex items-center gap-3 pt-2">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-sm font-semibold text-white">
-                    {service.initials}
-                  </div>
-                  <div>
-                    <p className="font-medium text-white text-sm">{service.provider}</p>
-                    <div className="flex items-center gap-1">
-                      <Star size={12} className="text-amber-400 fill-amber-400" />
-                      <span className="text-sm text-gray-400">{service.rating}</span>
+                <div className="flex items-center gap-2 text-gray-400">
+                  <Clock size={14} strokeWidth={1.5} />
+                  <span className="text-sm">{formatTime(booking.createdAt)}</span>
+                </div>
+                {booking.mechanic && (
+                  <div className="flex items-center gap-3 pt-2">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-sm font-semibold text-white">
+                      {booking.mechanic.initials}
                     </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-white text-sm">{booking.mechanic.name}</p>
+                      <div className="flex items-center gap-1">
+                        <Star size={12} className="text-amber-400 fill-amber-400" />
+                        <span className="text-sm text-gray-400">{booking.mechanic.rating}</span>
+                      </div>
+                    </div>
+                    {/* Show ETA for active bookings */}
+                    {booking.status === 'en_route' && (booking.providerETA !== undefined || booking.mechanic.eta) && (
+                      <div className="flex items-center gap-1 text-emerald-400">
+                        <Clock size={14} />
+                        <span className="text-sm font-medium">{booking.providerETA ?? booking.mechanic.eta} min</span>
+                      </div>
+                    )}
                   </div>
+                )}
+                {booking.vehicle && (
+                  <div className="flex items-center gap-2 text-gray-400">
+                    <Car size={14} strokeWidth={1.5} />
+                    <span className="text-sm">{booking.vehicle.label}</span>
+                    {booking.vehicle.plate && (
+                      <span className="text-xs text-gray-500">• {booking.vehicle.plate}</span>
+                    )}
+                  </div>
+                )}
+                {booking.notes && (
+                  <div className="pt-2">
+                    <p className="text-xs text-gray-500">Notes:</p>
+                    <p className="text-sm text-gray-400 mt-1">{booking.notes}</p>
+                  </div>
+                )}
+                
+                {/* Action buttons */}
+                <div className="flex gap-2 mt-3">
+                  {/* Track Service button for active bookings */}
+                  {!isCompleted && booking.status !== 'cancelled' && (
+                    <motion.button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onViewDetails()
+                      }}
+                      className="flex-1 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl text-sm"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      Track Service
+                    </motion.button>
+                  )}
+                  
+                  {/* Rebook button - always visible */}
+                  <motion.button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRebook()
+                    }}
+                    className={`${!isCompleted && booking.status !== 'cancelled' ? 'flex-1' : 'w-full'} py-2.5 flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-gray-300 font-medium rounded-xl text-sm hover:bg-white/10 hover:border-emerald-500/30 hover:text-emerald-400 transition-colors`}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <RefreshCw size={14} strokeWidth={2} />
+                    Rebook
+                  </motion.button>
                 </div>
               </div>
             </motion.div>
@@ -160,14 +245,16 @@ function CalendarView({
   currentDate, 
   selectedDate, 
   onSelectDate,
-  filteredServices,
-  onNavigateMonth
+  filteredBookings,
+  onNavigateMonth,
+  onViewBooking
 }: {
   currentDate: Date
   selectedDate: number | null
   onSelectDate: (day: number | null) => void
-  filteredServices: Service[]
+  filteredBookings: Booking[]
   onNavigateMonth: (direction: number) => void
+  onViewBooking: (booking: Booking) => void
 }) {
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
@@ -248,8 +335,8 @@ function CalendarView({
             return <div key={`empty-${index}`} className="aspect-square" />
           }
 
-          const dayServices = getServicesForDate(day, month, year, filteredServices)
-          const hasServices = dayServices.length > 0
+          const dayBookings = getBookingsForDate(day, month, year, filteredBookings)
+          const hasBookings = dayBookings.length > 0
           const isSelected = selectedDate === day
           const isToday = isCurrentMonth && day === todayDate
 
@@ -273,14 +360,14 @@ function CalendarView({
             >
               <span className="text-sm font-medium">{day}</span>
               
-              {/* Service indicators */}
-              {hasServices && (
+              {/* Booking indicators */}
+              {hasBookings && (
                 <div className="absolute bottom-1 flex gap-0.5">
-                  {dayServices.slice(0, 3).map((s, idx) => (
+                  {dayBookings.slice(0, 3).map((b, idx) => (
                     <div 
                       key={idx}
                       className={`w-1.5 h-1.5 rounded-full ${
-                        isSelected ? 'bg-white' : s.status === 'completed' ? 'bg-emerald-400' : 'bg-amber-400'
+                        isSelected ? 'bg-white' : b.status === 'completed' ? 'bg-emerald-400' : 'bg-amber-400'
                       }`}
                     />
                   ))}
@@ -291,7 +378,7 @@ function CalendarView({
         })}
       </motion.div>
 
-      {/* Selected date services */}
+      {/* Selected date bookings */}
       <AnimatePresence mode="wait">
         {selectedDate && (
           <motion.div
@@ -301,43 +388,43 @@ function CalendarView({
             className="mt-4"
           >
             {(() => {
-              const selectedServices = getServicesForDate(selectedDate, month, year, filteredServices)
-              if (selectedServices.length === 0) {
+              const selectedBookings = getBookingsForDate(selectedDate, month, year, filteredBookings)
+              if (selectedBookings.length === 0) {
                 return (
                   <p className="text-center text-gray-400 text-sm py-4 bg-white/5 rounded-xl">
-                    No services on this date
+                    No bookings on this date
                   </p>
                 )
               }
               return (
                 <div className="space-y-2">
                   <p className="text-sm text-gray-400 mb-2">
-                    {selectedServices.length} service{selectedServices.length > 1 ? 's' : ''} on {monthNames[month]} {selectedDate}
+                    {selectedBookings.length} booking{selectedBookings.length > 1 ? 's' : ''} on {monthNames[month]} {selectedDate}
                   </p>
-                  {selectedServices.map(service => (
-                    <motion.div
-                      key={service.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/5"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                          service.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
-                        }`}>
-                          {(() => {
-                            const Icon = serviceIcons[service.type]
-                            return <Icon size={18} strokeWidth={1.5} />
-                          })()}
+                  {selectedBookings.map(booking => {
+                    const Icon = serviceIcons[booking.service.id] || Wrench
+                    const statusInfo = statusDisplay[booking.status]
+                    return (
+                      <motion.div
+                        key={booking.id}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        onClick={() => onViewBooking(booking)}
+                        className="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/5 cursor-pointer hover:border-emerald-500/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${statusInfo.bgClass} ${statusInfo.colorClass}`}>
+                            <Icon size={18} strokeWidth={1.5} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-white">{booking.service.name}</p>
+                            <p className="text-xs text-gray-400">{formatTime(booking.createdAt)}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium text-white">{service.type}</p>
-                          <p className="text-xs text-gray-400">{service.provider}</p>
-                        </div>
-                      </div>
-                      <p className="text-emerald-400 font-semibold">${service.price}</p>
-                    </motion.div>
-                  ))}
+                        <p className="text-emerald-400 font-semibold">${booking.estimatedPrice}</p>
+                      </motion.div>
+                    )
+                  })}
                 </div>
               )
             })()}
@@ -350,13 +437,17 @@ function CalendarView({
 
 // List View Component
 function ListView({ 
-  filteredServices,
+  filteredBookings,
   expandedId,
-  setExpandedId
+  setExpandedId,
+  onViewBooking,
+  onRebook
 }: {
-  filteredServices: Service[]
-  expandedId: number | null
-  setExpandedId: (id: number | null) => void
+  filteredBookings: Booking[]
+  expandedId: string | null
+  setExpandedId: (id: string | null) => void
+  onViewBooking: (booking: Booking) => void
+  onRebook: (bookingId: string) => void
 }) {
   return (
     <motion.div
@@ -367,7 +458,7 @@ function ListView({
       transition={{ duration: 0.3 }}
       className="space-y-3"
     >
-      {filteredServices.length === 0 ? (
+      {filteredBookings.length === 0 ? (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -376,21 +467,23 @@ function ListView({
           <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
             <FileText size={28} strokeWidth={1.5} className="text-gray-500" />
           </div>
-          <h3 className="text-white/70 font-medium mb-2">No services found</h3>
+          <h3 className="text-white/70 font-medium mb-2">No bookings found</h3>
           <p className="text-gray-500 text-sm">Try adjusting your filter</p>
         </motion.div>
       ) : (
-        filteredServices.map((service, index) => (
+        filteredBookings.map((booking, index) => (
           <motion.div
-            key={service.id}
+            key={booking.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.05 }}
           >
-            <ServiceCard 
-              service={service} 
-              isExpanded={expandedId === service.id}
-              onToggle={() => setExpandedId(expandedId === service.id ? null : service.id)}
+            <BookingCard 
+              booking={booking} 
+              isExpanded={expandedId === booking.id}
+              onToggle={() => setExpandedId(expandedId === booking.id ? null : booking.id)}
+              onViewDetails={() => onViewBooking(booking)}
+              onRebook={() => onRebook(booking.id)}
             />
           </motion.div>
         ))
@@ -400,12 +493,14 @@ function ListView({
 }
 
 // Stats Bar Component
-function StatsBar({ filteredServices }: { filteredServices: Service[] }) {
-  const completedCount = filteredServices.filter(s => s.status === 'completed').length
-  const pendingCount = filteredServices.filter(s => s.status === 'pending').length
-  const totalSpent = filteredServices
-    .filter(s => s.status === 'completed')
-    .reduce((sum, s) => sum + s.price, 0)
+function StatsBar({ bookings }: { bookings: Booking[] }) {
+  const completedCount = bookings.filter(b => b.status === 'completed').length
+  const activeCount = bookings.filter(b => 
+    b.status !== 'completed' && b.status !== 'cancelled'
+  ).length
+  const totalSpent = bookings
+    .filter(b => b.status === 'completed')
+    .reduce((sum, b) => sum + b.estimatedPrice, 0)
 
   return (
     <motion.div 
@@ -419,8 +514,8 @@ function StatsBar({ filteredServices }: { filteredServices: Service[] }) {
         <p className="text-xs text-gray-400 mt-1">Completed</p>
       </div>
       <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/5">
-        <p className="text-2xl font-bold text-amber-400">{pendingCount}</p>
-        <p className="text-xs text-gray-400 mt-1">Pending</p>
+        <p className="text-2xl font-bold text-amber-400">{activeCount}</p>
+        <p className="text-xs text-gray-400 mt-1">Active</p>
       </div>
       <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/5">
         <p className="text-2xl font-bold text-white">${totalSpent}</p>
@@ -430,24 +525,65 @@ function StatsBar({ filteredServices }: { filteredServices: Service[] }) {
   )
 }
 
+// Empty State Component
+function EmptyState({ onRequestService }: { onRequestService: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="text-center py-16"
+    >
+      <div className="w-20 h-20 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-6">
+        <FileText size={36} strokeWidth={1.5} className="text-gray-500" />
+      </div>
+      <h3 className="text-xl font-semibold text-white mb-2">No Bookings Yet</h3>
+      <p className="text-gray-400 mb-8 max-w-xs mx-auto">
+        You haven't made any service requests yet. Start your first one now!
+      </p>
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={onRequestService}
+        className="inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-3 px-8 rounded-xl shadow-lg shadow-emerald-500/20"
+      >
+        <Plus size={20} />
+        Request Service
+      </motion.button>
+    </motion.div>
+  )
+}
+
 // Main History Screen Component
 export default function HistoryScreen() {
-  const [activeFilter, setActiveFilter] = useState<'All' | 'Completed' | 'Pending'>('All')
+  const { 
+    bookingHistory, 
+    setActiveBooking, 
+    setCurrentScreen,
+    setActiveModal,
+    rebookFromHistory,
+    openBookingDetail,
+  } = useAppStore()
+  
+  const [activeFilter, setActiveFilter] = useState<'All' | 'Active' | 'Completed'>('All')
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('list')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<number | null>(null)
-  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  // Filter services based on active filter
-  const filteredServices = useMemo(() => {
-    if (activeFilter === 'All') return services
-    return services.filter(s => s.status === activeFilter.toLowerCase() as ServiceStatus)
-  }, [activeFilter])
+  // Filter bookings based on active filter
+  const filteredBookings = useMemo(() => {
+    if (activeFilter === 'All') return bookingHistory
+    if (activeFilter === 'Completed') return bookingHistory.filter(b => b.status === 'completed')
+    // Active = not completed and not cancelled
+    return bookingHistory.filter(b => b.status !== 'completed' && b.status !== 'cancelled')
+  }, [activeFilter, bookingHistory])
 
-  // Sort services by date (most recent first)
-  const sortedServices = useMemo(() => {
-    return [...filteredServices].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  }, [filteredServices])
+  // Sort bookings by date (most recent first)
+  const sortedBookings = useMemo(() => {
+    return [...filteredBookings].sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    )
+  }, [filteredBookings])
 
   const handleNavigateMonth = (direction: number) => {
     setCurrentDate(prev => {
@@ -456,6 +592,38 @@ export default function HistoryScreen() {
       return newDate
     })
     setSelectedDate(null)
+  }
+
+  // Open booking detail modal instead of navigating directly to chat
+  const handleViewBooking = (booking: Booking) => {
+    openBookingDetail(booking.id)
+  }
+
+  const handleRebook = (bookingId: string) => {
+    rebookFromHistory(bookingId)
+    setCurrentScreen('chat')
+  }
+
+  const handleRequestService = () => {
+    setActiveModal('services')
+  }
+
+  // Show empty state if no bookings
+  if (bookingHistory.length === 0) {
+    return (
+      <div className="max-w-md mx-auto px-5 py-6">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
+        >
+          <h1 className="text-xl font-semibold text-white mb-1">Service History</h1>
+          <p className="text-white/40 text-sm">Track your past and pending services</p>
+        </motion.div>
+        
+        <EmptyState onRequestService={handleRequestService} />
+      </div>
+    )
   }
 
   return (
@@ -472,7 +640,7 @@ export default function HistoryScreen() {
 
       {/* Stats Bar */}
       <div className="mb-6">
-        <StatsBar filteredServices={filteredServices} />
+        <StatsBar bookings={bookingHistory} />
       </div>
 
       {/* View Toggle */}
@@ -515,7 +683,7 @@ export default function HistoryScreen() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
       >
-        {(['All', 'Completed', 'Pending'] as const).map((filter) => (
+        {(['All', 'Active', 'Completed'] as const).map((filter) => (
           <motion.button
             key={filter}
             onClick={() => setActiveFilter(filter)}
@@ -550,15 +718,18 @@ export default function HistoryScreen() {
             currentDate={currentDate}
             selectedDate={selectedDate}
             onSelectDate={setSelectedDate}
-            filteredServices={filteredServices}
+            filteredBookings={filteredBookings}
             onNavigateMonth={handleNavigateMonth}
+            onViewBooking={handleViewBooking}
           />
         ) : (
           <ListView
             key="list-view"
-            filteredServices={sortedServices}
+            filteredBookings={sortedBookings}
             expandedId={expandedId}
             setExpandedId={setExpandedId}
+            onViewBooking={handleViewBooking}
+            onRebook={handleRebook}
           />
         )}
       </AnimatePresence>

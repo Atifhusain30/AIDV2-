@@ -151,10 +151,15 @@ export const savedAddresses: SavedAddress[] = [
 export const mockBookingHistory: Booking[] = [
   {
     id: 'b1',
+    customerId: 'demo_user',
     service: services[1],
     status: 'completed',
     mechanic: nearbyMechanics[0],
-    vehicle: userVehicles[0],
+    vehicle: {
+      vehicleId: userVehicles[0].id,
+      label: `${userVehicles[0].year} ${userVehicles[0].make} ${userVehicles[0].model}`,
+      plate: userVehicles[0].licensePlate,
+    },
     location: {
       address: '789 Elm St, Dallas, TX',
       lat: 32.7800,
@@ -165,10 +170,15 @@ export const mockBookingHistory: Booking[] = [
   },
   {
     id: 'b2',
+    customerId: 'demo_user',
     service: services[2],
     status: 'completed',
     mechanic: nearbyMechanics[2],
-    vehicle: userVehicles[1],
+    vehicle: {
+      vehicleId: userVehicles[1].id,
+      label: `${userVehicles[1].year} ${userVehicles[1].make} ${userVehicles[1].model}`,
+      plate: userVehicles[1].licensePlate,
+    },
     location: {
       address: '321 Oak Ave, Dallas, TX',
       lat: 32.7850,
@@ -182,6 +192,7 @@ export const mockBookingHistory: Booking[] = [
 export const mockNotifications: Notification[] = [
   {
     id: 'n1',
+    userId: 'demo_user',
     type: 'promo',
     title: '20% Off Your Next Service',
     body: 'Use code SAVE20 for 20% off any service this week!',
@@ -190,6 +201,7 @@ export const mockNotifications: Notification[] = [
   },
   {
     id: 'n2',
+    userId: 'demo_user',
     type: 'system',
     title: 'Welcome to AID',
     body: 'Thanks for joining! Your safety is our priority.',
@@ -201,21 +213,27 @@ export const mockNotifications: Notification[] = [
 export const mockMessages: Message[] = [
   {
     id: 'msg1',
+    bookingId: 'b1',
     senderId: 'm1',
+    senderType: 'driver',
     content: "Hi! I'm on my way to your location now.",
     timestamp: new Date(Date.now() - 300000),
     isRead: true,
   },
   {
     id: 'msg2',
+    bookingId: 'b1',
     senderId: 'user',
+    senderType: 'customer',
     content: "Great, thank you! I'm parked near the entrance.",
     timestamp: new Date(Date.now() - 240000),
     isRead: true,
   },
   {
     id: 'msg3',
+    bookingId: 'b1',
     senderId: 'm1',
+    senderType: 'driver',
     content: "Perfect, I'll be there in about 5 minutes.",
     timestamp: new Date(Date.now() - 180000),
     isRead: true,

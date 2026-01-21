@@ -25,6 +25,8 @@ export const serviceEstimates: Record<ServiceType, { basePrice: number; eta: num
   towing: { basePrice: 95, eta: 35, description: 'Towing service' },
   ev_charging: { basePrice: 85, eta: 45, description: 'Mobile EV charging' },
   fuel_delivery: { basePrice: 50, eta: 20, description: 'Emergency fuel delivery' },
+  detailing: { basePrice: 79, eta: 90, description: 'Car detailing service' },
+  window_tinting: { basePrice: 250, eta: 180, description: 'Window tinting service' },
 }
 
 // Calculate service estimate
@@ -291,5 +293,7 @@ export const batteryTypes: Record<string, string> = {
   Porsche: 'Lithium-ion NMC',
   default: 'Lithium-ion',
 }
+
+
 
 

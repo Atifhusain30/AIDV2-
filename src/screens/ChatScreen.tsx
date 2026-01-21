@@ -8,18 +8,23 @@ import {
   CheckCheck,
   Loader2,
   MessageCircle,
-  CheckCircle2,
-  XCircle,
-  Wrench,
   MapPin,
   Navigation,
+  Clock,
+  X,
+  CheckCircle,
 } from 'lucide-react'
-import { useAppStore } from '../store/useAppStore'
+import { useAppStore, ChatMessage } from '../store/useAppStore'
+import { BookingStatus } from '../types'
+import { lazy, Suspense } from 'react'
+import * as bookingService from '../services/bookingService'
+import * as chatService from '../services/chatService'
+
+// Lazy load TrackingMap to avoid SSR issues with Leaflet
+const TrackingMap = lazy(() => import('../components/ui/TrackingMap'))
 
 // Types
-type ServiceStatus = 'pending' | 'accepted' | 'in_progress' | 'completed' | 'cancelled'
 type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read'
-type MessageType = 'text' | 'image' | 'location' | 'system'
 
 interface Provider {
   id: string
@@ -31,147 +36,35 @@ interface Provider {
   isOnline: boolean
 }
 
-interface Message {
-  id: string
-  senderId: string
-  senderType: 'customer' | 'provider' | 'system'
-  content: string
-  timestamp: Date
-  status: MessageStatus
-  type: MessageType
-}
+// Provider reply templates moved to chatService
 
-interface ServiceRequest {
-  id: string
-  status: ServiceStatus
-  serviceType: string
-  provider: Provider | null
-  createdAt: Date
-  acceptedAt: Date | null
-  completedAt: Date | null
-}
 
-// Sample data - In production, this would come from your store/API
-const sampleProvider: Provider = {
-  id: 'prov_456',
-  name: 'Mike Rodriguez',
-  initials: 'MR',
-  rating: 4.9,
-  vehicleInfo: 'White Ford F-150',
-  eta: 5,
-  isOnline: true,
-}
-
-const sampleMessages: Message[] = [
-  {
-    id: 'msg_1',
-    senderId: 'system',
-    senderType: 'system',
-    content: 'Mike Rodriguez accepted your request',
-    timestamp: new Date(Date.now() - 600000),
-    status: 'read',
-    type: 'system',
-  },
-  {
-    id: 'msg_2',
-    senderId: 'prov_456',
-    senderType: 'provider',
-    content: "Hi! I'm on my way. I should be there in about 8 minutes.",
-    timestamp: new Date(Date.now() - 540000),
-    status: 'read',
-    type: 'text',
-  },
-  {
-    id: 'msg_3',
-    senderId: 'cust_001',
-    senderType: 'customer',
-    content: "Great, thank you! I'm in the parking lot near the entrance.",
-    timestamp: new Date(Date.now() - 480000),
-    status: 'read',
-    type: 'text',
-  },
-  {
-    id: 'msg_4',
-    senderId: 'prov_456',
-    senderType: 'provider',
-    content: 'Perfect, I see the location. Look for a white Ford F-150.',
-    timestamp: new Date(Date.now() - 420000),
-    status: 'read',
-    type: 'text',
-  },
-  {
-    id: 'msg_5',
-    senderId: 'system',
-    senderType: 'system',
-    content: 'Mike is arriving now',
-    timestamp: new Date(Date.now() - 60000),
-    status: 'read',
-    type: 'system',
-  },
-]
-
-// For demo, toggle this to see different states
-const sampleService: ServiceRequest = {
-  id: 'sr_123',
-  status: 'in_progress', // Change to 'pending', 'completed', 'cancelled' to see different states
-  serviceType: 'Battery Jump',
-  provider: sampleProvider,
-  createdAt: new Date(Date.now() - 900000),
-  acceptedAt: new Date(Date.now() - 600000),
-  completedAt: null,
+// Status display config
+const statusConfig: Record<BookingStatus, { label: string; color: string; bgColor: string }> = {
+  pending: { label: 'Pending', color: 'text-gray-400', bgColor: 'bg-gray-500/20' },
+  searching: { label: 'Finding Provider...', color: 'text-amber-400', bgColor: 'bg-amber-500/20' },
+  accepted: { label: 'Provider Accepted', color: 'text-emerald-400', bgColor: 'bg-emerald-500/20' },
+  en_route: { label: 'On The Way', color: 'text-blue-400', bgColor: 'bg-blue-500/20' },
+  arrived: { label: 'Provider Arrived', color: 'text-purple-400', bgColor: 'bg-purple-500/20' },
+  in_progress: { label: 'Service In Progress', color: 'text-amber-400', bgColor: 'bg-amber-500/20' },
+  completed: { label: 'Completed', color: 'text-emerald-400', bgColor: 'bg-emerald-500/20' },
+  cancelled: { label: 'Cancelled', color: 'text-red-400', bgColor: 'bg-red-500/20' },
 }
 
 // Helper functions
-const isChatEnabled = (status: ServiceStatus): boolean => {
-  return status === 'accepted' || status === 'in_progress'
-}
-
-interface LockedStateConfig {
-  type: 'no_service' | 'pending' | 'completed' | 'cancelled'
-  title: string
-  message: string
-  action: string | null
-}
-
-const getLockedStateConfig = (service: ServiceRequest | null): LockedStateConfig | null => {
-  if (!service) {
-    return {
-      type: 'no_service',
-      title: 'No Active Service',
-      message: 'Chat is available when you have an ongoing service request.',
-      action: 'Request Service',
-    }
-  }
-  
-  switch (service.status) {
-    case 'pending':
-      return {
-        type: 'pending',
-        title: 'Finding a Provider',
-        message: 'Chat will be available once a provider accepts your request.',
-        action: null,
-      }
-    case 'completed':
-      return {
-        type: 'completed',
-        title: 'Service Completed',
-        message: 'This chat session has ended. Thank you for using AID!',
-        action: 'Rate Your Experience',
-      }
-    case 'cancelled':
-      return {
-        type: 'cancelled',
-        title: 'Service Cancelled',
-        message: 'This service request was cancelled.',
-        action: 'Request New Service',
-      }
-    default:
-      return null
-  }
-}
-
-const formatMessageTime = (date: Date) => {
+const formatMessageTime = (timestamp: string | Date) => {
+  const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
   return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
+const formatBookingTime = (date: Date) => {
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
@@ -207,7 +100,7 @@ function TypingIndicator({ providerName }: { providerName: string }) {
 }
 
 // System Message Component
-function SystemMessage({ message }: { message: Message }) {
+function SystemMessage({ message }: { message: ChatMessage }) {
   return (
     <div className="flex justify-center my-4">
       <motion.div
@@ -215,15 +108,16 @@ function SystemMessage({ message }: { message: Message }) {
         animate={{ opacity: 1, scale: 1 }}
         className="bg-white/5 px-4 py-2 rounded-full border border-white/5"
       >
-        <p className="text-xs text-gray-400 text-center">{message.content}</p>
+        <p className="text-xs text-gray-400 text-center">{message.text}</p>
       </motion.div>
     </div>
   )
 }
 
 // Message Bubble Component
-function MessageBubble({ message, isOwn }: { message: Message; isOwn: boolean }) {
+function MessageBubble({ message, isOwn, status }: { message: ChatMessage; isOwn: boolean; status?: MessageStatus }) {
   const formattedTime = formatMessageTime(message.timestamp)
+  const displayStatus = status || 'read' // Default to read for persisted messages
 
   return (
     <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
@@ -235,7 +129,7 @@ function MessageBubble({ message, isOwn }: { message: Message; isOwn: boolean })
               : 'bg-white/10 text-white rounded-bl-md'
           }`}
         >
-          <p className="text-[15px] leading-relaxed">{message.content}</p>
+          <p className="text-[15px] leading-relaxed">{message.text}</p>
         </div>
         
         {/* Timestamp and status */}
@@ -246,16 +140,16 @@ function MessageBubble({ message, isOwn }: { message: Message; isOwn: boolean })
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
             >
-              {message.status === 'sending' && (
+              {displayStatus === 'sending' && (
                 <Loader2 size={12} className="text-gray-500 animate-spin" />
               )}
-              {message.status === 'sent' && (
+              {displayStatus === 'sent' && (
                 <Check size={12} className="text-gray-500" />
               )}
-              {message.status === 'delivered' && (
+              {displayStatus === 'delivered' && (
                 <CheckCheck size={12} className="text-gray-500" />
               )}
-              {message.status === 'read' && (
+              {displayStatus === 'read' && (
                 <CheckCheck size={12} className="text-emerald-400" />
               )}
             </motion.div>
@@ -266,43 +160,21 @@ function MessageBubble({ message, isOwn }: { message: Message; isOwn: boolean })
   )
 }
 
-// Chat Locked State Component
-function ChatLockedState({ 
-  config, 
-  onAction 
-}: { 
-  config: LockedStateConfig
-  onAction?: () => void 
-}) {
+// Empty State Component
+function EmptyState({ onRequestService }: { onRequestService: () => void }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       className="flex-1 flex flex-col items-center justify-center px-8 text-center"
     >
-      {/* Icon based on type */}
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
         transition={{ type: 'spring', delay: 0.1 }}
-        className={`w-20 h-20 rounded-full flex items-center justify-center mb-6 ${
-          config.type === 'no_service' ? 'bg-white/5' :
-          config.type === 'pending' ? 'bg-amber-500/10' :
-          config.type === 'completed' ? 'bg-emerald-500/10' :
-          'bg-red-500/10'
-        }`}
+        className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-6"
       >
-        {config.type === 'no_service' && <MessageCircle size={32} strokeWidth={1.5} className="text-gray-500" />}
-        {config.type === 'pending' && (
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
-          >
-            <Loader2 size={32} strokeWidth={1.5} className="text-amber-400" />
-          </motion.div>
-        )}
-        {config.type === 'completed' && <CheckCircle2 size={32} strokeWidth={1.5} className="text-emerald-400" />}
-        {config.type === 'cancelled' && <XCircle size={32} strokeWidth={1.5} className="text-red-400" />}
+        <MessageCircle size={32} strokeWidth={1.5} className="text-gray-500" />
       </motion.div>
       
       <motion.h3
@@ -311,7 +183,7 @@ function ChatLockedState({
         transition={{ delay: 0.2 }}
         className="text-xl font-semibold text-white mb-2"
       >
-        {config.title}
+        No Active Request
       </motion.h3>
       
       <motion.p
@@ -320,114 +192,98 @@ function ChatLockedState({
         transition={{ delay: 0.3 }}
         className="text-gray-400 mb-8 max-w-xs"
       >
-        {config.message}
+        Start a service request to chat with your provider.
       </motion.p>
       
-      {config.action && (
-        <motion.button
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onAction}
-          className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-3 px-8 rounded-xl shadow-lg shadow-emerald-500/20"
-        >
-          {config.action}
-        </motion.button>
-      )}
+      <motion.button
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={onRequestService}
+        className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-3 px-8 rounded-xl shadow-lg shadow-emerald-500/20"
+      >
+        Request Service
+      </motion.button>
     </motion.div>
   )
 }
 
-// Chat Header Component
-function ChatHeader({ provider, onCall }: { provider: Provider; onCall: () => void }) {
+// Booking Info Card Component
+function BookingInfoCard({ 
+  serviceName, 
+  status, 
+  createdAt, 
+  location,
+  provider,
+  estimatedPrice,
+  providerETA,
+}: { 
+  serviceName: string
+  status: BookingStatus
+  createdAt: Date
+  location: string
+  provider: Provider | null
+  estimatedPrice: number
+  providerETA?: number
+}) {
+  const config = statusConfig[status]
+  
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: -20 }}
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 backdrop-blur-sm border-b border-white/10 px-4 py-3 rounded-t-2xl"
+      className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10"
     >
-      <div className="flex items-center gap-3">
-        {/* Provider info */}
-        <div className="flex items-center gap-3 flex-1">
-          <div className="relative">
-            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-sm font-semibold text-white">
+      {/* Service & Status */}
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h3 className="text-white font-semibold">{serviceName}</h3>
+          <p className="text-gray-400 text-xs mt-0.5">{formatBookingTime(createdAt)}</p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-medium ${config.bgColor} ${config.color}`}>
+          {config.label}
+        </span>
+      </div>
+      
+      {/* Location */}
+      <div className="flex items-center gap-2 text-gray-400 text-sm mb-3">
+        <MapPin size={14} strokeWidth={1.5} />
+        <span className="truncate">{location}</span>
+      </div>
+      
+      {/* Provider info (if accepted) */}
+      {provider && (status === 'accepted' || status === 'en_route' || status === 'arrived' || status === 'in_progress') && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="pt-3 border-t border-white/10"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-sm font-semibold text-white">
               {provider.initials}
             </div>
-            {/* Online indicator */}
-            {provider.isOnline && (
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-[#12122a]"
-              />
+            <div className="flex-1">
+              <p className="text-white text-sm font-medium">{provider.name}</p>
+              <p className="text-gray-400 text-xs">{provider.vehicleInfo}</p>
+            </div>
+            {(providerETA !== undefined || provider.eta !== null) && (
+              <div className="flex items-center gap-1 text-emerald-400">
+                <Clock size={14} />
+                <span className="text-sm font-medium">{providerETA ?? provider.eta} min</span>
+              </div>
             )}
           </div>
-          
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-white truncate">{provider.name}</h3>
-            <p className="text-xs text-gray-400">{provider.vehicleInfo}</p>
-          </div>
-        </div>
-        
-        {/* Call button */}
-        <motion.button
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={onCall}
-          className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center"
-        >
-          <Phone size={18} strokeWidth={1.5} />
-        </motion.button>
-      </div>
-    </motion.div>
-  )
-}
-
-// Service Status Bar Component
-function ServiceStatusBar({ service, provider }: { service: ServiceRequest; provider: Provider }) {
-  return (
-    <AnimatePresence>
-      {service.status === 'accepted' && provider.eta !== null && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2.5 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <motion.div
-              animate={{ scale: [1, 1.2, 1] }}
-              transition={{ repeat: Infinity, duration: 2 }}
-              className="w-2 h-2 bg-emerald-400 rounded-full"
-            />
-            <Navigation size={14} strokeWidth={1.5} className="text-emerald-400" />
-            <span className="text-sm text-emerald-400">
-              {provider.eta === 0 ? 'Arriving now' : `Arriving in ${provider.eta} min`}
-            </span>
-          </div>
-          <button className="text-xs text-emerald-400 underline">Track on map</button>
         </motion.div>
       )}
       
-      {service.status === 'in_progress' && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-center gap-2"
-        >
-          <motion.div
-            animate={{ rotate: [0, 10, -10, 0] }}
-            transition={{ repeat: Infinity, duration: 1.5 }}
-          >
-            <Wrench size={14} strokeWidth={1.5} className="text-amber-400" />
-          </motion.div>
-          <span className="text-sm text-amber-400">Service in progress — {service.serviceType}</span>
-        </motion.div>
-      )}
-    </AnimatePresence>
+      {/* Price */}
+      <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/10">
+        <span className="text-gray-400 text-sm">Estimated Price</span>
+        <span className="text-emerald-400 font-semibold">${estimatedPrice}</span>
+      </div>
+    </motion.div>
   )
 }
 
@@ -515,22 +371,245 @@ function ChatInput({
   )
 }
 
+// Status Progress Indicator
+function StatusProgress({ currentStatus }: { currentStatus: BookingStatus }) {
+  const stages: BookingStatus[] = ['searching', 'accepted', 'en_route', 'arrived', 'in_progress', 'completed']
+  const currentIndex = stages.indexOf(currentStatus)
+  
+  if (currentStatus === 'cancelled' || currentStatus === 'pending') return null
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="flex items-center justify-between px-2 py-3"
+    >
+      {stages.slice(0, 5).map((stage, index) => {
+        const isActive = index <= currentIndex
+        const isCurrent = index === currentIndex
+        return (
+          <div key={stage} className="flex items-center">
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: index * 0.1 }}
+              className={`w-3 h-3 rounded-full ${
+                isActive 
+                  ? isCurrent 
+                    ? 'bg-emerald-400 shadow-lg shadow-emerald-500/50' 
+                    : 'bg-emerald-500' 
+                  : 'bg-white/20'
+              }`}
+            >
+              {isCurrent && (
+                <motion.div
+                  className="w-full h-full rounded-full bg-emerald-400"
+                  animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                />
+              )}
+            </motion.div>
+            {index < 4 && (
+              <div className={`w-12 h-0.5 mx-1 ${isActive && index < currentIndex ? 'bg-emerald-500' : 'bg-white/20'}`} />
+            )}
+          </div>
+        )
+      })}
+    </motion.div>
+  )
+}
+
+// Action Buttons Component
+function BookingActions({ 
+  onCancel, 
+  onComplete,
+  isTerminal
+}: { 
+  onCancel: () => void
+  onComplete: () => void
+  isTerminal: boolean
+}) {
+  if (isTerminal) return null
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex gap-3 mb-4"
+    >
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={onCancel}
+        className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 font-medium text-sm hover:bg-red-500/20 transition-colors"
+      >
+        <X size={18} strokeWidth={2} />
+        Cancel Request
+      </motion.button>
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={onComplete}
+        className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium text-sm hover:bg-emerald-500/20 transition-colors"
+      >
+        <CheckCircle size={18} strokeWidth={2} />
+        Mark Completed
+      </motion.button>
+    </motion.div>
+  )
+}
+
 // Main Chat Screen Component
 export default function ChatScreen() {
-  const { setCurrentScreen, setActiveModal } = useAppStore()
+  const { 
+    activeBooking, 
+    setActiveModal,
+    bookingMessages,
+    openBookingDetail,
+  } = useAppStore()
   
   // State
-  const [activeService] = useState<ServiceRequest | null>(sampleService)
-  const [messages, setMessages] = useState<Message[]>(sampleMessages)
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [isSending, setIsSending] = useState(false)
+  const [pendingMessageStatus, setPendingMessageStatus] = useState<Record<string, MessageStatus>>({})
   
   const scrollRef = useRef<HTMLDivElement>(null)
+  const providerReplyTimerRef = useRef<(() => void) | null>(null)
+  const trackingStopRef = useRef<(() => void) | null>(null)
   
-  // Check if chat is enabled
-  const chatEnabled = activeService ? isChatEnabled(activeService.status) : false
-  const lockedConfig = !chatEnabled ? getLockedStateConfig(activeService) : null
+  // Get messages for current booking from store
+  const messages = activeBooking ? (bookingMessages[activeBooking.id] || []) : []
+  
+  // Derive provider from activeBooking.mechanic (persisted)
+  const provider: Provider | null = activeBooking?.mechanic
+    ? {
+        id: activeBooking.mechanic.id,
+        name: activeBooking.mechanic.name,
+        initials: activeBooking.mechanic.initials,
+        rating: activeBooking.mechanic.rating,
+        vehicleInfo: 'Service Vehicle', // Default vehicle info
+        eta: activeBooking.mechanic.eta,
+        isOnline: activeBooking.mechanic.isOnline,
+      }
+    : null
+  
+  // Terminal states - don't progress
+  const isTerminalStatus = activeBooking?.status === 'cancelled' || activeBooking?.status === 'completed'
+  
+  // Check if provider can reply (has provider + valid status)
+  const canProviderReply = activeBooking && 
+    provider && 
+    chatService.canProviderReply(activeBooking.id)
+  
+  // Schedule a provider reply with typing indicator
+  const scheduleProviderReplyWithTyping = (bookingId: string) => {
+    if (!canProviderReply) return
+    
+    // Clear any existing timer
+    if (providerReplyTimerRef.current) {
+      providerReplyTimerRef.current()
+    }
+    
+    setIsTyping(true)
+    
+    // Use chatService to schedule reply
+    const cleanup = chatService.scheduleProviderReply(bookingId)
+    
+    // Set up our own timer to clear typing indicator
+    const typingTimer = setTimeout(() => {
+      setIsTyping(false)
+    }, 3500) // Slightly longer than the max service delay
+    
+    providerReplyTimerRef.current = () => {
+      cleanup()
+      clearTimeout(typingTimer)
+      setIsTyping(false)
+    }
+  }
+  
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (providerReplyTimerRef.current) {
+        providerReplyTimerRef.current()
+      }
+      if (trackingStopRef.current) {
+        trackingStopRef.current()
+      }
+      // Cleanup all chat service timers for this booking
+      if (activeBooking) {
+        chatService.cleanupReplyTimers(activeBooking.id)
+      }
+    }
+  }, [activeBooking?.id])
+  
+  // Simulate status progression using services
+  useEffect(() => {
+    if (!activeBooking) return
+    if (['cancelled', 'completed'].includes(activeBooking.status)) return
+    
+    const timers: ReturnType<typeof setTimeout>[] = []
+    const bookingId = activeBooking.id
+    
+    if (activeBooking.status === 'searching') {
+      // After 2.5s: accepted + match provider
+      const t1 = setTimeout(() => {
+        bookingService.updateBookingStatus(bookingId, 'accepted')
+        bookingService.assignProvider(bookingId)
+      }, 2500)
+      timers.push(t1)
+    }
+    
+    if (activeBooking.status === 'accepted') {
+      // After 3s: en_route - initialize tracking
+      const t2 = setTimeout(() => {
+        bookingService.initializeProviderTracking(bookingId)
+      }, 3000)
+      timers.push(t2)
+    }
+    
+    return () => {
+      timers.forEach(t => clearTimeout(t))
+    }
+  }, [activeBooking?.status, activeBooking?.id])
+  
+  // Provider tracking - start/stop based on status
+  useEffect(() => {
+    if (!activeBooking) return
+    if (activeBooking.status !== 'en_route') {
+      // Stop tracking if not en_route
+      if (trackingStopRef.current) {
+        trackingStopRef.current()
+        trackingStopRef.current = null
+      }
+      return
+    }
+    if (!activeBooking.providerCoords) return
+    
+    // Start tracking via service
+    const stopTracking = bookingService.startProviderTracking(activeBooking.id)
+    trackingStopRef.current = stopTracking
+    
+    return () => {
+      if (trackingStopRef.current) {
+        trackingStopRef.current()
+        trackingStopRef.current = null
+      }
+    }
+  }, [activeBooking?.status, activeBooking?.id, activeBooking?.providerCoords?.lat])
+  
+  // Handle cancel request
+  const handleCancelRequest = () => {
+    if (!activeBooking) return
+    bookingService.cancelBooking(activeBooking.id)
+  }
+  
+  // Handle mark completed
+  const handleMarkCompleted = () => {
+    if (!activeBooking) return
+    bookingService.completeBooking(activeBooking.id)
+  }
   
   // Auto-scroll on new messages
   useEffect(() => {
@@ -542,92 +621,73 @@ export default function ChatScreen() {
     }
   }, [messages])
   
-  // Simulate typing indicator occasionally
-  useEffect(() => {
-    if (!chatEnabled) return
-    
-    const interval = setInterval(() => {
-      if (Math.random() > 0.7) {
-        setIsTyping(true)
-        setTimeout(() => setIsTyping(false), 2000)
-      }
-    }, 8000)
-    
-    return () => clearInterval(interval)
-  }, [chatEnabled])
+  // Check if chat is enabled (only when provider is assigned)
+  const chatEnabled = activeBooking && provider && 
+    ['accepted', 'en_route', 'arrived', 'in_progress'].includes(activeBooking.status)
   
   // Handle send message
   const handleSend = async () => {
-    if (!inputValue.trim() || isSending || !chatEnabled) return
+    if (!inputValue.trim() || isSending || !chatEnabled || !activeBooking) return
     
-    const newMessage: Message = {
-      id: `msg_${Date.now()}`,
-      senderId: 'cust_001',
-      senderType: 'customer',
-      content: inputValue.trim(),
-      timestamp: new Date(),
-      status: 'sending',
-      type: 'text',
-    }
+    const bookingId = activeBooking.id
+    const messageText = inputValue.trim()
     
-    setMessages(prev => [...prev, newMessage])
+    // Append message via service
+    chatService.appendUserMessage(bookingId, messageText)
+    
     setInputValue('')
     setIsSending(true)
     
-    // Simulate sending delay
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
-    // Update to sent
-    setMessages(prev => 
-      prev.map(m => m.id === newMessage.id ? { ...m, status: 'sent' } : m)
-    )
-    
-    await new Promise(resolve => setTimeout(resolve, 300))
-    
-    // Update to delivered
-    setMessages(prev => 
-      prev.map(m => m.id === newMessage.id ? { ...m, status: 'delivered' } : m)
-    )
-    
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
-    // Update to read
-    setMessages(prev => 
-      prev.map(m => m.id === newMessage.id ? { ...m, status: 'read' } : m)
-    )
+    // Simulate send/delivered/read progression
+    await new Promise(resolve => setTimeout(resolve, 1300))
     
     setIsSending(false)
     
-    // Simulate provider response
-    if (Math.random() > 0.5) {
-      setIsTyping(true)
-      setTimeout(() => {
-        setIsTyping(false)
-        const providerResponse: Message = {
-          id: `msg_${Date.now()}`,
-          senderId: 'prov_456',
-          senderType: 'provider',
-          content: getRandomResponse(),
-          timestamp: new Date(),
-          status: 'read',
-          type: 'text',
-        }
-        setMessages(prev => [...prev, providerResponse])
-      }, 2000)
-    }
-  }
-  
-  // Handle locked state actions
-  const handleLockedAction = () => {
-    if (lockedConfig?.type === 'no_service' || lockedConfig?.type === 'cancelled') {
-      setCurrentScreen('home')
-      setActiveModal('services')
+    // Schedule provider auto-reply (70% chance)
+    if (Math.random() > 0.3 && canProviderReply) {
+      scheduleProviderReplyWithTyping(bookingId)
     }
   }
 
   const handleCall = () => {
-    // In production, this would initiate an in-app call
     console.log('Initiating call...')
+  }
+
+  // Handle request service
+  const handleRequestService = () => {
+    setActiveModal('services')
+  }
+
+  // No active booking - show empty state
+  if (!activeBooking) {
+    return (
+      <div className="max-w-md mx-auto px-5 py-6 flex flex-col h-[calc(100vh-120px)]">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4"
+        >
+          <h1 className="text-xl font-semibold text-white mb-1">Messages</h1>
+          <p className="text-white/40 text-sm">Service communication</p>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="flex-1 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 flex flex-col overflow-hidden"
+        >
+          <EmptyState onRequestService={handleRequestService} />
+        </motion.div>
+      </div>
+    )
+  }
+
+  // Handle view details
+  const handleViewDetails = () => {
+    if (activeBooking) {
+      openBookingDetail(activeBooking.id)
+    }
   }
 
   return (
@@ -636,13 +696,78 @@ export default function ChatScreen() {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mb-4"
+        className="mb-4 flex items-start justify-between"
       >
-        <h1 className="text-xl font-semibold text-white mb-1">Messages</h1>
-        <p className="text-white/40 text-sm">
-          {chatEnabled ? `Chat with ${activeService?.provider?.name}` : 'Service communication'}
-        </p>
+        <div>
+          <h1 className="text-xl font-semibold text-white mb-1">Messages</h1>
+          <p className="text-white/40 text-sm">
+            {chatEnabled ? `Chat with ${provider?.name}` : 'Tracking your service'}
+          </p>
+        </div>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={handleViewDetails}
+          className="px-3 py-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors"
+        >
+          Details
+        </motion.button>
       </motion.div>
+      
+      {/* Booking Info Card */}
+      <div className="mb-4">
+        <BookingInfoCard
+          serviceName={activeBooking.service.name}
+          status={activeBooking.status}
+          createdAt={activeBooking.createdAt}
+          location={activeBooking.location.address}
+          provider={provider}
+          estimatedPrice={activeBooking.estimatedPrice}
+          providerETA={activeBooking.providerETA}
+        />
+      </div>
+      
+      {/* Live Tracking Map - shows when en_route */}
+      {activeBooking.status === 'en_route' && activeBooking.providerCoords && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 space-y-2"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <Navigation size={14} className="text-emerald-400" />
+              <span>Provider en route</span>
+            </div>
+            {activeBooking.providerETA && (
+              <div className="flex items-center gap-1 text-emerald-400 text-sm font-medium">
+                <Clock size={14} />
+                <span>{activeBooking.providerETA} min away</span>
+              </div>
+            )}
+          </div>
+          <Suspense fallback={
+            <div className="h-[220px] rounded-xl bg-gray-800 border border-gray-700 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-gray-500 animate-spin" />
+            </div>
+          }>
+            <TrackingMap
+              user={activeBooking.location}
+              provider={activeBooking.providerCoords}
+            />
+          </Suspense>
+        </motion.div>
+      )}
+      
+      {/* Action Buttons - Cancel / Complete */}
+      <BookingActions
+        onCancel={handleCancelRequest}
+        onComplete={handleMarkCompleted}
+        isTerminal={isTerminalStatus}
+      />
+      
+      {/* Status Progress */}
+      <StatusProgress currentStatus={activeBooking.status} />
       
       {/* Main Chat Container */}
       <motion.div
@@ -651,89 +776,121 @@ export default function ChatScreen() {
         transition={{ delay: 0.1 }}
         className="flex-1 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 flex flex-col overflow-hidden"
       >
-        <AnimatePresence mode="wait">
-          {chatEnabled && activeService?.provider ? (
-            <motion.div
-              key="chat-active"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              className="flex-1 flex flex-col"
-            >
-              {/* Chat Header */}
-              <ChatHeader provider={activeService.provider} onCall={handleCall} />
-              
-              {/* Service Status Bar */}
-              <ServiceStatusBar service={activeService} provider={activeService.provider} />
-              
-              {/* Messages */}
-              <div 
-                ref={scrollRef}
-                className="flex-1 overflow-y-auto px-4 py-4 space-y-3 hide-scrollbar"
-              >
-                <AnimatePresence initial={false}>
-                  {messages.map((message) => (
-                    <motion.div
-                      key={message.id}
-                      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{ 
-                        type: 'spring', 
-                        damping: 25, 
-                        stiffness: 300,
-                      }}
-                    >
-                      {message.type === 'system' ? (
-                        <SystemMessage message={message} />
-                      ) : (
-                        <MessageBubble 
-                          message={message} 
-                          isOwn={message.senderType === 'customer'} 
-                        />
-                      )}
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
+        {chatEnabled && provider ? (
+          <motion.div
+            key="chat-active"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            className="flex-1 flex flex-col"
+          >
+            {/* Chat Header */}
+            <div className="bg-white/5 backdrop-blur-sm border-b border-white/10 px-4 py-3 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-1">
+                  <div className="relative">
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-sm font-semibold text-white">
+                      {provider.initials}
+                    </div>
+                    {provider.isOnline && (
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-[#12122a]"
+                      />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-white truncate">{provider.name}</h3>
+                    <p className="text-xs text-gray-400">{provider.vehicleInfo}</p>
+                  </div>
+                </div>
                 
-                {/* Typing indicator */}
-                <AnimatePresence>
-                  {isTyping && activeService.provider && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                    >
-                      <TypingIndicator providerName={activeService.provider.name} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={handleCall}
+                  className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center"
+                >
+                  <Phone size={18} strokeWidth={1.5} />
+                </motion.button>
               </div>
-              
-              {/* Chat Input */}
-              <ChatInput
-                value={inputValue}
-                onChange={setInputValue}
-                onSend={handleSend}
-                isSending={isSending}
-              />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="chat-locked"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 flex"
+            </div>
+            
+            {/* Messages */}
+            <div 
+              ref={scrollRef}
+              className="flex-1 overflow-y-auto px-4 py-4 space-y-3 hide-scrollbar"
             >
-              {lockedConfig && (
-                <ChatLockedState 
-                  config={lockedConfig} 
-                  onAction={handleLockedAction} 
-                />
-              )}
+              <AnimatePresence initial={false}>
+                {messages.map((message) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ 
+                      type: 'spring', 
+                      damping: 25, 
+                      stiffness: 300,
+                    }}
+                  >
+                    {message.sender === 'system' ? (
+                      <SystemMessage message={message} />
+                    ) : (
+                      <MessageBubble 
+                        message={message} 
+                        isOwn={message.sender === 'user'} 
+                      />
+                    )}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+              
+              {/* Typing indicator */}
+              <AnimatePresence>
+                {isTyping && provider && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <TypingIndicator providerName={provider.name} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            
+            {/* Chat Input */}
+            <ChatInput
+              value={inputValue}
+              onChange={setInputValue}
+              onSend={handleSend}
+              isSending={isSending}
+            />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="waiting"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex-1 flex flex-col items-center justify-center p-8 text-center"
+          >
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
+              className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-4"
+            >
+              <Loader2 size={28} strokeWidth={1.5} className="text-amber-400" />
             </motion.div>
-          )}
-        </AnimatePresence>
+            <h3 className="text-lg font-semibold text-white mb-2">
+              {activeBooking.status === 'searching' ? 'Finding a Provider...' : 'Connecting...'}
+            </h3>
+            <p className="text-gray-400 text-sm">
+              Chat will be available once a provider accepts your request
+            </p>
+          </motion.div>
+        )}
       </motion.div>
       
       {/* Quick Actions (when chat is active) */}
@@ -764,14 +921,3 @@ export default function ChatScreen() {
   )
 }
 
-// Helper for simulated responses
-function getRandomResponse(): string {
-  const responses = [
-    "Got it! I'll be there soon.",
-    "Thanks for letting me know!",
-    "Perfect, see you in a few minutes.",
-    "Understood. I'm about 2 minutes away.",
-    "Great, I can see your location on the map.",
-  ]
-  return responses[Math.floor(Math.random() * responses.length)]
-}
