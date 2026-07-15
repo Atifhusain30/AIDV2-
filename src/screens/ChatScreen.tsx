@@ -661,14 +661,14 @@ export default function ChatScreen() {
   // No active booking - show empty state
   if (!activeBooking) {
     return (
-      <div className="max-w-md mx-auto px-5 py-6 flex flex-col h-[calc(100vh-120px)]">
+      <div className="customer-chat max-w-md mx-auto px-5 py-6 flex flex-col h-[calc(100vh-120px)]">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-4"
         >
-          <h1 className="text-xl font-semibold text-white mb-1">Messages</h1>
-          <p className="text-white/40 text-sm">Service communication</p>
+          <h1 className="text-xl font-semibold text-white mb-1">Updates</h1>
+          <p className="text-white/40 text-sm">Live service status and messages</p>
         </motion.div>
         
         <motion.div
@@ -691,7 +691,7 @@ export default function ChatScreen() {
   }
 
   return (
-    <div className="max-w-md mx-auto px-5 py-6 flex flex-col h-[calc(100vh-120px)]">
+    <div className="customer-chat max-w-md mx-auto px-5 py-6 flex flex-col h-[calc(100vh-120px)]">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -699,7 +699,7 @@ export default function ChatScreen() {
         className="mb-4 flex items-start justify-between"
       >
         <div>
-          <h1 className="text-xl font-semibold text-white mb-1">Messages</h1>
+          <h1 className="text-xl font-semibold text-white mb-1">Updates</h1>
           <p className="text-white/40 text-sm">
             {chatEnabled ? `Chat with ${provider?.name}` : 'Tracking your service'}
           </p>

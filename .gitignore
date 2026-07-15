@@ -35,6 +35,13 @@ yarn-error.log*
 
 # Testing
 coverage
+artifacts/
+
+# Native local/build state
+android/local.properties
+android/.gradle/
+android/**/build/
+ios/**/DerivedData/
 
 # Misc
 *.pem

@@ -60,7 +60,7 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
 
   if (!activeBooking) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center px-6">
+      <div className="driver-job min-h-screen flex items-center justify-center px-6">
         <div className="text-center">
           <AlertCircle size={48} className="text-gray-600 mx-auto mb-4" />
           <p className="text-gray-400">No active job</p>
@@ -150,7 +150,7 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] pb-8 safe-top">
+    <div className="driver-job min-h-screen pb-8 safe-top">
       {/* Header */}
       <div className="px-6 pt-6 pb-4 flex items-center justify-between">
         <button onClick={onBack} className="text-gray-400">
@@ -186,7 +186,7 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
             <p className="text-white font-medium">Customer</p>
             <p className="text-gray-500 text-sm">{activeBooking.location.address}</p>
           </div>
-          <button className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+          <button className="w-10 h-10 rounded-full bg-[#dfff54]/20 flex items-center justify-center">
             <Phone size={18} className="text-emerald-400" />
           </button>
         </div>
@@ -218,7 +218,7 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
                 key={step.status}
                 className={`flex items-center gap-4 p-4 rounded-xl border ${
                   isCurrent 
-                    ? 'bg-emerald-500/10 border-emerald-500/30'
+                    ? 'bg-[#dfff54]/10 border-[#dfff54]/30'
                     : isComplete
                       ? 'bg-white/5 border-white/10'
                       : 'bg-white/[0.02] border-white/5'
@@ -231,9 +231,9 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
               >
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                   isComplete 
-                    ? 'bg-emerald-500 text-white'
+                    ? 'bg-[#dfff54] text-[#101508]'
                     : isCurrent
-                      ? 'bg-emerald-500/20 text-emerald-400'
+                      ? 'bg-[#dfff54]/20 text-emerald-400'
                       : 'bg-white/5 text-gray-600'
                 }`}>
                   {isComplete ? (
@@ -261,7 +261,7 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
         <div className="mx-6 mb-4">
           <button
             onClick={openMapsNavigation}
-            className="w-full py-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 font-semibold flex items-center justify-center gap-2"
+            className="w-full py-4 rounded-xl border border-[#dfff54]/30 bg-[#dfff54]/10 text-emerald-400 font-semibold flex items-center justify-center gap-2"
           >
             <Navigation size={20} />
             Open in Maps

@@ -68,10 +68,15 @@ input, textarea, select {
   font-size: 16px !important;
 }
 
-/* Fix iOS button styling */
+/* Fix iOS button styling and remove delayed mobile taps */
 button {
   -webkit-appearance: none;
   appearance: none;
+  touch-action: manipulation;
+}
+
+button, a, input, textarea, select {
+  font: inherit;
 }
 
 /* Fix for 100vh on iOS */
@@ -349,6 +354,16 @@ button {
     transform: translateZ(0);
     backface-visibility: hidden;
     perspective: 1000px;
+  }
+}
+
+/* Respect the platform accessibility setting and avoid decorative motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

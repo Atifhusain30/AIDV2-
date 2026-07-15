@@ -169,7 +169,7 @@ export default function DriverOnboardingScreen({ onComplete, onSkip }: DriverOnb
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] px-6 py-8 safe-top">
+    <div className="driver-onboarding min-h-screen px-6 py-8 safe-top">
       {/* Progress Bar */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-3">
