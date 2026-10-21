@@ -22,6 +22,8 @@ function createClient(overrides: Record<string, unknown> = {}) {
     signUp: vi.fn(),
     signOut: vi.fn().mockResolvedValue({ error: null }),
     getSession: vi.fn(),
+    resetPasswordForEmail: vi.fn().mockResolvedValue({ data: {}, error: null }),
+    updateUser: vi.fn().mockResolvedValue({ data: { user: authUser }, error: null }),
     ...overrides,
   }
 
@@ -95,5 +97,53 @@ describe('Supabase auth service', () => {
     const result = await service.signIn('customer', 'wrong@example.com', 'wrong-password')
 
     expect(result).toEqual({ success: false, error: 'Invalid login credentials' })
+  })
+
+  it('sends a normalized password recovery email with the native callback URL', async () => {
+    const { client, auth } = createClient()
+    const service = createAuthService(client)
+
+    const result = await service.requestPasswordReset('  Alex@Example.com ')
+
+    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('alex@example.com', {
+      redirectTo: 'com.aid.roadside://auth/recovery',
+    })
+    expect(result).toEqual({
+      success: true,
+      message: 'Check your email for a secure password reset link.',
+    })
+  })
+
+  it('returns the managed password recovery error', async () => {
+    const { client } = createClient({
+      resetPasswordForEmail: vi.fn().mockResolvedValue({ data: {}, error: { message: 'Too many requests' } }),
+    })
+    const service = createAuthService(client)
+
+    await expect(service.requestPasswordReset('alex@example.com')).resolves.toEqual({
+      success: false,
+      error: 'Too many requests',
+    })
+  })
+
+  it('updates the recovered account password', async () => {
+    const { client, auth } = createClient()
+    const service = createAuthService(client)
+
+    const result = await service.updatePassword('new-secure-password')
+
+    expect(auth.updateUser).toHaveBeenCalledWith({ password: 'new-secure-password' })
+    expect(auth.signOut).toHaveBeenCalled()
+    expect(result).toEqual({ success: true, message: 'Your password has been updated.' })
+  })
+
+  it('rejects a password shorter than eight characters before calling Supabase', async () => {
+    const { client, auth } = createClient()
+    const service = createAuthService(client)
+
+    const result = await service.updatePassword('short')
+
+    expect(auth.updateUser).not.toHaveBeenCalled()
+    expect(result).toEqual({ success: false, error: 'Password must be at least 8 characters.' })
   })
 })

@@ -1,0 +1,13 @@
+type RecoveryAuthClient = {
+  exchangeCodeForSession(code: string): Promise<{ error: { message: string } | null }>
+}
+
+export async function completeRecoveryFromUrl(client: RecoveryAuthClient, rawUrl: string): Promise<boolean> {
+  const url = new URL(rawUrl)
+  if (url.protocol !== 'com.aid.roadside:' || url.hostname !== 'auth' || url.pathname !== '/recovery') return false
+  const code = url.searchParams.get('code')
+  if (!code) throw new Error('Password recovery link is invalid or expired.')
+  const { error } = await client.exchangeCodeForSession(code)
+  if (error) throw new Error(error.message)
+  return true
+}

@@ -12,6 +12,10 @@ import { useDriverStore } from './store/useDriverStore'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
 import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
+import { App as CapacitorApp } from '@capacitor/app'
+import { supabase } from './auth/supabase'
+import { completeRecoveryFromUrl } from './auth/recovery'
+import PasswordRecoveryScreen from './components/auth/PasswordRecoveryScreen'
 
 // Customer Screens
 import HomeScreen from './screens/HomeScreen'
@@ -263,6 +267,8 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
 // Main App Component
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('select')
+  const [isRecoveringPassword, setIsRecoveringPassword] = useState(false)
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const { isAuthenticated, user, token, logout, restoreSession, updateUser } = useAuthStore()
 
   // Initialize app features on startup
@@ -279,6 +285,28 @@ function App() {
     })
     void restoreSession()
   }, [restoreSession])
+
+  useEffect(() => {
+    const handleUrl = async (url: string) => {
+      try {
+        if (await completeRecoveryFromUrl(supabase.auth, url)) {
+          setRecoveryError(null)
+          setIsRecoveringPassword(true)
+        }
+      } catch (error) {
+        setRecoveryError(error instanceof Error ? error.message : 'Password recovery link is invalid or expired.')
+        setIsRecoveringPassword(false)
+      }
+    }
+    let removeListener: (() => Promise<void>) | undefined
+    void CapacitorApp.addListener('appUrlOpen', ({ url }) => void handleUrl(url)).then((listener) => {
+      removeListener = () => listener.remove()
+    })
+    void CapacitorApp.getLaunchUrl().then((launch) => {
+      if (launch?.url) void handleUrl(launch.url)
+    })
+    return () => { void removeListener?.() }
+  }, [])
 
   // Check for existing session
   useEffect(() => {
@@ -349,6 +377,22 @@ function App() {
   const handleLogout = () => {
     logout()
     setAppMode('select')
+  }
+
+  if (isRecoveringPassword) {
+    return <PasswordRecoveryScreen onComplete={() => { setIsRecoveringPassword(false); setAppMode('customer') }} />
+  }
+
+  if (recoveryError) {
+    return (
+      <main className="auth-portal safe-top safe-bottom">
+        <section className="auth-portal__content">
+          <AidBrand compact label="ACCOUNT RECOVERY" />
+          <div className="auth-portal__intro"><h1>That reset link did not work.</h1><p role="alert">{recoveryError}</p></div>
+          <button type="button" className="aid-primary-button" onClick={() => { setRecoveryError(null); setAppMode('customer') }}>Request another link</button>
+        </section>
+      </main>
+    )
   }
 
   // Mode selection screen

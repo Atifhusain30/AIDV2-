@@ -74,6 +74,16 @@ describe('first-run flow', () => {
     expect(screen.getByRole('alert').textContent).toContain('Enter your email address first.')
   })
 
+  it('sends password recovery through managed authentication', async () => {
+    const requestPasswordReset = vi.spyOn(useAuthStore.getState(), 'requestPasswordReset').mockResolvedValue(true)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /Get roadside help/i }))
+    fireEvent.change(screen.getByPlaceholderText('you@email.com'), { target: { value: 'alex@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Forgot password?' }))
+
+    await waitFor(() => expect(requestPasswordReset).toHaveBeenCalledWith('alex@example.com'))
+  })
+
   it('does not advertise a guest request flow that cannot reach the authenticated API', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /Get roadside help/i }))

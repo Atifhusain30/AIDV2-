@@ -39,6 +39,7 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
     customerRegister,
     driverLogin,
     driverRegister,
+    requestPasswordReset,
 
     isLoading,
     error,
@@ -68,6 +69,17 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
     clearError()
     setRecoveryMessage('')
     setIsLogin((current) => !current)
+  }
+
+  const handlePasswordRecovery = async () => {
+    clearError()
+    setRecoveryMessage('')
+    const normalizedEmail = email.trim().toLowerCase()
+    if (!normalizedEmail) {
+      setRecoveryMessage('Enter your email address first.')
+      return
+    }
+    await requestPasswordReset(normalizedEmail)
   }
 
   return (
@@ -161,7 +173,7 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
             <button
               type="button"
               className="auth-form__forgot"
-              onClick={() => setRecoveryMessage(email.trim() ? 'Password recovery is not connected in this preview yet.' : 'Enter your email address first.')}
+              onClick={() => void handlePasswordRecovery()}
             >
               Forgot password?
             </button>

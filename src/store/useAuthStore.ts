@@ -17,6 +17,7 @@ interface AuthStore extends AuthState {
   customerRegister: (email: string, password: string, firstName: string, lastName: string, phone: string) => Promise<boolean>
   driverLogin: (email: string, password: string) => Promise<boolean>
   driverRegister: (email: string, password: string, firstName: string, lastName: string, phone: string) => Promise<boolean>
+  requestPasswordReset: (email: string) => Promise<boolean>
   continueAsGuest: () => boolean
   restoreSession: () => Promise<void>
   logout: () => void
@@ -124,6 +125,17 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
     }
 
     set({ isLoading: false, error: result.error || 'Registration failed' })
+    return false
+  },
+
+  requestPasswordReset: async (email) => {
+    set({ isLoading: true, error: null, notice: null })
+    const result = await managedAuth.requestPasswordReset(email)
+    if (result.success) {
+      set({ isLoading: false, notice: result.message || 'Check your email for a password reset link.' })
+      return true
+    }
+    set({ isLoading: false, error: result.error || 'Unable to send password reset email.' })
     return false
   },
 

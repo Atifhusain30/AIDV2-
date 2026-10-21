@@ -34,6 +34,8 @@ export interface ManagedAuthClient {
     }): Promise<AuthResult>
     signOut(): Promise<{ error: { message: string } | null }>
     getSession(): Promise<SessionResult>
+    resetPasswordForEmail(email: string, options: { redirectTo: string }): Promise<{ error: { message: string } | null }>
+    updateUser(input: { password: string }): Promise<{ error: { message: string } | null }>
   }
 }
 
@@ -200,9 +202,33 @@ export function createAuthService(client: ManagedAuthClient) {
     }
   }
 
+  async function requestPasswordReset(email: string): Promise<ApiResponse<void>> {
+    try {
+      const { error } = await client.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: 'com.aid.roadside://auth/recovery',
+      })
+      if (error) return { success: false, error: error.message }
+      return { success: true, message: 'Check your email for a secure password reset link.' }
+    } catch {
+      return { success: false, error: 'Unable to send a password reset email. Check your connection and try again.' }
+    }
+  }
+
+  async function updatePassword(password: string): Promise<ApiResponse<void>> {
+    if (password.length < 8) return { success: false, error: 'Password must be at least 8 characters.' }
+    try {
+      const { error } = await client.auth.updateUser({ password })
+      if (error) return { success: false, error: error.message }
+      await client.auth.signOut()
+      return { success: true, message: 'Your password has been updated.' }
+    } catch {
+      return { success: false, error: 'Unable to update your password. Check your connection and try again.' }
+    }
+  }
+
   async function signOut(): Promise<void> {
     await client.auth.signOut()
   }
 
-  return { signIn, register, restore, signOut }
+  return { signIn, register, restore, requestPasswordReset, updatePassword, signOut }
 }
