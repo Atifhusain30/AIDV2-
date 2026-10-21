@@ -68,7 +68,6 @@ export default function ServicesModal() {
     showSuccess,
     setShowSuccess,
     setCurrentScreen,
-    userLocation,
     // Location confirmation
     userLocationLabel,
     userCoords,
@@ -117,7 +116,7 @@ export default function ServicesModal() {
 
   const handleSubmit = async () => {
     // Check if location is confirmed
-    if (!userLocationLabel) {
+    if (!userLocationLabel || !userCoords) {
       // Open location confirmation modal (will return here after)
       openLocationModal()
       return
@@ -130,10 +129,7 @@ export default function ServicesModal() {
         service: selectedService || services[0],
         notes: serviceFormData.problemDescription || undefined,
         locationLabel: userLocationLabel,
-        locationCoords: {
-          lat: userCoords?.lat ?? userLocation.lat,
-          lng: userCoords?.lng ?? userLocation.lng,
-        },
+        locationCoords: userCoords,
       })
       setShowSuccess(true)
     } catch (error) {

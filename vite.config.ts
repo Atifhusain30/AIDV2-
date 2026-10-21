@@ -22,6 +22,7 @@ export default defineConfig({
     }
   },
   test: {
+    setupFiles: ['src/test/setup.ts'],
     exclude: ['server/**', 'node_modules/**', 'dist/**', 'ios/**'],
   }
 })

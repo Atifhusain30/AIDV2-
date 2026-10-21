@@ -49,6 +49,8 @@ test('available-booking listings hide customer identity and precise pickup detai
   assert.equal(booking.location.address, 'Approximate pickup area');
   assert.equal(booking.location.lat, 32.78);
   assert.equal(booking.location.lng, -96.8);
+  assert.ok(booking.expiresAt instanceof Date);
+  assert.equal(Number.isNaN(booking.expiresAt.getTime()), false);
 });
 
 test('payment status cannot be downgraded after success', async () => {

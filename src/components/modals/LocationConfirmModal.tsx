@@ -113,7 +113,8 @@ export default function LocationConfirmModal() {
 
     try {
       // Step 1: Get GPS coordinates
-      const coords = await locationService.getCurrentCoords()
+      const current = await locationService.getCurrentLocationSelection()
+      const coords = current.coords
       setSelectedCoords(coords)
       console.log('[LocationConfirmModal] GPS location acquired:', coords)
       
@@ -123,7 +124,7 @@ export default function LocationConfirmModal() {
       setSelectedLabel('Looking up address...')
       
       try {
-        const label = await locationService.reverseGeocodeLabel(coords.lat, coords.lng)
+        const label = current.label
         setSelectedLabel(label)
         setManualQuery(label) // Sync with manual input
         setAddressWarning(null)
@@ -212,12 +213,13 @@ export default function LocationConfirmModal() {
     // Use selectedLabel if set, otherwise fall back to manualQuery
     const finalLabel = selectedLabel.trim() || manualQuery.trim()
     
-    if (!finalLabel) {
-      setError('Please select or enter a location')
+    try {
+      const resolved = locationService.requireResolvedLocation(finalLabel, selectedCoords)
+      confirmLocation(resolved.label, resolved.coords)
+    } catch (locationError) {
+      setError(locationError instanceof Error ? locationError.message : 'Select a valid location.')
       return
     }
-
-    confirmLocation(finalLabel, selectedCoords)
     
     // Return to the modal that opened us (e.g., ServicesModal) with the same step
     if (pendingReturnModal) {
@@ -230,7 +232,7 @@ export default function LocationConfirmModal() {
   }
 
   // Determine if confirm button should be enabled
-  const canConfirm = (selectedLabel.trim() || manualQuery.trim()) && 
+  const canConfirm = Boolean((selectedLabel.trim() || manualQuery.trim()) && selectedCoords) &&
                      !isLoadingGPS && 
                      !isResolvingAddress && 
                      !isUpdatingPin &&

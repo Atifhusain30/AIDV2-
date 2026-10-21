@@ -20,6 +20,22 @@ export async function getCurrentCoords(): Promise<GeoCoords> {
   return getCurrentPosition()
 }
 
+export type ResolvedLocation = { label: string; coords: GeoCoords }
+
+export async function getCurrentLocationSelection(): Promise<ResolvedLocation> {
+  const coords = await getCurrentCoords()
+  const label = await reverseGeocodeLabel(coords.lat, coords.lng)
+  return { label, coords }
+}
+
+export function requireResolvedLocation(label: string, coords: GeoCoords | null): ResolvedLocation {
+  const trimmedLabel = label.trim()
+  if (!trimmedLabel || !coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
+    throw new Error('Select an address suggestion or use your current location.')
+  }
+  return { label: trimmedLabel, coords }
+}
+
 /**
  * Request location permission from user
  * @returns Permission status or null if not available
@@ -95,6 +111,8 @@ export function coordsEqual(
 // Default export as service object
 const locationService = {
   getCurrentCoords,
+  getCurrentLocationSelection,
+  requireResolvedLocation,
   requestPermission,
   reverseGeocodeLabel,
   searchAddressSuggestions,

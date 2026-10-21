@@ -283,10 +283,15 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (booking.payment?.status === 'succeeded') return res.status(409).json({ error: 'Booking is already paid' });
       if (booking.status !== 'completed') return res.status(409).json({ error: 'Booking must be completed before payment' });
       const amount = Math.round(booking.estimatedPrice * 100);
+      const previousIntentId = booking.payment?.intentId;
+      const retryablePayment = previousIntentId && ['failed', 'refunded'].includes(booking.payment.status);
+      const idempotencyKey = retryablePayment
+        ? `booking-${booking.id}-retry-${previousIntentId}`
+        : `booking-${booking.id}`;
       const intent = await stripe.paymentIntents.create({
         amount, currency: 'usd', automatic_payment_methods: { enabled: true },
         metadata: { bookingId: booking.id, customerId: req.auth.identity.id },
-      }, { idempotencyKey: `booking-${booking.id}` });
+      }, { idempotencyKey });
       await repository.setPaymentIntent(booking.id, req.auth.identity.id, intent.id);
       res.json({ id: intent.id, clientSecret: intent.client_secret, amount: intent.amount, currency: intent.currency, status: intent.status });
     } catch (error) { next(error); }

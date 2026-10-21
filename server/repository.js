@@ -217,6 +217,7 @@ class PostgresRepository {
     `);
     return result.rows.map((row) => {
       const booking = mapBooking(row);
+      booking.expiresAt = new Date(new Date(row.created_at).getTime() + 10 * 60 * 1000);
       delete booking.customerName;
       delete booking.customerPhone;
       delete booking.customerId;

@@ -226,3 +226,28 @@ test('payment intent creation requires a completed booking', async () => {
   assert.equal(response.status, 409);
   assert.equal(response.body.error, 'Booking must be completed before payment');
 });
+
+test('failed payment retries use a new idempotency key derived from the previous intent', async () => {
+  let options;
+  const stripe = {
+    paymentIntents: {
+      async create(_input, requestOptions) {
+        options = requestOptions;
+        return { id: 'pi_retry', client_secret: 'pi_retry_secret', amount: 12500, currency: 'usd', status: 'requires_payment_method' };
+      },
+    },
+  };
+  const { app, bookings } = buildHarness(stripe);
+  bookings.set('booking-retry', {
+    id: 'booking-retry', customerId: 'customer-1', estimatedPrice: 125, status: 'completed',
+    payment: { intentId: 'pi_failed', status: 'failed' },
+  });
+
+  const response = await request(app)
+    .post('/api/payments/create-intent')
+    .set('Authorization', 'Bearer customerToken')
+    .send({ bookingId: 'booking-retry' });
+
+  assert.equal(response.status, 200);
+  assert.equal(options.idempotencyKey, 'booking-booking-retry-retry-pi_failed');
+});

@@ -5,6 +5,7 @@ const Stripe = require('stripe');
 const { randomUUID } = require('crypto');
 const { createApp } = require('./app');
 const { PostgresRepository } = require('./repository');
+const { databaseSslConfig } = require('./config');
 
 const required = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'DATABASE_URL'];
 const missing = required.filter((name) => !process.env[name] || /replace|placeholder|your_/i.test(process.env[name]));
@@ -18,7 +19,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SEC
 });
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+  ssl: databaseSslConfig(process.env),
   max: Number(process.env.DATABASE_POOL_SIZE || 10),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
