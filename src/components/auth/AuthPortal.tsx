@@ -39,8 +39,10 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
     customerRegister,
     driverLogin,
     driverRegister,
+
     isLoading,
     error,
+    notice,
     clearError,
   } = useAuthStore()
 
@@ -166,9 +168,9 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
           )}
 
           <AnimatePresence>
-            {(error || recoveryMessage) && (
-              <motion.p className="auth-form__error" role="alert" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                {error || recoveryMessage}
+            {(error || notice || recoveryMessage) && (
+              <motion.p className="auth-form__error" role={error || recoveryMessage ? 'alert' : 'status'} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                {error || notice || recoveryMessage}
               </motion.p>
             )}
           </AnimatePresence>
@@ -184,18 +186,7 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
             <ArrowLeftRight size={17} />
             {isDriver ? 'I need roadside help' : 'Switch to driver mode'}
           </button>
-          {!isDriver && isLogin && (
-            <button
-              type="button"
-              className="guest-access"
-              onClick={async () => {
-                const success = await customerLogin('demo@aid.com', 'demo123')
-                if (success) onLoginSuccess()
-              }}
-            >
-              Explore with a guest account
-            </button>
-          )}
+
         </div>
       </motion.section>
     </main>

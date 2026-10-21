@@ -10,8 +10,8 @@ import {
   ChevronDown
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
-import { Booking } from '../../types'
 import { services } from '../../data/mockData'
+import * as bookingService from '../../services/bookingService'
 import { calculateEVChargingEstimate, evMakesModels, batteryTypes } from '../../utils/estimates'
 import Modal, { 
   StepIndicator, 
@@ -38,8 +38,6 @@ export default function EVChargingModal() {
     showSuccess,
     setShowSuccess,
     userLocation,
-    setActiveBooking,
-    addToBookingHistory,
     setCurrentScreen,
   } = useAppStore()
 
@@ -84,31 +82,23 @@ export default function EVChargingModal() {
 
   const handleSubmit = async () => {
     setIsSubmitting(true)
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // Create the booking object for EV charging
-    const evService = services.find(s => s.id === 'ev_charging') || services[5]
-    const booking: Booking = {
-      id: crypto.randomUUID(),
-      customerId: 'demo_user',
-      service: evService,
-      status: 'searching',
-      location: {
-        address: evChargingFormData.address || 'Current Location',
-        lat: evChargingFormData.coords?.lat || userLocation.lat,
-        lng: evChargingFormData.coords?.lng || userLocation.lng,
-      },
-      estimatedPrice: estimate?.total || evService.basePrice,
-      notes: `${evChargingFormData.evMake} ${evChargingFormData.evModel} - Charge from ${evChargingFormData.currentCharge}% to ${evChargingFormData.desiredCharge}%`,
-      createdAt: new Date(),
+    try {
+      const evService = services.find(s => s.id === 'ev_charging') || services[5]
+      await bookingService.requestAndStartBooking({
+        service: evService,
+        locationLabel: evChargingFormData.address || 'Current Location',
+        locationCoords: {
+          lat: evChargingFormData.coords?.lat ?? userLocation.lat,
+          lng: evChargingFormData.coords?.lng ?? userLocation.lng,
+        },
+        notes: `${evChargingFormData.evMake} ${evChargingFormData.evModel} - Charge from ${evChargingFormData.currentCharge}% to ${evChargingFormData.desiredCharge}%`,
+      })
+      setShowSuccess(true)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to request EV charging.')
+    } finally {
+      setIsSubmitting(false)
     }
-    
-    // Save booking to store
-    setActiveBooking(booking)
-    addToBookingHistory(booking)
-    
-    setIsSubmitting(false)
-    setShowSuccess(true)
   }
 
   const evMakes = Object.keys(evMakesModels)

@@ -15,6 +15,8 @@ import {
   CheckCircle,
 } from 'lucide-react'
 import { useAppStore, ChatMessage } from '../store/useAppStore'
+import { useAuthStore } from '../store/useAuthStore'
+import { apiService } from '../services/api'
 import { BookingStatus } from '../types'
 import { lazy, Suspense } from 'react'
 import * as bookingService from '../services/bookingService'
@@ -466,7 +468,10 @@ export default function ChatScreen() {
     setActiveModal,
     bookingMessages,
     openBookingDetail,
+    setActiveBooking,
+    updateBookingInHistory,
   } = useAppStore()
+  const { token } = useAuthStore()
   
   // State
   const [inputValue, setInputValue] = useState('')
@@ -544,8 +549,27 @@ export default function ChatScreen() {
     }
   }, [activeBooking?.id])
   
-  // Simulate status progression using services
+  // Keep managed bookings synchronized with driver actions from the backend.
   useEffect(() => {
+    if (!token || !activeBooking) return
+    let stopped = false
+    const refresh = async () => {
+      const result = await apiService.getBooking(activeBooking.id)
+      if (!stopped && result.success && result.data) {
+        bookingService.reconcileManagedBooking(result.data)
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(() => void refresh(), 4000)
+    return () => {
+      stopped = true
+      window.clearInterval(interval)
+    }
+  }, [token, activeBooking?.id, setActiveBooking, updateBookingInHistory])
+
+  // Simulate status progression only for local guest demonstrations.
+  useEffect(() => {
+    if (token) return
     if (!activeBooking) return
     if (['cancelled', 'completed'].includes(activeBooking.status)) return
     
@@ -572,7 +596,7 @@ export default function ChatScreen() {
     return () => {
       timers.forEach(t => clearTimeout(t))
     }
-  }, [activeBooking?.status, activeBooking?.id])
+  }, [token, activeBooking?.status, activeBooking?.id])
   
   // Provider tracking - start/stop based on status
   useEffect(() => {
@@ -600,14 +624,28 @@ export default function ChatScreen() {
   }, [activeBooking?.status, activeBooking?.id, activeBooking?.providerCoords?.lat])
   
   // Handle cancel request
-  const handleCancelRequest = () => {
+  const handleCancelRequest = async () => {
     if (!activeBooking) return
-    bookingService.cancelBooking(activeBooking.id)
+    if (!token) {
+      bookingService.cancelBooking(activeBooking.id)
+      return
+    }
+    const result = await apiService.updateBookingStatus(activeBooking.id, 'cancelled')
+    if (!result.success || !result.data) {
+      window.alert(result.error || 'Unable to cancel this request.')
+      return
+    }
+    setActiveBooking(null)
+    updateBookingInHistory(result.data.id, result.data)
   }
   
-  // Handle mark completed
+  // Only providers can complete managed jobs; local guest demos retain the prototype action.
   const handleMarkCompleted = () => {
     if (!activeBooking) return
+    if (token) {
+      window.alert('Your provider will complete the job when service is finished.')
+      return
+    }
     bookingService.completeBooking(activeBooking.id)
   }
   

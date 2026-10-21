@@ -1,0 +1,228 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const request = require('supertest');
+const { createApp } = require('../app');
+
+function buildHarness(stripe = null) {
+  const users = {
+    customerToken: { id: 'customer-1', role: 'customer', status: 'active', firstName: 'Casey', lastName: 'Customer' },
+    driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', isOnline: true },
+    offlineDriverToken: { id: 'driver-3', role: 'driver', status: 'active', verificationStatus: 'verified', isOnline: false },
+    pendingDriverToken: { id: 'driver-2', role: 'driver', status: 'active', verificationStatus: 'pending' },
+  };
+
+  const bookings = new Map();
+  const repository = {
+    async getProfile(userId) {
+      return Object.values(users).find((user) => user.id === userId) || null;
+    },
+    async createBooking(input) {
+      const booking = { id: `booking-${bookings.size + 1}`, status: 'searching', ...input };
+      bookings.set(booking.id, booking);
+      return booking;
+    },
+    async listAvailableBookings() {
+      return [...bookings.values()].filter((booking) => booking.status === 'searching');
+    },
+    async acceptBooking(bookingId, driverId) {
+      const booking = bookings.get(bookingId);
+      if (!booking || booking.status !== 'searching' || booking.driverId) return null;
+      const accepted = { ...booking, status: 'accepted', driverId };
+      bookings.set(bookingId, accepted);
+      return accepted;
+    },
+    async listVehicles(customerId) {
+      return [{ id: 'vehicle-1', customerId, make: 'Honda', model: 'Civic', year: 2020 }];
+    },
+    async getVehicle(customerId, vehicleId) {
+      return vehicleId === 'vehicle-1' ? { id: vehicleId, customerId } : null;
+    },
+    async getBooking(bookingId, userId, role) {
+      const booking = bookings.get(bookingId);
+      if (!booking) return null;
+      return role === 'customer' && booking.customerId === userId ? booking : null;
+    },
+    async setPaymentIntent(bookingId, customerId, paymentIntentId) {
+      const booking = bookings.get(bookingId);
+      if (!booking || booking.customerId !== customerId) return null;
+      const updated = { ...booking, paymentIntentId, payment: { status: 'processing' } };
+      bookings.set(bookingId, updated);
+      return updated;
+    },
+  };
+
+  const auth = {
+    async getUser(token) {
+      const user = users[token];
+      return user ? { id: user.id, email: `${user.id}@example.com` } : null;
+    },
+  };
+
+  return { app: createApp({ auth, repository, stripe }), repository, bookings };
+}
+
+test('health endpoint is available without authentication', async () => {
+  const { app } = buildHarness();
+  const response = await request(app).get('/health');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, 'ok');
+});
+
+test('protected endpoints reject missing bearer tokens', async () => {
+  const { app } = buildHarness();
+  const response = await request(app).get('/api/vehicles');
+  assert.equal(response.status, 401);
+  assert.equal(response.body.error, 'Authentication required');
+});
+
+test('customer can list only their vehicles', async () => {
+  const { app } = buildHarness();
+  const response = await request(app).get('/api/vehicles').set('Authorization', 'Bearer customerToken');
+  assert.equal(response.status, 200);
+  assert.equal(response.body[0].customerId, 'customer-1');
+});
+
+test('booking price is server-owned and customer identity comes from the token', async () => {
+  const { app } = buildHarness();
+  const response = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer customerToken')
+    .send({
+      customerId: 'attacker-selected-id',
+      serviceType: 'battery_jump',
+      estimatedPrice: 1,
+      location: { address: '100 Main St', lat: 32.77, lng: -96.79 },
+    });
+
+  assert.equal(response.status, 201);
+  assert.equal(response.body.customerId, 'customer-1');
+  assert.equal(response.body.estimatedPrice, 65);
+  assert.equal(response.body.service.id, 'battery_jump');
+});
+
+test('booking cannot reference a vehicle owned by another customer', async () => {
+  const { app } = buildHarness();
+  const response = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer customerToken')
+    .send({
+      serviceType: 'towing',
+      vehicleId: 'other-customer-vehicle',
+      location: { address: '100 Main St', lat: 32.77, lng: -96.79 },
+    });
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, 'Vehicle is not available for this customer');
+});
+
+test('drivers cannot create customer bookings', async () => {
+  const { app } = buildHarness();
+  const response = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer driverToken')
+    .send({ serviceType: 'battery_jump', location: { address: '100 Main St', lat: 32.77, lng: -96.79 } });
+  assert.equal(response.status, 403);
+});
+
+test('unverified drivers cannot view dispatch requests', async () => {
+  const { app } = buildHarness();
+  const response = await request(app)
+    .get('/api/drivers/requests')
+    .set('Authorization', 'Bearer pendingDriverToken');
+  assert.equal(response.status, 403);
+  assert.equal(response.body.error, 'Verified driver account required');
+});
+
+test('verified offline drivers cannot view or accept dispatch requests', async () => {
+  const { app, bookings } = buildHarness();
+  bookings.set('available-1', { id: 'available-1', status: 'searching', customerId: 'customer-1' });
+
+  const list = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer offlineDriverToken');
+  const accept = await request(app).post('/api/bookings/available-1/accept').set('Authorization', 'Bearer offlineDriverToken');
+
+  assert.equal(list.status, 403);
+  assert.equal(accept.status, 403);
+  assert.equal(list.body.error, 'Driver must be online to receive requests');
+});
+
+test('unverified drivers cannot change an assigned booking status', async () => {
+  const { app, bookings } = buildHarness();
+  bookings.set('assigned-1', { id: 'assigned-1', status: 'accepted', driverId: 'driver-2', customerId: 'customer-1' });
+  const response = await request(app)
+    .patch('/api/bookings/assigned-1/status')
+    .set('Authorization', 'Bearer pendingDriverToken')
+    .send({ status: 'en_route' });
+  assert.equal(response.status, 403);
+  assert.equal(response.body.error, 'Verified driver account required');
+});
+
+test('booking acceptance is atomic', async () => {
+  const { app } = buildHarness();
+  const created = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer customerToken')
+    .send({ serviceType: 'towing', location: { address: '100 Main St', lat: 32.77, lng: -96.79 } });
+
+  const first = await request(app)
+    .post(`/api/bookings/${created.body.id}/accept`)
+    .set('Authorization', 'Bearer driverToken');
+  const second = await request(app)
+    .post(`/api/bookings/${created.body.id}/accept`)
+    .set('Authorization', 'Bearer driverToken');
+
+  assert.equal(first.status, 200);
+  assert.equal(first.body.driverId, 'driver-1');
+  assert.equal(second.status, 409);
+});
+
+test('payment intent amount and customer identity come from the owned booking', async () => {
+  let stripeRequest;
+  const stripe = {
+    paymentIntents: {
+      async create(input, options) {
+        stripeRequest = { input, options };
+        return { id: 'pi_test_1', client_secret: 'pi_test_1_secret', amount: input.amount, currency: input.currency, status: 'requires_payment_method' };
+      },
+    },
+  };
+  const { app, bookings } = buildHarness(stripe);
+  bookings.set('booking-paid', { id: 'booking-paid', customerId: 'customer-1', estimatedPrice: 125, status: 'completed' });
+
+  const response = await request(app)
+    .post('/api/payments/create-intent')
+    .set('Authorization', 'Bearer customerToken')
+    .send({ bookingId: 'booking-paid', amount: 1, customerId: 'attacker-selected-id' });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.amount, 12500);
+  assert.equal(stripeRequest.input.amount, 12500);
+  assert.equal(stripeRequest.input.metadata.customerId, 'customer-1');
+  assert.equal(stripeRequest.options.idempotencyKey, 'booking-booking-paid');
+  assert.equal(bookings.get('booking-paid').paymentIntentId, 'pi_test_1');
+});
+
+test('customer cannot create a payment intent for another customer booking', async () => {
+  const stripe = { paymentIntents: { async create() { throw new Error('Stripe must not be called'); } } };
+  const { app, bookings } = buildHarness(stripe);
+  bookings.set('booking-other', { id: 'booking-other', customerId: 'customer-2', estimatedPrice: 65, status: 'completed' });
+
+  const response = await request(app)
+    .post('/api/payments/create-intent')
+    .set('Authorization', 'Bearer customerToken')
+    .send({ bookingId: 'booking-other' });
+
+  assert.equal(response.status, 404);
+});
+
+test('payment intent creation requires a completed booking', async () => {
+  const stripe = { paymentIntents: { async create() { throw new Error('Stripe must not be called'); } } };
+  const { app, bookings } = buildHarness(stripe);
+  bookings.set('booking-active', { id: 'booking-active', customerId: 'customer-1', estimatedPrice: 65, status: 'searching' });
+
+  const response = await request(app)
+    .post('/api/payments/create-intent')
+    .set('Authorization', 'Bearer customerToken')
+    .send({ bookingId: 'booking-active' });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error, 'Booking must be completed before payment');
+});

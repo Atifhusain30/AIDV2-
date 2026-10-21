@@ -14,30 +14,20 @@ import {
   CreditCard,
   Star,
   Check,
-  DollarSign,
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
-
-// Tip percentage options
-const TIP_OPTIONS = [
-  { label: '10%', value: 0.1 },
-  { label: '15%', value: 0.15 },
-  { label: '20%', value: 0.2 },
-]
+import PaymentCheckout from '../payment/PaymentCheckout'
 
 export default function ReceiptModal() {
   const {
     receiptBookingId,
     bookingHistory,
     closeReceipt,
-    setTipForBooking,
     setCurrentScreen,
     updateBookingInHistory,
   } = useAppStore()
-  
-  const [selectedTipPercent, setSelectedTipPercent] = useState<number | null>(null)
-  const [customTip, setCustomTip] = useState<string>('')
-  const [showCustomTip, setShowCustomTip] = useState(false)
+  const [showCheckout, setShowCheckout] = useState(false)
+  const [paymentError, setPaymentError] = useState<string | null>(null)
   
   // Find the booking
   const booking = bookingHistory.find(b => b.id === receiptBookingId)
@@ -53,8 +43,7 @@ export default function ReceiptModal() {
     total: booking.estimatedPrice,
   }
   
-  const currentTip = booking.tipAmount || 0
-  const grandTotal = breakdown.total + currentTip
+  const grandTotal = breakdown.total
   
   // Format date/time
   const formatDateTime = (date: Date) => {
@@ -67,29 +56,31 @@ export default function ReceiptModal() {
   
   const { date, time } = formatDateTime(booking.createdAt)
   
-  // Handle tip selection
-  const handleTipSelect = (percent: number) => {
-    setSelectedTipPercent(percent)
-    setShowCustomTip(false)
-    const tipAmount = Math.round(breakdown.total * percent * 100) / 100
-    setTipForBooking(booking.id, tipAmount)
-  }
-  
-  // Handle custom tip
-  const handleCustomTipSubmit = () => {
-    const tipAmount = parseFloat(customTip)
-    if (!isNaN(tipAmount) && tipAmount >= 0) {
-      setSelectedTipPercent(null)
-      setTipForBooking(booking.id, tipAmount)
-    }
-  }
-  
   // Handle done
   const handleDone = () => {
     // Mark receipt as viewed
     updateBookingInHistory(booking.id, { receiptViewed: true })
     closeReceipt()
     setCurrentScreen('history')
+  }
+
+  if (showCheckout) {
+    return (
+      <PaymentCheckout
+        amount={booking.estimatedPrice}
+        bookingId={booking.id}
+        serviceName={booking.service.name}
+        onSuccess={(paymentId) => {
+          updateBookingInHistory(booking.id, {
+            payment: { intentId: paymentId, status: 'processing', amount: booking.estimatedPrice },
+          })
+          setPaymentError(null)
+          setShowCheckout(false)
+        }}
+        onCancel={() => setShowCheckout(false)}
+        onError={setPaymentError}
+      />
+    )
   }
   
   return (
@@ -215,13 +206,6 @@ export default function ReceiptModal() {
                   </div>
                 </div>
                 
-                {currentTip > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-emerald-400">Tip</span>
-                    <span className="text-emerald-400">+${currentTip.toFixed(2)}</span>
-                  </div>
-                )}
-                
                 <div className="border-t border-white/10 pt-2 mt-2">
                   <div className="flex justify-between">
                     <span className="text-white font-bold">Total</span>
@@ -231,121 +215,37 @@ export default function ReceiptModal() {
               </div>
             </div>
             
-            {/* Payment Method */}
+            {/* Secure Payment */}
             <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
-              <p className="text-xs text-gray-400 font-medium mb-3">PAYMENT METHOD</p>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-600/20 flex items-center justify-center">
-                    <CreditCard size={20} className="text-blue-400" />
-                  </div>
-                  <div>
-                    <p className="text-white font-medium">{booking.paymentMethodLabel || 'Visa •••• 4242'}</p>
-                    <p className="text-xs text-gray-400">Default payment</p>
-                  </div>
+              <p className="text-xs text-gray-400 font-medium mb-3">SECURE PAYMENT</p>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-600/20 flex items-center justify-center">
+                  <CreditCard size={20} className="text-blue-400" />
                 </div>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-400 bg-white/5 rounded-lg hover:bg-white/10 transition-colors"
-                >
-                  Change
-                </motion.button>
+                <div className="flex-1">
+                  <p className="text-white font-medium">
+                    {booking.payment?.status === 'succeeded'
+                      ? 'Paid securely with Stripe'
+                      : booking.payment?.status === 'processing'
+                        ? 'Payment is processing'
+                        : 'Payment required'}
+                  </p>
+                  <p className="text-xs text-gray-400">Card details are entered only in Stripe's hosted form.</p>
+                </div>
               </div>
-            </div>
-            
-            {/* Tip Section */}
-            <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 rounded-2xl p-4 border border-emerald-500/20">
-              <p className="text-xs text-emerald-400 font-medium mb-3">ADD A TIP</p>
-              
-              {/* Tip buttons */}
-              <div className="flex gap-2 mb-3">
-                {TIP_OPTIONS.map((option) => {
-                  const tipValue = Math.round(breakdown.total * option.value * 100) / 100
-                  const isSelected = selectedTipPercent === option.value && !showCustomTip
-                  
-                  return (
-                    <motion.button
-                      key={option.label}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => handleTipSelect(option.value)}
-                      className={`flex-1 py-3 rounded-xl text-center transition-all ${
-                        isSelected
-                          ? 'bg-emerald-500 text-white'
-                          : 'bg-white/5 text-gray-400 hover:bg-white/10'
-                      }`}
-                    >
-                      <p className="font-semibold">{option.label}</p>
-                      <p className="text-xs opacity-70">${tipValue.toFixed(2)}</p>
-                    </motion.button>
-                  )
-                })}
-                
+              {paymentError && <p className="mt-3 text-sm text-red-400">{paymentError}</p>}
+              {booking.payment?.status !== 'succeeded' && booking.payment?.status !== 'processing' && (
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => {
-                    setShowCustomTip(!showCustomTip)
-                    setSelectedTipPercent(null)
+                    setPaymentError(null)
+                    setShowCheckout(true)
                   }}
-                  className={`flex-1 py-3 rounded-xl text-center transition-all ${
-                    showCustomTip
-                      ? 'bg-emerald-500 text-white'
-                      : 'bg-white/5 text-gray-400 hover:bg-white/10'
-                  }`}
+                  className="w-full mt-4 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold"
                 >
-                  <p className="font-semibold">Custom</p>
-                  <p className="text-xs opacity-70">Enter amount</p>
+                  Pay securely
                 </motion.button>
-              </div>
-              
-              {/* Custom tip input */}
-              <AnimatePresence>
-                {showCustomTip && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="flex gap-2 overflow-hidden"
-                  >
-                    <div className="flex-1 relative">
-                      <DollarSign size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        type="number"
-                        value={customTip}
-                        onChange={(e) => setCustomTip(e.target.value)}
-                        placeholder="0.00"
-                        min="0"
-                        step="0.01"
-                        className="w-full pl-8 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 outline-none focus:border-emerald-500/50"
-                      />
-                    </div>
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={handleCustomTipSubmit}
-                      className="px-4 py-2.5 bg-emerald-500 text-white font-medium rounded-xl"
-                    >
-                      Apply
-                    </motion.button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              
-              {/* No tip option */}
-              <motion.button
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => {
-                  setSelectedTipPercent(null)
-                  setShowCustomTip(false)
-                  setTipForBooking(booking.id, 0)
-                }}
-                className="w-full mt-2 py-2 text-sm text-gray-400 hover:text-white transition-colors"
-              >
-                No tip
-              </motion.button>
+              )}
             </div>
             
             {/* Done Button */}

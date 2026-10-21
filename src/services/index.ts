@@ -26,7 +26,7 @@ export {
 export {
   getStripe,
   createPaymentIntent,
-  processDemoPayment,
+  confirmPayment,
   formatAmount,
   dollarsToCents
 } from './payment'
@@ -35,7 +35,6 @@ export {
   pickDocument,
   pickImage,
   uploadDocument,
-  storeDocumentLocally,
   getStoredDocuments,
   validateDocumentRequirements,
   DOCUMENT_TYPE_LABELS

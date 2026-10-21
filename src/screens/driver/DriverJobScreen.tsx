@@ -7,8 +7,6 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   MapPin, 
-  Phone, 
-  MessageSquare, 
   Navigation, 
   Check, 
   Clock,
@@ -25,7 +23,6 @@ import type { Booking, BookingStatus } from '../../types'
 
 interface DriverJobScreenProps {
   onBack: () => void
-  onOpenChat: () => void
 }
 
 const STATUS_STEPS: { status: BookingStatus; label: string; icon: React.ElementType }[] = [
@@ -36,7 +33,7 @@ const STATUS_STEPS: { status: BookingStatus; label: string; icon: React.ElementT
   { status: 'completed', label: 'Completed', icon: Flag }
 ]
 
-export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenProps) {
+export default function DriverJobScreen({ onBack }: DriverJobScreenProps) {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
 
@@ -157,12 +154,7 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
           <X size={24} />
         </button>
         <h1 className="text-lg font-bold text-white">Active Job</h1>
-        <button 
-          onClick={onOpenChat}
-          className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center relative"
-        >
-          <MessageSquare size={20} className="text-gray-400" />
-        </button>
+        <span className="w-10" aria-hidden="true" />
       </div>
 
       {/* Job Card */}
@@ -186,9 +178,7 @@ export default function DriverJobScreen({ onBack, onOpenChat }: DriverJobScreenP
             <p className="text-white font-medium">Customer</p>
             <p className="text-gray-500 text-sm">{activeBooking.location.address}</p>
           </div>
-          <button className="w-10 h-10 rounded-full bg-[#dfff54]/20 flex items-center justify-center">
-            <Phone size={18} className="text-emerald-400" />
-          </button>
+
         </div>
 
         {/* Distance & ETA */}

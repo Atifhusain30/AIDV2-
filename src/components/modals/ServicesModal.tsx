@@ -124,28 +124,23 @@ export default function ServicesModal() {
     }
 
     setIsSubmitting(true)
-    // Simulate booking delay
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // Get selected service
-    const selectedService = services.find(s => s.id === serviceFormData.selectedService)
-    
-    // Create booking via service
-    const booking = bookingService.createBookingFromServiceRequest({
-      service: selectedService || services[0],
-      notes: serviceFormData.problemDescription || undefined,
-      locationLabel: userLocationLabel,
-      locationCoords: {
-        lat: userCoords?.lat ?? userLocation.lat,
-        lng: userCoords?.lng ?? userLocation.lng,
-      },
-    })
-    
-    // Start booking (sets active, adds to history, creates chat thread)
-    bookingService.startBooking(booking)
-    
-    setIsSubmitting(false)
-    setShowSuccess(true)
+    try {
+      const selectedService = services.find(s => s.id === serviceFormData.selectedService)
+      await bookingService.requestAndStartBooking({
+        service: selectedService || services[0],
+        notes: serviceFormData.problemDescription || undefined,
+        locationLabel: userLocationLabel,
+        locationCoords: {
+          lat: userCoords?.lat ?? userLocation.lat,
+          lng: userCoords?.lng ?? userLocation.lng,
+        },
+      })
+      setShowSuccess(true)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to request service.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const filteredServices = services.filter(s => 

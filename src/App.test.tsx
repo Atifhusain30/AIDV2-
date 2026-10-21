@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import App from './App'
 import { useAuthStore } from './store/useAuthStore'
 import { initNotifications } from './lib/notifications'
+import { apiService } from './services/api'
+import { useDriverStore } from './store/useDriverStore'
 
 vi.mock('./lib/notifications', () => ({
   initNotifications: vi.fn(),
@@ -11,6 +13,14 @@ vi.mock('./lib/notifications', () => ({
 
 vi.mock('./lib/leafletFix', () => ({
   applyLeafletIconFix: vi.fn(),
+}))
+
+vi.mock('./services/api', () => ({
+  apiService: {
+    getProfile: vi.fn(),
+    getDriverActiveBooking: vi.fn(),
+    getServiceRequests: vi.fn(),
+  },
 }))
 
 afterEach(() => cleanup())
@@ -64,11 +74,38 @@ describe('first-run flow', () => {
     expect(screen.getByRole('alert').textContent).toContain('Enter your email address first.')
   })
 
-  it('initializes booking notifications after entering an authenticated customer session', async () => {
+  it('does not advertise a guest request flow that cannot reach the authenticated API', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /Get roadside help/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Explore with a guest account' }))
 
-    await waitFor(() => expect(initNotifications).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('button', { name: 'Explore with a guest account' })).toBeNull()
+  })
+
+  it('hydrates verified driver status and online state from the authoritative profile', async () => {
+    vi.mocked(apiService.getProfile).mockResolvedValue({
+      success: true,
+      data: {
+        id: 'driver-1', role: 'driver', status: 'active', email: 'driver@aid.test', firstName: 'Alex', lastName: 'Rivera', phone: '',
+        createdAt: '2026-01-01T00:00:00.000Z', verificationStatus: 'verified', isVerified: true, isOnline: true,
+        rating: 4.9, totalJobs: 18, specializations: [],
+      },
+    })
+    vi.mocked(apiService.getDriverActiveBooking).mockResolvedValue({ success: true, data: undefined })
+    vi.mocked(apiService.getServiceRequests).mockResolvedValue({ success: true, data: [] })
+    useAuthStore.setState({
+      isAuthenticated: true,
+      token: 'managed-token',
+      user: {
+        id: 'driver-1', email: 'driver@aid.test', phone: '', firstName: 'Alex', lastName: 'Rivera', role: 'driver', createdAt: new Date(),
+        isOnline: false, isVerified: false, verificationStatus: 'pending', documents: [], rating: 0, totalJobs: 0, specializations: [],
+      },
+    })
+    useDriverStore.setState({ isOnline: false, incomingRequests: [], activeBooking: null, documents: [] })
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Go offline' })).toBeTruthy())
+    expect((useAuthStore.getState().user as { verificationStatus?: string }).verificationStatus).toBe('verified')
+    expect(useDriverStore.getState().isOnline).toBe(true)
   })
 })

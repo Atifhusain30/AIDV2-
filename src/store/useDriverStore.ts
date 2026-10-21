@@ -4,7 +4,8 @@
  */
 
 import { create } from 'zustand'
-import type { ServiceRequest, Booking, Location, Driver, DriverDocument } from '../types'
+import type { ServiceRequest, Booking, Location, DriverDocument } from '../types'
+import { useAuthStore } from './useAuthStore'
 import { apiService } from '../services/api'
 import { documentService } from '../services/documents'
 
@@ -29,9 +30,9 @@ interface DriverStore {
   updateDriverLocationForBooking: () => Promise<void>
   
   // Document management
-  fetchDocuments: () => void
+  fetchDocuments: () => Promise<void>
   addDocument: (document: DriverDocument) => void
-  removeDocument: (documentId: string) => void
+  removeDocument: (documentId: string) => Promise<void>
   
   // Reset
   reset: () => void
@@ -52,13 +53,17 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
 
   // Set online/offline status
   setOnlineStatus: async (isOnline) => {
-    const userStr = localStorage.getItem('user')
-    if (!userStr) return
-    
-    const user = JSON.parse(userStr) as Driver
-    await apiService.updateDriverOnlineStatus(user.id, isOnline)
-    
-    set({ isOnline })
+    const user = useAuthStore.getState().user
+    if (!user || user.role !== 'driver') {
+      set({ error: 'Driver session required' })
+      return
+    }
+    const result = await apiService.updateDriverOnlineStatus(user.id, isOnline)
+    if (!result.success) {
+      set({ error: result.error })
+      return
+    }
+    set({ isOnline, error: null })
     
     // If going online, start fetching requests
     if (isOnline) {
@@ -88,10 +93,8 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
 
   // Accept a service request
   acceptRequest: async (requestId) => {
-    const userStr = localStorage.getItem('user')
-    if (!userStr) return false
-    
-    const user = JSON.parse(userStr) as Driver
+    const user = useAuthStore.getState().user
+    if (!user || user.role !== 'driver') return false
     
     set({ isLoading: true })
     
@@ -159,9 +162,13 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
   },
 
   // Fetch stored documents
-  fetchDocuments: () => {
-    const docs = documentService.getStoredDocuments()
-    set({ documents: docs })
+  fetchDocuments: async () => {
+    try {
+      const docs = await documentService.getStoredDocuments()
+      set({ documents: docs, error: null })
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unable to load documents' })
+    }
   },
 
   // Add a new document
@@ -170,9 +177,13 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
   },
 
   // Remove a document
-  removeDocument: (documentId) => {
-    documentService.deleteStoredDocument(documentId)
-    set({ documents: get().documents.filter(d => d.id !== documentId) })
+  removeDocument: async (documentId) => {
+    try {
+      await documentService.deleteStoredDocument(documentId)
+      set({ documents: get().documents.filter(d => d.id !== documentId), error: null })
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unable to remove document' })
+    }
   },
 
   // Reset store

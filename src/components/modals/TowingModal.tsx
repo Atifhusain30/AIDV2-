@@ -13,8 +13,8 @@ import {
   Route
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
-import { Booking } from '../../types'
 import { services } from '../../data/mockData'
+import * as bookingService from '../../services/bookingService'
 import { calculateTowingEstimate } from '../../utils/estimates'
 import Modal, { 
   StepIndicator, 
@@ -50,8 +50,6 @@ export default function TowingModal() {
     showSuccess,
     setShowSuccess,
     userLocation,
-    setActiveBooking,
-    addToBookingHistory,
     setCurrentScreen,
   } = useAppStore()
 
@@ -96,36 +94,28 @@ export default function TowingModal() {
 
   const handleSubmit = async () => {
     setIsSubmitting(true)
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // Create the booking object for towing
-    const towingService = services.find(s => s.id === 'towing') || services[4]
-    const booking: Booking = {
-      id: crypto.randomUUID(),
-      customerId: 'demo_user',
-      service: towingService,
-      status: 'searching',
-      location: {
-        address: towingFormData.pickupAddress || 'Current Location',
-        lat: towingFormData.pickupCoords?.lat || userLocation.lat,
-        lng: towingFormData.pickupCoords?.lng || userLocation.lng,
-      },
-      dropoffLocation: towingFormData.dropoffAddress ? {
-        address: towingFormData.dropoffAddress,
-        lat: towingFormData.dropoffCoords?.lat || userLocation.lat,
-        lng: towingFormData.dropoffCoords?.lng || userLocation.lng,
-      } : undefined,
-      estimatedPrice: estimate?.total || towingService.basePrice,
-      notes: towingFormData.specialRequirements || undefined,
-      createdAt: new Date(),
+    try {
+      const towingService = services.find(s => s.id === 'towing') || services[4]
+      await bookingService.requestAndStartBooking({
+        service: towingService,
+        notes: towingFormData.specialRequirements || undefined,
+        locationLabel: towingFormData.pickupAddress || 'Current Location',
+        locationCoords: {
+          lat: towingFormData.pickupCoords?.lat ?? userLocation.lat,
+          lng: towingFormData.pickupCoords?.lng ?? userLocation.lng,
+        },
+        dropoffLocation: towingFormData.dropoffAddress ? {
+          address: towingFormData.dropoffAddress,
+          lat: towingFormData.dropoffCoords?.lat ?? userLocation.lat,
+          lng: towingFormData.dropoffCoords?.lng ?? userLocation.lng,
+        } : undefined,
+      })
+      setShowSuccess(true)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to request towing.')
+    } finally {
+      setIsSubmitting(false)
     }
-    
-    // Save booking to store
-    setActiveBooking(booking)
-    addToBookingHistory(booking)
-    
-    setIsSubmitting(false)
-    setShowSuccess(true)
   }
 
   return (

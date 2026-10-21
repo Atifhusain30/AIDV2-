@@ -129,7 +129,7 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
               <article className="request-card" key={request.id}>
                 <div className="request-card__top">
                   <span className="request-card__service"><Truck size={19} /></span>
-                  <div><strong>{request.service.name}</strong><p>{request.customerName}</p></div>
+                  <div><strong>{request.service.name}</strong><p>{request.customerName || 'Nearby customer'}</p></div>
                   <span className="request-card__price">${request.estimatedPrice}</span>
                 </div>
                 <p className="request-card__location"><MapPin size={15} /> {request.location.address}</p>

@@ -62,8 +62,8 @@ export default function DriverOnboardingScreen({ onComplete, onSkip }: DriverOnb
         return
       }
 
-      // Store locally (in production, this would upload to backend)
-      const document = documentService.storeDocumentLocally(file, documentType)
+      if (!user) throw new Error('Driver session required')
+      const document = await documentService.uploadDocument(file, documentType, user.id)
       addDocument(document)
       
       // Auto-advance to next step

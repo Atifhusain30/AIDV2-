@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
+import { apiService } from '../services/api'
 
 const emptyVehicle = { make: '', model: '', year: '', color: '', plate: '' }
 
@@ -29,30 +30,61 @@ export default function ProfileScreen() {
     addVehicle,
     removeVehicle,
     setActiveVehicle,
+    setVehicles,
     setActiveModal,
     signOut,
   } = useAppStore()
-  const { user: authUser, isAuthenticated, logout } = useAuthStore()
+  const { user: authUser, isAuthenticated, token, logout } = useAuthStore()
   const [showVehicleForm, setShowVehicleForm] = useState(false)
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle)
+
+  useEffect(() => {
+    if (!token) return
+    void apiService.listVehicles().then((result) => {
+      if (result.success && result.data) setVehicles(result.data)
+    })
+  }, [token, setVehicles])
 
   const name = profile?.name || (authUser ? `${authUser.firstName} ${authUser.lastName}`.trim() : '')
   const email = profile?.email || authUser?.email
   const phone = profile?.phone || authUser?.phone
 
-  const submitVehicle = (event: FormEvent) => {
+  const submitVehicle = async (event: FormEvent) => {
     event.preventDefault()
     const year = Number(vehicleForm.year)
     if (!vehicleForm.make.trim() || !vehicleForm.model.trim() || !year) return
-    addVehicle({
+    const input = {
       make: vehicleForm.make.trim(),
       model: vehicleForm.model.trim(),
       year,
       color: vehicleForm.color.trim() || 'Not specified',
       plate: vehicleForm.plate.trim() || 'Not added',
-    })
+    }
+    if (token) {
+      const result = await apiService.createVehicle(input)
+      if (!result.success || !result.data) {
+        window.alert(result.error || 'Unable to save vehicle.')
+        return
+      }
+      setVehicles([result.data, ...vehicles])
+    } else {
+      addVehicle(input)
+    }
     setVehicleForm(emptyVehicle)
     setShowVehicleForm(false)
+  }
+
+  const handleRemoveVehicle = async (vehicleId: string) => {
+    if (token) {
+      const result = await apiService.deleteVehicle(vehicleId)
+      if (!result.success) {
+        window.alert(result.error || 'Unable to remove vehicle.')
+        return
+      }
+      setVehicles(vehicles.filter((vehicle) => vehicle.id !== vehicleId))
+      return
+    }
+    removeVehicle(vehicleId)
   }
 
   const handleLogout = () => {
@@ -83,7 +115,7 @@ export default function ProfileScreen() {
                     <div><strong>{vehicle.year} {vehicle.make} {vehicle.model}</strong><small>{vehicle.color} · {vehicle.plate}</small></div>
                     {active ? <span className="account-vehicle__active"><Check size={14} /> ACTIVE</span> : <ChevronRight size={18} />}
                   </button>
-                  <button type="button" className="account-vehicle__remove" aria-label={`Remove ${vehicle.make} ${vehicle.model}`} onClick={() => removeVehicle(vehicle.id)}><Trash2 size={16} /></button>
+                  <button type="button" className="account-vehicle__remove" aria-label={`Remove ${vehicle.make} ${vehicle.model}`} onClick={() => void handleRemoveVehicle(vehicle.id)}><Trash2 size={16} /></button>
                 </div>
               )
             })}

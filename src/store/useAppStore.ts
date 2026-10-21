@@ -121,6 +121,7 @@ interface AppState {
   updateVehicle: (id: string, patch: Partial<Omit<UserVehicle, 'id' | 'createdAt'>>) => void
   removeVehicle: (id: string) => void
   setActiveVehicle: (id: string) => void
+  setVehicles: (vehicles: UserVehicle[]) => void
   
   // User & Location (legacy)
   userLocation: { lat: number; lng: number }
@@ -363,6 +364,12 @@ export const useAppStore = create<AppState>()(
         }
       }),
       setActiveVehicle: (id) => set({ activeVehicleId: id }),
+      setVehicles: (vehicles) => set((state) => ({
+        vehicles,
+        activeVehicleId: vehicles.some((vehicle) => vehicle.id === state.activeVehicleId)
+          ? state.activeVehicleId
+          : vehicles[0]?.id ?? null,
+      })),
       
       // User & Location (legacy)
       userLocation: { lat: 32.7767, lng: -96.7970 },

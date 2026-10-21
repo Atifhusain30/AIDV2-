@@ -9,6 +9,7 @@ import { useAppStore } from '../store/useAppStore'
 import { Booking, BookingStatus, Service, PriceBreakdown } from '../types'
 import { notifyBookingUpdate, getNotificationTemplate } from '../lib/notifications'
 import * as chatService from './chatService'
+import { apiService } from './api'
 
 // Types for booking creation input
 export interface CreateBookingInput {
@@ -18,62 +19,6 @@ export interface CreateBookingInput {
   locationCoords: { lat: number; lng: number }
   priceBreakdown?: PriceBreakdown
   paymentMethodLabel?: string
-}
-
-/**
- * Create a new booking from service request input
- */
-export function createBookingFromServiceRequest(input: CreateBookingInput): Booking {
-  const { service, notes, locationLabel, locationCoords, priceBreakdown, paymentMethodLabel } = input
-  
-  // Generate price breakdown if not provided
-  const breakdown = priceBreakdown || generatePriceBreakdown(service.basePrice || 50)
-  
-  // Get vehicle snapshot if user has an active vehicle
-  const { vehicles, activeVehicleId, user } = useAppStore.getState()
-  const activeVehicle = vehicles.find(v => v.id === activeVehicleId)
-  
-  const booking: Booking = {
-    id: crypto.randomUUID(),
-    customerId: user?.id || 'demo_user',
-    service,
-    status: 'searching',
-    location: {
-      address: locationLabel,
-      lat: locationCoords.lat,
-      lng: locationCoords.lng,
-    },
-    // Attach vehicle snapshot if available
-    vehicle: activeVehicle ? {
-      vehicleId: activeVehicle.id,
-      label: `${activeVehicle.year} ${activeVehicle.make} ${activeVehicle.model}`,
-      plate: activeVehicle.plate || undefined,
-    } : undefined,
-    estimatedPrice: breakdown.total,
-    priceBreakdown: breakdown,
-    paymentMethodLabel: paymentMethodLabel || 'Visa •••• 4242',
-    notes: notes || undefined,
-    createdAt: new Date(),
-  }
-  
-  return booking
-}
-
-/**
- * Generate a default price breakdown
- */
-function generatePriceBreakdown(basePrice: number): PriceBreakdown {
-  const baseFee = Math.round(basePrice * 0.6 * 100) / 100
-  const distanceFee = Math.round((10 + Math.random() * 20) * 100) / 100
-  const surgeFee = Math.random() > 0.7 ? Math.round(Math.random() * 10 * 100) / 100 : 0
-  const total = Math.round((baseFee + distanceFee + surgeFee) * 100) / 100
-  
-  return {
-    baseFee,
-    distanceFee,
-    surgeFee: surgeFee > 0 ? surgeFee : undefined,
-    total,
-  }
 }
 
 /**
@@ -90,6 +35,46 @@ export function startBooking(booking: Booking): void {
   
   // Initialize chat thread with system message
   chatService.appendSystemMessage(booking.id, 'Searching for a provider near you...', 'status_update')
+}
+
+/** Mirror an authoritative managed booking update into customer UI state. */
+export function reconcileManagedBooking(booking: Booking): void {
+  const store = useAppStore.getState()
+  store.updateBookingInHistory(booking.id, booking)
+  if (booking.status === 'completed') {
+    store.openReceipt(booking.id)
+    if (store.activeBooking?.id === booking.id) store.clearActiveBooking()
+    return
+  }
+  if (booking.status === 'cancelled') {
+    if (store.activeBooking?.id === booking.id) store.clearActiveBooking()
+    return
+  }
+  store.setActiveBooking(booking)
+}
+
+/**
+ * Persist a booking through the authenticated API, then mirror it into the UI store.
+ * The backend derives customer identity and pricing from the secure session and service catalog.
+ */
+export async function requestAndStartBooking(
+  input: CreateBookingInput & { dropoffLocation?: { address: string; lat: number; lng: number } }
+): Promise<Booking> {
+  const { activeVehicleId } = useAppStore.getState()
+  const result = await apiService.createBooking({
+    serviceType: input.service.id,
+    vehicleId: activeVehicleId,
+    location: {
+      address: input.locationLabel,
+      lat: input.locationCoords.lat,
+      lng: input.locationCoords.lng,
+    },
+    dropoffLocation: input.dropoffLocation,
+    notes: input.notes,
+  })
+  if (!result.success || !result.data) throw new Error(result.error || 'Unable to request service.')
+  startBooking(result.data)
+  return result.data
 }
 
 /**

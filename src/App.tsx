@@ -11,6 +11,7 @@ import { useAuthStore } from './store/useAuthStore'
 import { useDriverStore } from './store/useDriverStore'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
 import { applyLeafletIconFix } from './lib/leafletFix'
+import { apiService } from './services/api'
 
 // Customer Screens
 import HomeScreen from './screens/HomeScreen'
@@ -28,9 +29,6 @@ import {
   DriverOnboardingScreen,
   DriverJobScreen 
 } from './screens/driver'
-
-// Payment
-import { PaymentCheckout } from './components/payment'
 
 // App modes
 type AppMode = 'select' | 'customer' | 'driver'
@@ -220,7 +218,6 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
         >
           <DriverJobScreen
             onBack={() => setCurrentView('home')}
-            onOpenChat={() => {/* TODO: Implement driver chat */}}
           />
         </motion.div>
       )}
@@ -266,7 +263,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
 // Main App Component
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('select')
-  const { isAuthenticated, user, logout } = useAuthStore()
+  const { isAuthenticated, user, token, logout, restoreSession, updateUser } = useAuthStore()
 
   // Initialize app features on startup
   useEffect(() => {
@@ -280,7 +277,8 @@ function App() {
       console.log('[App] Notification tapped for booking:', bookingId)
       useAppStore.getState().openBookingDetailFromNotification(bookingId)
     })
-  }, [])
+    void restoreSession()
+  }, [restoreSession])
 
   // Check for existing session
   useEffect(() => {
@@ -291,6 +289,62 @@ function App() {
       void initNotifications()
     }
   }, [isAuthenticated, user])
+
+  // Rehydrate the authoritative server profile and marketplace state after a managed session is restored.
+  useEffect(() => {
+    if (!token || !user) return
+    let cancelled = false
+
+    void (async () => {
+      const profileResult = await apiService.getProfile()
+      if (cancelled) return
+
+      const role = profileResult.success && profileResult.data ? profileResult.data.role : user.role
+      if (profileResult.success && profileResult.data) {
+        const profile = profileResult.data
+        const baseProfile = {
+          id: profile.id,
+          email: profile.email,
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          phone: profile.phone,
+          createdAt: new Date(profile.createdAt),
+        }
+        if (profile.role === 'driver') {
+          updateUser({
+            ...baseProfile,
+            role: 'driver',
+            isVerified: profile.isVerified,
+            verificationStatus: profile.verificationStatus,
+            isOnline: profile.isOnline,
+            rating: profile.rating,
+            totalJobs: profile.totalJobs,
+            specializations: profile.specializations,
+          })
+          useDriverStore.setState({ isOnline: profile.isOnline })
+        } else {
+          updateUser({ ...baseProfile, role: 'customer' })
+        }
+        setAppMode(profile.role)
+      }
+
+      if (role === 'driver') {
+        await useDriverStore.getState().fetchActiveBooking(user.id)
+        return
+      }
+
+      const [history, active] = await Promise.all([apiService.listBookings(), apiService.getActiveBooking()])
+      if (cancelled) return
+      const store = useAppStore.getState()
+      if (history.success && history.data) {
+        store.clearBookings()
+        history.data.slice().reverse().forEach((booking) => store.addToBookingHistory(booking))
+      }
+      if (active.success) store.setActiveBooking(active.data || null)
+    })()
+
+    return () => { cancelled = true }
+  }, [token, user?.id, updateUser])
 
   const handleLogout = () => {
     logout()
