@@ -20,6 +20,7 @@ vi.mock('./services/api', () => ({
     getProfile: vi.fn(),
     getDriverActiveBooking: vi.fn(),
     getServiceRequests: vi.fn(),
+    listBookings: vi.fn(async () => ({ success: true, data: [] })),
   },
 }))
 

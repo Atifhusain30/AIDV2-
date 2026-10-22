@@ -141,19 +141,6 @@ export interface DriverVehicle {
   equipmentType: DriverEquipmentType | ''
 }
 
-// Mechanic (legacy, alias for Driver)
-export interface Mechanic {
-  id: string
-  name: string
-  initials: string
-  rating: number
-  totalJobs: number
-  specializations: ServiceType[]
-  location: Location
-  eta: number
-  isOnline: boolean
-}
-
 // Customer Vehicle
 export interface Vehicle {
   id: string
@@ -248,7 +235,6 @@ export interface Booking {
   driverId?: string
   service: Service
   status: BookingStatus
-  mechanic?: Mechanic  // Legacy
   vehicle?: BookingVehicleSnapshot  // Vehicle snapshot at time of booking
   location: {
     address: string
@@ -262,7 +248,6 @@ export interface Booking {
   }
   estimatedPrice: number
   finalPrice?: number
-  estimatedArrival?: number
   payment?: {
     intentId: string
     status: PaymentStatus
@@ -275,10 +260,6 @@ export interface Booking {
   driver?: JobDriver
   /** Customer contact, shown to the driver once accepted. */
   customer?: JobContact
-  // Provider tracking coordinates (for live tracking)
-  providerCoords?: { lat: number; lng: number }
-  // Live ETA in minutes (updates during tracking)
-  providerETA?: number
   // Price breakdown for receipt
   priceBreakdown?: PriceBreakdown
   // Payment method display label (e.g., "Visa •••• 4242")
@@ -315,29 +296,6 @@ export interface ServiceRequest {
   expiresAt: Date // Request expires if not accepted
   /** Estimated road miles from the driver's current location (server-computed). */
   distanceMiles?: number
-}
-
-// Chat Message
-export interface Message {
-  id: string
-  bookingId: string
-  senderId: string
-  senderType: 'customer' | 'driver' | 'system'
-  content: string
-  timestamp: Date
-  isRead: boolean
-}
-
-// Notification
-export interface Notification {
-  id: string
-  userId: string
-  type: 'booking' | 'promo' | 'system' | 'driver_request'
-  title: string
-  body: string
-  data?: Record<string, unknown>
-  timestamp: Date
-  isRead: boolean
 }
 
 // Auth State

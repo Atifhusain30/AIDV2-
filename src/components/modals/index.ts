@@ -1,2 +1,1 @@
-export { default as HistoryModal } from './HistoryModal'
 export { default as BookingDetailModal } from './BookingDetailModal'

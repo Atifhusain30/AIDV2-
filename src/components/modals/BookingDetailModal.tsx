@@ -2,9 +2,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   X,
   MapPin,
-  Clock,
   Star,
-  MessageCircle,
+  Navigation,
   RefreshCw,
   Calendar,
   FileText,
@@ -152,7 +151,7 @@ export default function BookingDetailModal() {
     selectedBookingId,
     bookingHistory,
     closeBookingDetail,
-    setActiveBooking,
+    activeBooking,
     setCurrentScreen,
     rebookFromHistory,
     openReceipt,
@@ -169,20 +168,17 @@ export default function BookingDetailModal() {
     closeBookingDetail()
   }
 
-  // Resume Chat action
-  const handleResumeChat = () => {
-    if (!booking) return
-    setActiveBooking(booking)
+  // Open the live status screen for the request that is in progress right now
+  const handleTrack = () => {
     closeBookingDetail()
     setCurrentScreen('chat')
   }
 
-  // Rebook action
+  // Rebook action (opens the request sheet on Home)
   const handleRebook = () => {
     if (!booking) return
     rebookFromHistory(booking.id)
     closeBookingDetail()
-    setCurrentScreen('chat')
   }
 
   // View Receipt action (for completed bookings)
@@ -229,6 +225,9 @@ export default function BookingDetailModal() {
   const ServiceIcon = serviceIcons[booking.service.id] || Wrench
   const statusInfo = statusConfig[booking.status]
   const isTerminal = booking.status === 'cancelled' || booking.status === 'completed'
+  const isActiveRequest = !isTerminal && activeBooking?.id === booking.id
+  const driver = booking.driver
+  const driverVehicle = driver?.vehicle ? [driver.vehicle.color, driver.vehicle.make, driver.vehicle.model].filter(Boolean).join(' ') : ''
 
   return (
     <AnimatePresence>
@@ -285,30 +284,25 @@ export default function BookingDetailModal() {
               </div>
             </div>
 
-            {/* Provider Card (if assigned) */}
-            {booking.mechanic && (
+            {/* Driver (from the server, once one accepted) */}
+            {driver && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 rounded-2xl p-4 border border-emerald-500/20"
+                className="bg-white/5 rounded-2xl p-4 border border-white/10"
               >
-                <p className="text-xs text-emerald-400 font-medium mb-3">PROVIDER</p>
+                <p className="text-xs text-gray-400 font-medium mb-3">DRIVER</p>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white font-semibold">
-                    {booking.mechanic.initials}
+                  <div className="w-12 h-12 rounded-full bg-violet-500/20 flex items-center justify-center text-violet-300 font-semibold">
+                    {(driver.firstName || driver.name || 'D').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1">
-                    <p className="text-white font-medium">{booking.mechanic.name}</p>
-                    <div className="flex items-center gap-3 mt-1">
-                      <div className="flex items-center gap-1">
-                        <Star size={12} className="text-amber-400 fill-amber-400" />
-                        <span className="text-sm text-gray-400">{booking.mechanic.rating.toFixed(1)}</span>
-                      </div>
-                      {(booking.providerETA !== undefined || booking.mechanic.eta) && !isTerminal && (
-                        <div className="flex items-center gap-1">
-                          <Clock size={12} className="text-emerald-400" />
-                          <span className="text-sm text-emerald-400">{booking.providerETA ?? booking.mechanic.eta} min</span>
-                        </div>
+                    <p className="text-white font-medium">{driver.name || driver.firstName}</p>
+                    <div className="flex items-center gap-1 mt-1 text-sm text-gray-400">
+                      {driver.totalJobs > 0 && driver.rating > 0 ? (
+                        <><Star size={12} className="text-amber-400 fill-amber-400" /><span>{driver.rating.toFixed(1)} · {driver.totalJobs} {driver.totalJobs === 1 ? 'job' : 'jobs'}</span></>
+                      ) : (
+                        <span>{driverVehicle || 'New on AID'}</span>
                       )}
                     </div>
                   </div>
@@ -400,7 +394,7 @@ export default function BookingDetailModal() {
 
           {/* Action Buttons */}
           <div className="p-4 border-t border-white/10 space-y-3">
-            {/* Primary: View Receipt (for completed) OR Resume Chat */}
+            {/* Primary: View Receipt (completed) or live status (the request in progress) */}
             {booking.status === 'completed' ? (
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -411,17 +405,17 @@ export default function BookingDetailModal() {
                 <Receipt size={18} strokeWidth={2} />
                 View Receipt
               </motion.button>
-            ) : (
+            ) : isActiveRequest ? (
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={handleResumeChat}
+                onClick={handleTrack}
                 className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/20"
               >
-                <MessageCircle size={18} strokeWidth={2} />
-                {isTerminal ? 'View Chat' : 'Resume Chat'}
+                <Navigation size={18} strokeWidth={2} />
+                View live status
               </motion.button>
-            )}
+            ) : null}
 
             {/* Secondary actions row */}
             <div className="flex gap-3">

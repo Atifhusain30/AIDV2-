@@ -12,11 +12,11 @@ import {
   Calendar,
   Clock,
   CreditCard,
-  Star,
   Check,
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import PaymentCheckout from '../payment/PaymentCheckout'
+import { formatPrice } from '../../lib/money'
 
 export default function ReceiptModal() {
   const {
@@ -35,16 +35,12 @@ export default function ReceiptModal() {
   // If no receipt to show, return null
   if (!receiptBookingId || !booking) return null
   
-  // Calculate totals
-  const breakdown = booking.priceBreakdown || {
-    baseFee: booking.estimatedPrice * 0.6,
-    distanceFee: booking.estimatedPrice * 0.35,
-    surgeFee: booking.estimatedPrice * 0.05,
-    total: booking.estimatedPrice,
-  }
-  
-  const grandTotal = breakdown.total
-  
+  // Only amounts the server reported: the itemised breakdown when there is one, otherwise the total.
+  const breakdown = booking.priceBreakdown
+  const isFinal = booking.finalPrice != null
+  const grandTotal = booking.finalPrice ?? breakdown?.total ?? booking.estimatedPrice
+  const driverName = booking.driver?.name || booking.driver?.firstName
+
   // Format date/time
   const formatDateTime = (date: Date) => {
     const d = new Date(date)
@@ -67,12 +63,12 @@ export default function ReceiptModal() {
   if (showCheckout) {
     return (
       <PaymentCheckout
-        amount={booking.estimatedPrice}
+        amount={grandTotal}
         bookingId={booking.id}
         serviceName={booking.service.name}
         onSuccess={(paymentId) => {
           updateBookingInHistory(booking.id, {
-            payment: { intentId: paymentId, status: 'processing', amount: booking.estimatedPrice },
+            payment: { intentId: paymentId, status: 'processing', amount: grandTotal },
           })
           setPaymentError(null)
           setShowCheckout(false)
@@ -134,24 +130,20 @@ export default function ReceiptModal() {
                     <span className="text-sm text-emerald-400">Completed</span>
                   </div>
                 </div>
-                {booking.mechanic && (
+                {driverName && (
                   <div className="flex items-center gap-2">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-sm font-semibold text-white">
-                      {booking.mechanic.initials}
+                    <div className="w-10 h-10 rounded-full bg-violet-500/20 flex items-center justify-center text-sm font-semibold text-violet-300">
+                      {driverName.charAt(0).toUpperCase()}
                     </div>
                   </div>
                 )}
               </div>
-              
-              {/* Provider info */}
-              {booking.mechanic && (
+
+              {/* Driver (from the server) */}
+              {driverName && (
                 <div className="flex items-center gap-2 mb-3 pb-3 border-b border-white/10">
-                  <span className="text-gray-400 text-sm">Provider:</span>
-                  <span className="text-white text-sm font-medium">{booking.mechanic.name}</span>
-                  <div className="flex items-center gap-1 ml-auto">
-                    <Star size={12} className="text-amber-400 fill-amber-400" />
-                    <span className="text-sm text-gray-400">{booking.mechanic.rating}</span>
-                  </div>
+                  <span className="text-gray-400 text-sm">Driver:</span>
+                  <span className="text-white text-sm font-medium">{driverName}</span>
                 </div>
               )}
               
@@ -184,32 +176,30 @@ export default function ReceiptModal() {
               <p className="text-xs text-gray-400 font-medium mb-3">PRICE BREAKDOWN</p>
               
               <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Base fee</span>
-                  <span className="text-white">${breakdown.baseFee.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Distance fee</span>
-                  <span className="text-white">${breakdown.distanceFee.toFixed(2)}</span>
-                </div>
-                {breakdown.surgeFee && breakdown.surgeFee > 0 && (
+                {breakdown ? (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-400">Base fee</span>
+                      <span className="text-white">{formatPrice(breakdown.baseFee)}</span>
+                    </div>
+                    {breakdown.distanceFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">Distance fee</span>
+                        <span className="text-white">{formatPrice(breakdown.distanceFee)}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-400">Surge pricing</span>
-                    <span className="text-white">${breakdown.surgeFee.toFixed(2)}</span>
+                    <span className="text-gray-400">{booking.service.name}</span>
+                    <span className="text-white">{formatPrice(grandTotal)}</span>
                   </div>
                 )}
-                
+
                 <div className="border-t border-white/10 pt-2 mt-2">
                   <div className="flex justify-between">
-                    <span className="text-white font-medium">Subtotal</span>
-                    <span className="text-white font-semibold">${breakdown.total.toFixed(2)}</span>
-                  </div>
-                </div>
-                
-                <div className="border-t border-white/10 pt-2 mt-2">
-                  <div className="flex justify-between">
-                    <span className="text-white font-bold">Total</span>
-                    <span className="text-emerald-400 font-bold text-lg">${grandTotal.toFixed(2)}</span>
+                    <span className="text-white font-bold">{isFinal ? 'Total' : 'Quoted total'}</span>
+                    <span className="text-emerald-400 font-bold text-lg">{formatPrice(grandTotal)}</span>
                   </div>
                 </div>
               </div>

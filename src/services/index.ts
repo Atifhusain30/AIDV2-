@@ -10,7 +10,6 @@ export { default as apiService } from './api'
 
 // New service layer for backend-ready architecture
 export * as bookingService from './bookingService'
-export * as chatService from './chatService'
 export { default as locationServiceV2 } from './locationService'
 
 // Re-export commonly used functions

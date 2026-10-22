@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { Booking, BookingStatus, Mechanic, Notification, ServiceType } from '../types'
-import { nearbyMechanics, mockNotifications } from '../data/mockData'
+import { Booking, ServiceType } from '../types'
 
 // Modal types
 export type ModalType = 
@@ -10,28 +9,12 @@ export type ModalType =
   | 'ev_charging' 
   | 'detailing' 
   | 'window_tinting'
-  | 'history'
   | 'search'
   | 'locationConfirm'
   | null
 
 // Geolocation coordinates type
 export type GeoCoords = { lat: number; lng: number; accuracy?: number }
-
-// Chat message types
-export type MessageKind = 'user_message' | 'provider_intro' | 'provider_auto_reply' | 'status_update'
-export type MessageSender = 'user' | 'provider' | 'system'
-
-export interface ChatMessage {
-  id: string
-  bookingId: string
-  sender: MessageSender
-  text: string
-  timestamp: string // ISO string for serialization
-  meta?: {
-    kind?: MessageKind
-  }
-}
 
 // Form data types
 export interface ServiceFormData {
@@ -111,7 +94,6 @@ interface AppState {
   // Auth + User Profile
   isAuthed: boolean
   user: UserProfile | null
-  signInMock: (payload: { name: string; phone: string; email?: string }) => void
   signOut: () => void
   updateUserProfile: (patch: Partial<Omit<UserProfile, 'id'>>) => void
   
@@ -145,26 +127,7 @@ interface AppState {
   addToBookingHistory: (booking: Booking) => void
   updateBookingInHistory: (id: string, updates: Partial<Booking>) => void
   rebookFromHistory: (bookingId: string) => void
-  matchProviderForBooking: (bookingId: string) => void
   clearBookings: () => void
-  
-  // Chat Messages (persisted per booking)
-  bookingMessages: Record<string, ChatMessage[]>
-  appendMessage: (bookingId: string, message: Omit<ChatMessage, 'id' | 'bookingId' | 'timestamp'> & { timestamp?: string }) => void
-  clearBookingMessages: (bookingId: string) => void
-  
-  // Push Notification Tracking (persisted to avoid duplicate notifications)
-  lastNotifiedStatusByBooking: Record<string, BookingStatus>
-  setLastNotifiedStatus: (bookingId: string, status: BookingStatus) => void
-  
-  // Mechanics
-  mechanics: Mechanic[]
-  setMechanics: (mechanics: Mechanic[]) => void
-  
-  // Notifications
-  notifications: Notification[]
-  unreadCount: number
-  markNotificationRead: (id: string) => void
   
   // Legacy service selection
   selectedService: ServiceType | null
@@ -233,8 +196,6 @@ interface AppState {
   // Search
   searchQuery: string
   setSearchQuery: (query: string) => void
-  recentSearches: string[]
-  addRecentSearch: (search: string) => void
 }
 
 const initialServiceFormData: ServiceFormData = {
@@ -315,12 +276,6 @@ export const useAppStore = create<AppState>()(
       // Auth + User Profile
       isAuthed: false,
       user: null,
-      signInMock: (payload) => set((state) => ({
-        isAuthed: true,
-        user: state.user 
-          ? { ...state.user, ...payload }
-          : { id: crypto.randomUUID(), ...payload },
-      })),
       signOut: () => set({
         isAuthed: false,
         user: null,
@@ -428,107 +383,11 @@ export const useAppStore = create<AppState>()(
           },
           activeModal: 'services',
           modalStep: 1,
+          // The request sheet lives on Home, so "Request again" from Activity or a notice opens it there.
+          currentScreen: 'home',
         }
       }),
-      matchProviderForBooking: (bookingId) => set((state) => {
-        // Find booking (could be active or in history)
-        const isActiveBooking = state.activeBooking?.id === bookingId
-        const bookingInHistory = state.bookingHistory.find(b => b.id === bookingId)
-        
-        if (!isActiveBooking && !bookingInHistory) return state
-        
-        // Pick a provider from mechanics list or create fallback
-        let matchedMechanic: Mechanic
-        
-        if (state.mechanics && state.mechanics.length > 0) {
-          // Pick a random mechanic from the list
-          const randomIndex = Math.floor(Math.random() * state.mechanics.length)
-          const selectedMechanic = state.mechanics[randomIndex]
-          matchedMechanic = {
-            ...selectedMechanic,
-            eta: 5 + Math.floor(Math.random() * 10), // 5-15 min ETA
-          }
-        } else {
-          // Fallback provider
-          const randomNum = Math.floor(100 + Math.random() * 900)
-          matchedMechanic = {
-            id: crypto.randomUUID(),
-            name: `AID Pro #${randomNum}`,
-            initials: 'AP',
-            rating: 4.5 + Math.random() * 0.5, // 4.5-5.0
-            totalJobs: Math.floor(50 + Math.random() * 200),
-            specializations: [],
-            location: { lat: 32.78, lng: -96.80 },
-            eta: 8 + Math.floor(Math.random() * 10),
-            isOnline: true,
-          }
-        }
-        
-        // Update both activeBooking and bookingHistory
-        const providerUpdate: Partial<Booking> = {
-          mechanic: matchedMechanic,
-          driverId: matchedMechanic.id,
-          estimatedArrival: matchedMechanic.eta,
-          acceptedAt: new Date(),
-        }
-        
-        return {
-          activeBooking: isActiveBooking && state.activeBooking
-            ? { ...state.activeBooking, ...providerUpdate }
-            : state.activeBooking,
-          bookingHistory: state.bookingHistory.map(b =>
-            b.id === bookingId ? { ...b, ...providerUpdate } : b
-          ),
-        }
-      }),
-      clearBookings: () => set({ bookingHistory: [], activeBooking: null, bookingMessages: {} }),
-      
-      // Chat Messages (persisted per booking)
-      bookingMessages: {},
-      appendMessage: (bookingId, messageData) => set((state) => {
-        const newMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          bookingId,
-          sender: messageData.sender,
-          text: messageData.text,
-          timestamp: messageData.timestamp || new Date().toISOString(),
-          meta: messageData.meta,
-        }
-        const existingMessages = state.bookingMessages[bookingId] || []
-        return {
-          bookingMessages: {
-            ...state.bookingMessages,
-            [bookingId]: [...existingMessages, newMessage],
-          },
-        }
-      }),
-      clearBookingMessages: (bookingId) => set((state) => {
-        const { [bookingId]: _, ...rest } = state.bookingMessages
-        return { bookingMessages: rest }
-      }),
-      
-      // Push Notification Tracking (persisted to avoid duplicate notifications)
-      lastNotifiedStatusByBooking: {},
-      setLastNotifiedStatus: (bookingId, status) => set((state) => ({
-        lastNotifiedStatusByBooking: {
-          ...state.lastNotifiedStatusByBooking,
-          [bookingId]: status,
-        },
-      })),
-      
-      // Mechanics
-      mechanics: nearbyMechanics,
-      setMechanics: (mechanics) => set({ mechanics }),
-      
-      // Notifications
-      notifications: mockNotifications,
-      unreadCount: mockNotifications.filter(n => !n.isRead).length,
-      markNotificationRead: (id) => set((state) => ({
-        notifications: state.notifications.map(n => 
-          n.id === id ? { ...n, isRead: true } : n
-        ),
-        unreadCount: state.notifications.filter(n => !n.isRead && n.id !== id).length,
-      })),
+      clearBookings: () => set({ bookingHistory: [], activeBooking: null }),
       
       // Legacy service selection
       selectedService: null,
@@ -636,20 +495,17 @@ export const useAppStore = create<AppState>()(
       // Search
       searchQuery: '',
       setSearchQuery: (query) => set({ searchQuery: query }),
-      recentSearches: ['Oil change', 'Flat tire help', 'Towing service'],
-      addRecentSearch: (search) => set((state) => ({
-        recentSearches: [search, ...state.recentSearches.filter(s => s !== search)].slice(0, 5)
-      })),
     }),
     {
       name: 'aid-bookings-v1',
       storage: createJSONStorage(() => getStorage()),
-      // Only persist booking data + messages + notification tracking + confirmed location + auth + vehicles - NOT UI state (modals, forms, loading states)
+      // v1 drops data left by the old on-device demo (simulated chat threads and made-up providers).
+      version: 1,
+      migrate: (persisted) => stripLegacyDemoState(persisted) as unknown as AppState,
+      // Only persist booking data + confirmed location + auth + vehicles - NOT UI state (modals, forms, loading states)
       partialize: (state) => ({
         bookingHistory: state.bookingHistory,
         activeBooking: state.activeBooking,
-        bookingMessages: state.bookingMessages,
-        lastNotifiedStatusByBooking: state.lastNotifiedStatusByBooking,
         // Confirmed location (survives restart so user doesn't have to re-confirm)
         userLocationLabel: state.userLocationLabel,
         userCoords: state.userCoords,
@@ -664,16 +520,21 @@ export const useAppStore = create<AppState>()(
   )
 )
 
-// Selector helpers (external to avoid circular reference)
-export const getBookingMessages = (bookingId: string): ChatMessage[] => {
-  return useAppStore.getState().bookingMessages[bookingId] || []
-}
-
-export const hasProviderIntroMessage = (bookingId: string): boolean => {
-  const messages = useAppStore.getState().bookingMessages[bookingId] || []
-  return messages.some((m: ChatMessage) => m.meta?.kind === 'provider_intro')
-}
-
-export const getLastNotifiedStatus = (bookingId: string): BookingStatus | undefined => {
-  return useAppStore.getState().lastNotifiedStatusByBooking[bookingId]
+/**
+ * Remove state persisted by the old on-device demo: simulated chat threads, notification
+ * bookkeeping, and the made-up provider (`mechanic`) attached to local bookings.
+ */
+export function stripLegacyDemoState(persisted: unknown): Record<string, unknown> {
+  const state = { ...((persisted as Record<string, unknown>) || {}) }
+  delete state.bookingMessages
+  delete state.lastNotifiedStatusByBooking
+  const clean = (booking: unknown) => {
+    if (!booking || typeof booking !== 'object') return booking
+    const rest = { ...(booking as Record<string, unknown>) }
+    delete rest.mechanic
+    return rest
+  }
+  if (Array.isArray(state.bookingHistory)) state.bookingHistory = state.bookingHistory.map(clean)
+  if (state.activeBooking) state.activeBooking = clean(state.activeBooking)
+  return state
 }

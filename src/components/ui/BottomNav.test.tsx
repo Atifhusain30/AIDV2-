@@ -7,7 +7,7 @@ afterEach(() => cleanup())
 
 describe('BottomNav information architecture', () => {
   beforeEach(() => {
-    useAppStore.setState({ currentScreen: 'home', activeModal: null, unreadCount: 3 })
+    useAppStore.setState({ currentScreen: 'home', activeModal: null })
   })
 
   it('keeps emergency help primary and moves messages into the active request', () => {

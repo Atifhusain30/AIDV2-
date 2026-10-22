@@ -5,7 +5,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
 import { apiService } from '../../services/api'
 
-afterEach(() => cleanup())
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('driver work layout', () => {
   beforeEach(() => {
@@ -27,6 +27,33 @@ describe('driver work layout', () => {
     expect(screen.getByText('Today')).toBeTruthy()
     expect(screen.getByText('Incoming requests')).toBeTruthy()
     expect(screen.getByText('Driver readiness')).toBeTruthy()
+  })
+
+  it('shows only real figures for today: completed jobs from job history, no invented earnings or rating', async () => {
+    const now = new Date()
+    const yesterday = new Date(now.getTime() - 36 * 60 * 60 * 1000)
+    vi.spyOn(apiService, 'listBookings').mockResolvedValue({ success: true, data: [
+      { id: 'b1', status: 'completed', completedAt: now },
+      { id: 'b2', status: 'completed', completedAt: now },
+      { id: 'b3', status: 'completed', completedAt: yesterday },
+      { id: 'b4', status: 'cancelled', cancelledAt: now },
+    ] as never })
+    useAuthStore.setState({ user: { ...(useAuthStore.getState().user as object), rating: 0, totalJobs: 0 } as never })
+    render(<DriverHomeScreen onOpenOnboarding={vi.fn()} onOpenVehicle={vi.fn()} onOpenSettings={vi.fn()} onOpenActiveJob={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByLabelText('Jobs completed today').textContent).toContain('2'))
+    expect(screen.getByLabelText('Earnings coming soon').textContent).toContain('Soon')
+    expect(screen.getByLabelText('Rating').textContent).toContain('—')
+    expect(screen.queryByText('$0.00')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Notifications' })).toBeNull()
+  })
+
+  it('says so when today\'s jobs cannot be loaded instead of showing zero', async () => {
+    vi.spyOn(apiService, 'listBookings').mockResolvedValue({ success: false, error: 'offline' })
+    render(<DriverHomeScreen onOpenOnboarding={vi.fn()} onOpenVehicle={vi.fn()} onOpenSettings={vi.fn()} onOpenActiveJob={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/Couldn't load today's jobs/)).toBeTruthy())
+    expect(screen.getByLabelText('Jobs completed today').textContent).toContain('—')
   })
 
   it('does not let an unverified driver go online', () => {

@@ -1,10 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  Bell,
   CheckCircle2,
   ChevronRight,
   Clock3,
-  DollarSign,
+  Wallet,
   FileCheck2,
   LocateFixed,
   MapPin,
@@ -25,6 +24,8 @@ import { formatCalendarDate } from '../../lib/dates'
 import { formatPrice } from '../../lib/money'
 import { driverVehicleSummary, vehicleComplete, VEHICLE_REQUIRED_COPY } from '../../lib/driverVehicle'
 import { formatDistance, LOCATION_PROMPT_COPY } from '../../lib/nearbyRequests'
+import { completedTodayCount, driverRatingLabel, timeOfDayGreeting } from '../../lib/driverStats'
+import { apiService } from '../../services/api'
 
 interface DriverHomeScreenProps {
   onOpenOnboarding: () => void
@@ -74,6 +75,20 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
     if (user?.id) fetchActiveBooking(user.id)
   }, [fetchActiveBooking, user?.id])
 
+  // "Completed today" is counted from the driver's real job history; refreshed when a job ends.
+  const [completedToday, setCompletedToday] = useState<{ state: 'loading' | 'ready' | 'error'; count: number }>({ state: 'loading', count: 0 })
+  const activeJobId = activeBooking?.id ?? null
+  useEffect(() => {
+    let cancelled = false
+    void apiService.listBookings().then((result) => {
+      if (cancelled) return
+      setCompletedToday(result.success && result.data
+        ? { state: 'ready', count: completedTodayCount(result.data) }
+        : { state: 'error', count: 0 })
+    })
+    return () => { cancelled = true }
+  }, [activeJobId])
+
   useEffect(() => {
     if (!isOnline || !canWork) return
     fetchIncomingRequests()
@@ -98,10 +113,9 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
         <div>
           <AidBrand compact label="DRIVER" />
           <h1>Work</h1>
-          <p>Good afternoon, {user?.firstName || 'Driver'}.</p>
+          <p>{timeOfDayGreeting()}, {user?.firstName || 'Driver'}.</p>
         </div>
         <div className="driver-work__header-actions">
-          <button type="button" className="aid-icon-button" aria-label="Notifications"><Bell size={19} /></button>
           <button type="button" className="aid-icon-button" aria-label="Driver settings" onClick={onOpenSettings}><Settings size={19} /></button>
         </div>
       </header>
@@ -200,10 +214,15 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
       <section className="driver-section" aria-labelledby="today-title">
         <div className="driver-section__heading"><div><span>PERFORMANCE</span><h2 id="today-title">Today</h2></div></div>
         <div className="driver-metrics">
-          <div><span><DollarSign size={18} /></span><small>Earnings</small><strong>$0.00</strong></div>
-          <div><span><CheckCircle2 size={18} /></span><small>Completed</small><strong>0</strong></div>
-          <div><span><Star size={18} /></span><small>Rating</small><strong>{user?.rating?.toFixed(1) || '—'}</strong></div>
+          <div aria-label="Earnings coming soon"><span><Wallet size={18} /></span><small>Earnings</small><strong>Soon</strong></div>
+          <div aria-label="Jobs completed today"><span><CheckCircle2 size={18} /></span><small>Completed</small><strong>{completedToday.state === 'loading' ? '…' : completedToday.state === 'error' ? '—' : completedToday.count}</strong></div>
+          <div aria-label="Rating"><span><Star size={18} /></span><small>Rating</small><strong>{driverRatingLabel(user)}</strong></div>
         </div>
+        <p className="driver-metrics__note">
+          {completedToday.state === 'error'
+            ? "Couldn't load today's jobs. They'll show next time you open Work."
+            : 'Earnings and payouts are coming soon. Ratings appear after customers can rate jobs.'}
+        </p>
       </section>
 
       <section className="driver-section" aria-labelledby="readiness-title">

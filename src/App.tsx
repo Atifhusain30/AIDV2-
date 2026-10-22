@@ -27,7 +27,7 @@ import { SafetyMenuItem } from './components/safety/Safety'
 // Customer Screens
 import HomeScreen from './screens/HomeScreen'
 import HistoryScreen from './screens/HistoryScreen'
-import ChatScreen from './screens/ChatScreen'
+import UpdatesScreen from './screens/UpdatesScreen'
 import ProfileScreen from './screens/ProfileScreen'
 import { CustomerLoginScreen } from './screens/customer'
 import BottomNav from './components/ui/BottomNav'
@@ -133,7 +133,7 @@ function CustomerApp() {
       case 'history':
         return <HistoryScreen />
       case 'chat':
-        return <ChatScreen />
+        return <UpdatesScreen />
       case 'profile':
         return <ProfileScreen />
       default:

@@ -9,7 +9,6 @@ import {
   Fuel,
   KeyRound,
   MapPin,
-  MessageCircle,
   Navigation,
   Plus,
   ShieldCheck,
@@ -26,7 +25,6 @@ import { useAppStore } from '../store/useAppStore'
 import type { ServiceType } from '../types'
 import { driverTracking } from '../lib/customerTracking'
 import { customerStatusLine } from '../lib/jobLifecycle'
-import { HistoryModal } from '../components/modals'
 import RequestSheet from '../components/request/RequestSheet'
 import { SafetySheet } from '../components/safety/Safety'
 
@@ -48,7 +46,6 @@ export default function HomeScreen() {
     activeVehicleId,
     user,
     userLocationLabel,
-    unreadCount,
     setCurrentScreen,
     setActiveModal,
     setServiceFormData,
@@ -57,12 +54,8 @@ export default function HomeScreen() {
   } = useAppStore()
   const [showSafety, setShowSafety] = useState(false)
 
-  // Real jobs: the server's approximate ETA (hidden when the driver's location is too old).
-  const activeEta = activeBooking
-    ? activeBooking.driver
-      ? driverTracking(activeBooking, Date.now()).eta?.minutes ?? null
-      : activeBooking.providerETA ?? activeBooking.estimatedArrival ?? null
-    : null
+  // The server's approximate ETA once a driver is sharing location (hidden when it is too old).
+  const activeEta = activeBooking?.driver ? driverTracking(activeBooking, Date.now()).eta?.minutes ?? null : null
 
   const activeVehicle = vehicles.find((vehicle) => vehicle.id === activeVehicleId) ?? vehicles[0]
   const recentBooking = bookingHistory.find((booking) => booking.status === 'completed')
@@ -79,9 +72,8 @@ export default function HomeScreen() {
       <header className="consumer-topbar">
         <AidBrand compact label="ROADSIDE" />
         <div className="consumer-topbar__actions">
-          <button type="button" className="consumer-icon-button" aria-label="Activity and notifications" onClick={() => setCurrentScreen('history')}>
+          <button type="button" className="consumer-icon-button" aria-label="Activity" onClick={() => setCurrentScreen('history')}>
             <Bell size={20} />
-            {unreadCount > 0 && <span>{Math.min(unreadCount, 9)}</span>}
           </button>
           <button type="button" className="consumer-avatar" aria-label="Open account" onClick={() => setCurrentScreen('profile')}>
             {user?.name ? user.name.charAt(0).toUpperCase() : <UserRound size={20} />}
@@ -97,13 +89,13 @@ export default function HomeScreen() {
 
       {activeBooking && (
         <button type="button" className="consumer-active" onClick={() => setCurrentScreen('chat')} aria-label="Track active request">
-          <div className="consumer-active__status"><span><i /> ACTIVE REQUEST</span><strong>{activeEta != null ? `≈ ${activeEta} min` : '-- min'}</strong></div>
+          <div className="consumer-active__status"><span><i /> ACTIVE REQUEST</span><strong>{activeEta != null ? `≈ ${activeEta} min` : activeBooking.driver ? '-- min' : 'Finding driver'}</strong></div>
           <div className="consumer-active__main">
             <span className="consumer-active__nav"><Navigation size={22} /></span>
             <div><strong>{customerStatusLine(activeBooking)}</strong><p>{activeBooking.service.name} · {activeBooking.location.address}</p></div>
             <ChevronRight size={20} />
           </div>
-          <div className="consumer-active__footer"><span><MessageCircle size={15} /> Message</span><span>Track provider <ArrowRight size={15} /></span></div>
+          <div className="consumer-active__footer"><span><Clock3 size={15} /> Live status</span><span>{activeBooking.driver ? 'Track driver' : 'View request'} <ArrowRight size={15} /></span></div>
         </button>
       )}
 
@@ -111,7 +103,7 @@ export default function HomeScreen() {
         <section className="consumer-intro" aria-labelledby="consumer-help-title">
           <p>{user?.name ? 'Hi, ' + user.name.split(' ')[0] : 'Roadside assistance'}</p>
           <h1 id="consumer-help-title">How can we help?</h1>
-          <span><i /> Providers available nearby</span>
+          <span><ShieldCheck size={13} aria-hidden="true" /> Every AID driver is verified</span>
         </section>
 
         <section className="service-launcher" aria-label="Roadside services">
@@ -173,7 +165,6 @@ export default function HomeScreen() {
       </main>
 
       <RequestSheet />
-      <HistoryModal />
     </div>
   )
 }
