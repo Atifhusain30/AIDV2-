@@ -9,6 +9,7 @@ import type { PickedFile } from '@capawesome/capacitor-file-picker'
 import { useAuthStore } from './useAuthStore'
 import { apiService } from '../services/api'
 import { documentService } from '../services/documents'
+import type { SharingStatus } from '../lib/jobLocationSharing'
 
 interface DriverStore {
   // State
@@ -18,18 +19,20 @@ interface DriverStore {
   activeBooking: Booking | null
   documents: DriverDocument[]
   verification: DriverVerification | null
+  /** GPS sharing state during an active job (shown on the job screen). */
+  locationSharing: SharingStatus
   isLoading: boolean
   error: string | null
 
   // Actions
   setOnlineStatus: (isOnline: boolean) => Promise<void>
   setCurrentLocation: (location: Location) => void
+  setLocationSharing: (status: SharingStatus) => void
   fetchIncomingRequests: () => Promise<void>
   acceptRequest: (requestId: string) => Promise<boolean>
   declineRequest: (requestId: string) => void
   updateJobStatus: (status: Booking['status']) => Promise<boolean>
   fetchActiveBooking: (driverId: string) => Promise<void>
-  updateDriverLocationForBooking: () => Promise<void>
   
   // Document management
   fetchDocuments: () => Promise<void>
@@ -52,6 +55,7 @@ const initialState = {
   activeBooking: null,
   documents: [],
   verification: null,
+  locationSharing: 'off' as SharingStatus,
   isLoading: false,
   error: null
 }
@@ -94,6 +98,8 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
   setCurrentLocation: (location) => {
     set({ currentLocation: location })
   },
+
+  setLocationSharing: (locationSharing) => set({ locationSharing }),
 
   // Fetch incoming service requests
   fetchIncomingRequests: async () => {
@@ -169,15 +175,6 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
     if (result.success) {
       set({ activeBooking: result.data || null })
     }
-  },
-
-  // Update driver location for active booking (for customer tracking)
-  updateDriverLocationForBooking: async () => {
-    const { activeBooking, currentLocation } = get()
-    
-    if (!activeBooking || !currentLocation) return
-    
-    await apiService.updateDriverLocation(activeBooking.id, currentLocation)
   },
 
   // Fetch stored documents

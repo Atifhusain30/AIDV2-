@@ -200,6 +200,29 @@ export interface BookingVehicleSnapshot {
   vehicleId: string
   label: string  // e.g. "2019 Honda Civic"
   plate?: string
+  color?: string
+}
+
+/** The vehicle a driver arrives in (what the customer should look for). */
+export interface DriverVehicle {
+  make: string
+  model: string
+  color: string
+  plate: string
+}
+
+/** The other person on a job. Phone is only present while the job is active. */
+export interface JobContact {
+  name: string        // "Marcus T."
+  firstName: string
+  phone?: string
+}
+
+export interface JobDriver extends JobContact {
+  id: string
+  rating: number
+  totalJobs: number
+  vehicle: DriverVehicle | null
 }
 
 // Service Request (Booking)
@@ -229,7 +252,11 @@ export interface Booking {
     status: PaymentStatus
     amount: number
   }
-  driverLocation?: Location
+  driverLocation?: Location & { updatedAt?: string }
+  /** Assigned driver, shown to the customer once accepted. */
+  driver?: JobDriver
+  /** Customer contact, shown to the driver once accepted. */
+  customer?: JobContact
   // Provider tracking coordinates (for live tracking)
   providerCoords?: { lat: number; lng: number }
   // Live ETA in minutes (updates during tracking)

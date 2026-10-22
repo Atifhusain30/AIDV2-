@@ -9,6 +9,7 @@ import { ArrowRight, Briefcase, Clock3, LifeBuoy, MapPinned, ShieldCheck } from 
 import { useAppStore } from './store/useAppStore'
 import { useAuthStore } from './store/useAuthStore'
 import { useDriverStore } from './store/useDriverStore'
+import { useJobLocationSharing } from './lib/useJobLocationSharing'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
 import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
@@ -163,6 +164,8 @@ function CustomerApp() {
 // Driver App Component
 function DriverApp({ onLogout }: { onLogout: () => void }) {
   const [currentView, setCurrentView] = useState<DriverView>('home')
+  // Share GPS with the customer on every driver screen while a job is active.
+  useJobLocationSharing()
   const { user } = useAuthStore()
   const { activeBooking, fetchDocuments } = useDriverStore()
 

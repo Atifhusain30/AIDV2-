@@ -27,7 +27,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 1.3 | Detailing & Window Tint show "Booked!" without creating a booking | ✅ `bbf9c8c` "Coming soon"; server rejects (409) |
 | 1.4 | "Request again"/Rebook creates a local-only phantom booking (`rebookFromHistory`) | ✅ `bbf9c8c` reopens sheet prefilled; server creates booking |
 | 1.5 | After acceptance customer gets no driver name/phone/vehicle/live location; driver sees "Customer" with no contact, notes or tow destination | ⚠️ server returns both parties' cards (contact only while active) + location timestamp; screens pending |
-| 1.6 | Driver app never captures/uploads GPS during a job (`watchLocation` never called) | ❌ |
+| 1.6 | Driver app never captures/uploads GPS during a job (`watchLocation` never called) | ✅ app-wide `useJobLocationSharing` (throttled, stops when job ends); foreground only for now |
 | 1.7 | Release builds silently default API to `127.0.0.1`; Android CORS origin `https://localhost` missing | ❌ |
 
 ## Phase 2 — Security & backend hardening
