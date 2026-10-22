@@ -35,7 +35,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 |---|---|---|
 | 2.1 | Least-privilege database grants + live attack test | ✅ fixed |
 | 2.2 | Rate limiting (IP + user), CAPTCHA on sign-up/reset, upload caps | ❌ |
-| 2.3 | One active booking per customer; one active job per driver; expire unaccepted requests | ❌ |
+| 2.3 | One active booking per customer; one active job per driver; expire unaccepted requests | ✅ `80f720a` — server pre-check (409 `active_request_exists` / `driver_busy`) backed by partial unique indexes (`bookings_one_active_per_customer`, `bookings_one_active_job_per_driver`, migration `20261022200000`, applied to the current database); unaccepted requests → new status `expired` after `REQUEST_EXPIRY_MINUTES` (default 15); accepted/en-route jobs with no driver location or status for `STALE_JOB_MINUTES` (default 60) → cancelled by `system` (`driver_unresponsive`); audited in `booking_events` (actor null, role system); run on every read/create + 60 s sweep (`server/expiry.js`); overdue requests are never listed or acceptable even before the sweep. Proven on the live database (concurrent creates, expiry, sweep, silent-driver release, DB refuses a second active row). Gaps: no push notification when a request expires (B14); with no background location (G2) a driver who keeps AID closed for 60 min on the way loses the job; admin panel doesn't list expired/released jobs |
 | 2.4 | Admin accounts require MFA (TOTP) | ❌ |
 | 2.5 | Payment: pre-authorize at booking (manual capture), capture on completion; customer confirmation of completion | ❌ |
 | 2.6 | Stripe webhook: dedupe event ids, verify amount/booking, handle refunds/disputes, 500 on DB errors; reuse/cancel stale intents | ⚠️ |
