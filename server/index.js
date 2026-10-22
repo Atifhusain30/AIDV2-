@@ -11,6 +11,8 @@ const { startExpirySweep } = require('./expiry');
 const { createLogger, securityConfigFromEnv } = require('./security');
 const { rateLimitsFromEnv } = require('./rateLimit');
 const { serializeError } = require('./redact');
+const { createRealtimeHub, realtimeConfigFromEnv, notifyEnded } = require('./realtime');
+const { radiusFromEnv } = require('./nearby');
 
 // E8: one JSON line per event on stdout, already redacted (see redact.js). LOG_LEVEL: debug|info|warn|error|silent.
 const logger = createLogger({ level: process.env.LOG_LEVEL || 'info' });
@@ -79,7 +81,12 @@ const documentStorage = {
   },
 };
 
+// B11: one realtime hub shared by the API routes and the expiry sweep (in-memory, single instance).
+const realtimeConfig = realtimeConfigFromEnv(process.env);
+const realtime = createRealtimeHub({ ...realtimeConfig, radiusMiles: radiusFromEnv(process.env), logger });
 const app = createApp({
+  realtime,
+  realtimeEnabled: realtimeConfig.enabled,
   auth,
   repository,
   stripe,
@@ -104,9 +111,14 @@ const server = app.listen(port, host, () => {
     msg: 'security', corsOrigins: security.corsOrigin, trustProxy: security.trustProxy, hsts: security.hsts.enabled,
     rateLimits: rateLimits.enabled ? 'on (in-memory, single instance)' : 'OFF', jsonBodyLimit: security.jsonBodyLimit, documentMaxBytes: security.documentMaxBytes,
   });
+  logger.info({
+    msg: 'realtime', enabled: realtimeConfig.enabled, transport: 'SSE, in-memory bus (single instance)',
+    maxConnectionsPerUser: realtimeConfig.maxConnectionsPerUser, maxStreamMinutes: realtimeConfig.maxStreamMs / 60000, heartbeatSeconds: realtimeConfig.heartbeatMs / 1000,
+  });
 });
 const expirySweep = startExpirySweep({
   repository,
+  onExpired: (result) => notifyEnded(realtime, repository, result),
   intervalMs: expiryConfig.sweepSeconds * 1000,
   logger: { log: (line) => logger.info({ msg: line }), error: (...parts) => logger.error({ msg: parts.map(String).join(' ') }) },
 });
@@ -115,6 +127,7 @@ void expirySweep.tick();
 async function shutdown(signal) {
   logger.info({ msg: `${signal} received; shutting down.` });
   expirySweep.stop();
+  realtime.closeAll(); // open event streams would otherwise keep server.close() waiting
   server.close(async () => {
     await pool.end();
     process.exit(0);

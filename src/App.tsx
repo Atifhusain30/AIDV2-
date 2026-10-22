@@ -12,6 +12,7 @@ import { useDriverStore } from './store/useDriverStore'
 import { useJobLocationSharing } from './lib/useJobLocationSharing'
 import { useDriverJobSync } from './lib/useDriverJobSync'
 import { useActiveBookingSync } from './lib/useActiveBookingSync'
+import { useRealtimeConnection } from './lib/useRealtimeConnection'
 import EndedBookingNotice from './components/tracking/EndedBookingNotice'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
 import { applyLeafletIconFix } from './lib/leafletFix'
@@ -124,6 +125,10 @@ function CustomerApp() {
   const { currentScreen } = useAppStore()
   // Keep the active request (status, driver, live location, ETA) current on every customer screen.
   useActiveBookingSync()
+  // B11: live updates while the customer has an active request (polling covers the rest).
+  const hasLiveRequest = useAppStore((state) => Boolean(state.activeBooking?.id))
+  const signedIn = useAuthStore((state) => Boolean(state.token))
+  useRealtimeConnection(signedIn && hasLiveRequest)
   const { logout, user } = useAuthStore()
   const [mounted, setMounted] = useState(false)
 
@@ -188,6 +193,9 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
   useJobLocationSharing()
   // Notice a customer cancellation (or any server-side change) to the active job.
   useDriverJobSync()
+  // B11: live updates while the driver is online (new nearby requests) or on a job.
+  const driverLive = useDriverStore((state) => state.isOnline || Boolean(state.activeBooking?.id))
+  useRealtimeConnection(driverLive)
   const { user } = useAuthStore()
   const { activeBooking, fetchDocuments } = useDriverStore()
   // B15: right after completing a job, the driver rates the customer (skippable; one reminder on next open).

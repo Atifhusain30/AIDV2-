@@ -17,6 +17,7 @@ import { jobCountLabel, ratingSummary } from '../../lib/ratings'
 import { showChatEntry, type BookingChat } from '../../lib/chat'
 import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
+import RealtimeNotice from '../../components/ui/RealtimeNotice'
 
 const LiveDriverMap = lazy(() => import('../../components/tracking/LiveDriverMap'))
 
@@ -107,6 +108,7 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
 
   return (
     <div className="track-screen" aria-label="Live tracking">
+      <RealtimeNotice />
       <header className="job-header track-header">
         <div><small>{HEADER_LABEL[booking.status] ?? 'ACTIVE REQUEST'}</small><h1>{booking.service.name}</h1></div>
         <strong className="job-header__price">{formatPrice(booking.estimatedPrice)}</strong>

@@ -37,6 +37,10 @@ const DEFAULT_LIMITS = Object.freeze({
   chatSend: { max: 60, windowMs: MINUTE, env: 'RATE_LIMIT_CHAT_SENDS_PER_MINUTE' },
   block: { max: 10, windowMs: HOUR, env: 'RATE_LIMIT_BLOCKS_PER_HOUR' },
   accountChange: { max: 60, windowMs: HOUR, env: 'RATE_LIMIT_ACCOUNT_CHANGES_PER_HOUR' },
+  // B11 realtime: a phone opens one stream, rotated every 30 min, plus reconnects after network
+  // drops or returning from the background (backoff 1–30 s). 60 per 10 minutes is far above that.
+  realtimeTicket: { max: 60, windowMs: 10 * MINUTE, env: 'RATE_LIMIT_REALTIME_TICKETS_PER_10_MINUTES' },
+  realtimeStream: { max: 60, windowMs: 10 * MINUTE, env: 'RATE_LIMIT_REALTIME_STREAMS_PER_10_MINUTES' },
 });
 
 function rateLimitsFromEnv(env = process.env) {

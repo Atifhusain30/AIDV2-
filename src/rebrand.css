@@ -1398,3 +1398,9 @@ select:focus-visible {
 .chat-count { position: absolute; top: -18px; right: 70px; color: var(--aid-muted); font-size: .6875rem; }
 .chat-send { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--aid-signal); color: #fff; }
 .chat-send:disabled { background: #2a2333; color: #6b6375; }
+
+/* B11: live updates reconnecting (shown only after a few seconds disconnected on live screens). */
+.realtime-notice { position: fixed; z-index: 95; top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; max-width: calc(100vw - 32px); padding: 6px 12px; border: 1px solid var(--aid-line); border-radius: 999px; background: rgba(12, 9, 15, .92); color: var(--aid-muted); font-size: .75rem; line-height: 1.2; pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.realtime-notice__icon { flex: none; animation: realtime-spin 1.6s linear infinite; }
+@keyframes realtime-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .realtime-notice__icon { animation: none; } }

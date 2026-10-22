@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const http = require('node:http');
 const { randomUUID } = require('node:crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { Pool } = require('pg');
@@ -8,7 +9,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const runLive = process.env.LIVE_E2E === '1';
 
-test('live Supabase customer → verified driver → document → completed booking flow', { skip: !runLive, timeout: 120000 }, async () => {
+test('live Supabase customer → verified driver → document → completed booking flow', { skip: !runLive, timeout: 180000 }, async () => {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 1 });
   const suffix = randomUUID();
@@ -31,6 +32,47 @@ test('live Supabase customer → verified driver → document → completed book
     const { data: login, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
     if (loginError) throw loginError;
     return { id: data.user.id, token: login.session.access_token };
+  }
+
+  // B11: minimal SSE reader for /api/realtime/stream (records arrival time of each event).
+  const liveStreams = [];
+  function openLiveStream(ticket) {
+    return new Promise((resolve, reject) => {
+      const events = [];
+      const waiters = [];
+      const req = http.get(`http://127.0.0.1:3001/api/realtime/stream?ticket=${encodeURIComponent(ticket)}`, (res) => {
+        let buffer = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          buffer += chunk;
+          let index;
+          while ((index = buffer.indexOf('\n\n')) >= 0) {
+            const block = buffer.slice(0, index);
+            buffer = buffer.slice(index + 2);
+            const type = /^event: (.*)$/m.exec(block)?.[1];
+            if (!type) continue;
+            const data = /^data: (.*)$/m.exec(block)?.[1];
+            const event = { type, data: data ? JSON.parse(data) : null, raw: block, at: Date.now() };
+            events.push(event);
+            const waiter = waiters.findIndex((w) => w.type === type);
+            if (waiter >= 0) waiters.splice(waiter, 1)[0].done(event);
+            else event.pending = true;
+          }
+        });
+        resolve({
+          status: res.statusCode, events, close: () => req.destroy(),
+          next(type, timeoutMs = 3000) {
+            const queued = events.find((event) => event.type === type && event.pending);
+            if (queued) { queued.pending = false; return Promise.resolve(queued); }
+            return new Promise((done, fail) => {
+              const timer = setTimeout(() => fail(new Error(`no ${type} event within ${timeoutMs} ms`)), timeoutMs);
+              waiters.push({ type, done: (event) => { clearTimeout(timer); done(event); } });
+            });
+          },
+        });
+      });
+      req.on('error', reject);
+    });
   }
 
   async function api(pathname, token, options = {}) {
@@ -187,17 +229,43 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(available.dropoffLocation, undefined);
     assert.equal(available.notes, undefined);
 
+    // ---- B11: live updates — customer and driver streams receive the job's events within ~1 s; an outsider gets nothing ----
+    const ticketResponse = await api('/realtime/ticket', customer.token, { method: 'POST', body: JSON.stringify({}) });
+    assert.equal(ticketResponse.status, 200);
+    const customerTicket = (await ticketResponse.json()).ticket;
+    const customerStream = await openLiveStream(customerTicket);
+    assert.equal(customerStream.status, 200);
+    assert.equal((await openLiveStream(customerTicket)).status, 401, 'a stream ticket works once');
+    const driverStream = await openLiveStream((await (await api('/realtime/ticket', driver.token, { method: 'POST', body: JSON.stringify({}) })).json()).ticket);
+    const outsiderStream = await openLiveStream((await (await api('/realtime/ticket', otherCustomer.token, { method: 'POST', body: JSON.stringify({}) })).json()).ticket);
+    liveStreams.push(customerStream, driverStream, outsiderStream);
+    await Promise.all([customerStream.next('ready'), driverStream.next('ready'), outsiderStream.next('ready')]);
+
+    let sentAt = Date.now();
     const acceptResponse = await api(`/bookings/${bookingId}/accept`, driver.token, { method: 'POST' });
     assert.equal(acceptResponse.status, 200);
+    const acceptEvent = await customerStream.next('booking', 3000);
+    const acceptLatency = acceptEvent.at - sentAt;
+    assert.deepEqual(acceptEvent.data, { bookingId, reason: 'accepted' });
+    assert.ok(acceptLatency < 1500, `accept event arrived in ${acceptLatency} ms`);
     const accepted = await acceptResponse.json();
     assert.equal(accepted.location.address, '100 Main Street');
     assert.equal(accepted.dropoffLocation.address, '200 Main Street');
     assert.equal(accepted.notes, 'Private E2E gate instructions');
     assert.ok(accepted.customer?.firstName !== undefined, 'driver sees the customer card after accepting');
 
+    sentAt = Date.now();
     assert.equal((await api(`/bookings/${bookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'en_route' }) })).status, 200);
+    const statusEvent = await customerStream.next('booking', 3000);
+    const statusLatency = statusEvent.at - sentAt;
+    assert.deepEqual(statusEvent.data, { bookingId, reason: 'status' });
+    assert.ok(statusLatency < 1500, `status event arrived in ${statusLatency} ms`);
+    sentAt = Date.now();
     const locationResponse = await api(`/bookings/${bookingId}/driver-location`, driver.token, { method: 'PATCH', body: JSON.stringify({ location: { lat: 32.79, lng: -96.81 } }) });
     assert.equal(locationResponse.status, 200);
+    const locationEvent = await customerStream.next('booking', 3000);
+    assert.deepEqual(locationEvent.data, { bookingId, reason: 'location' });
+    console.log(`[B11 live] customer stream latency (request sent → event received): accept ${acceptLatency} ms, status ${statusLatency} ms, location ${locationEvent.at - sentAt} ms`);
     const tracking = await (await api('/bookings/active', customer.token)).json();
     assert.equal(tracking.id, bookingId);
     assert.deepEqual(tracking.driver.vehicle, { make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'E2E-1' });
@@ -211,6 +279,8 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(tracking.chat.unread, 0);
     const hello = await chatSend(customer.token, bookingId, { body: '  E2E: gate code 4411  ', clientId: `e2e-${suffix}` });
     assert.equal(hello.status, 201);
+    const chatEvent = await driverStream.next('chat', 3000);
+    assert.deepEqual(chatEvent.data, { bookingId }, 'the driver hears about the new message at once');
     const helloBody = await hello.json();
     assert.equal(helloBody.body, 'E2E: gate code 4411', 'trimmed');
     const retried = await chatSend(customer.token, bookingId, { body: 'E2E: gate code 4411', clientId: `e2e-${suffix}` });
@@ -236,6 +306,11 @@ test('live Supabase customer → verified driver → document → completed book
     for (const secret of [customer.id, driver.id, customerEmail, driverEmail]) assert.equal(chatJson.includes(secret), false, 'chat leaks no id or email');
     const storedChat = await pool.query('select sender_id, sender_role from public.job_messages where booking_id=$1 order by seq', [bookingId]);
     assert.deepEqual(storedChat.rows, [{ sender_id: customer.id, sender_role: 'customer' }, { sender_id: driver.id, sender_role: 'driver' }]);
+    // B11: the outsider's stream heard nothing about this job; no stream carried PII, coordinates or text.
+    assert.deepEqual(outsiderStream.events.filter((event) => event.type !== 'ready' && event.type !== 'ping'), [], 'outsider receives nothing');
+    const streamText = [customerStream, driverStream].flatMap((s) => s.events.map((event) => event.raw)).join('\n');
+    for (const secret of [customer.id, driver.id, customerEmail, '32.79', '-96.81', 'gate code', '100 Main']) assert.equal(streamText.includes(secret), false, `stream leaks ${secret}`);
+    liveStreams.forEach((s) => s.close());
 
     for (const status of ['arrived', 'in_progress', 'completed']) {
       const response = await api(`/bookings/${bookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status }) });
@@ -526,6 +601,7 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(await new Repo(pool).acceptBooking(blockedRequestId, driver.id, { serviceTypes: ['battery_jump'], electricTowing: false }), null);
     assert.equal((await pool.query('select status from public.bookings where id=$1', [blockedRequestId])).rows[0].status, 'searching');
   } finally {
+    liveStreams.forEach((s) => s.close());
     const stored = await pool.query('select storage_path from public.driver_documents where driver_id = any($1::uuid[])', [createdIds]).catch(() => ({ rows: [] }));
     // A fresh service client: `supabase` above now carries the last test user's session.
     const storageAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } });

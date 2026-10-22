@@ -1,45 +1,55 @@
 /**
- * Mounted once in the customer app: while the customer has an active request, poll the server
- * so status, driver card, driver location and ETA stay current on every screen.
- * Polling matches the driver side (uploads every 5–30 s); there is no realtime channel yet.
+ * Mounted once in the customer app: while the customer has an active request, keep status, driver
+ * card, driver location, ETA and the chat unread count current on every screen.
+ * B11: re-fetches as soon as the server signals a change to this job (live updates). Polls every
+ * BOOKING_POLL_MS while live updates are down, and only every SAFETY_POLL_MS while they're up.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiService } from '../services/api'
 import { reconcileManagedBooking } from '../services/bookingService'
+import { pollInterval } from './realtime'
+import { useCoalescedRefresh, useRealtimeConnected, useRealtimeEvents } from './useRealtimeStatus'
 
 export const BOOKING_POLL_MS = 4000
 
 export function useActiveBookingSync() {
   const token = useAuthStore((state) => state.token)
   const bookingId = useAppStore((state) => state.activeBooking?.id ?? null)
+  const connected = useRealtimeConnected()
+  const live = useRef<{ token: string | null; bookingId: string | null }>({ token: null, bookingId: null })
+  live.current = { token, bookingId }
+
+  const refresh = useCoalescedRefresh(async () => {
+    const id = live.current.bookingId
+    if (!live.current.token || !id) return
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    const result = await apiService.getBooking(id)
+    if (result.success && result.data && live.current.bookingId === id && useAppStore.getState().activeBooking?.id === id) {
+      reconcileManagedBooking(result.data)
+    }
+  })
+
+  // Live: this job changed (status, driver location/ETA, cancel, new chat message) or we reconnected.
+  useRealtimeEvents((event) => {
+    if (!token || !bookingId) return
+    if (event.type === 'resync' || ((event.type === 'booking' || event.type === 'chat') && event.bookingId === bookingId)) void refresh()
+  })
 
   useEffect(() => {
     if (!token || !bookingId) return
-    let stopped = false
-    let inFlight = false
-    const refresh = async () => {
-      if (inFlight || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
-      inFlight = true
-      try {
-        const result = await apiService.getBooking(bookingId)
-        if (!stopped && result.success && result.data && useAppStore.getState().activeBooking?.id === bookingId) {
-          reconcileManagedBooking(result.data)
-        }
-      } finally {
-        inFlight = false
-      }
-    }
     void refresh()
-    const interval = window.setInterval(() => void refresh(), BOOKING_POLL_MS)
     const onVisible = () => { if (document.visibilityState === 'visible') void refresh() }
     document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      stopped = true
-      window.clearInterval(interval)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [token, bookingId])
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [token, bookingId, refresh])
+
+  // Fallback polling: the usual pace when live updates are down, a slow safety net when they're up.
+  useEffect(() => {
+    if (!token || !bookingId) return
+    const interval = window.setInterval(() => void refresh(), pollInterval(BOOKING_POLL_MS, connected))
+    return () => window.clearInterval(interval)
+  }, [token, bookingId, connected, refresh])
 }

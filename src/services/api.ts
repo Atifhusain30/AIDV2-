@@ -4,6 +4,7 @@ import { supabase, managedAuth } from '../auth/supabase'
 import type { PendingRating, RatingInput } from '../lib/ratings'
 import type { SupportConfig, SupportReport } from '../lib/support'
 import type { BlockResult, ChatMessage, ChatPage } from '../lib/chat'
+import type { TicketResult } from '../lib/realtime'
 
 function normalizeApiBaseUrl(value?: string): string {
   const base = (value || 'http://127.0.0.1:3001').replace(/\/$/, '')
@@ -264,6 +265,20 @@ export async function updateDriverVehicle(vehicle: DriverVehicle): Promise<ApiRe
   return apiFetch('/drivers/me/vehicle', { method: 'PATCH', body: JSON.stringify(vehicle) })
 }
 
+/**
+ * B11: a single-use, 30-second ticket for the live-update stream, and the stream URL that uses it.
+ * The session token itself never goes in a URL.
+ */
+export async function createRealtimeTicket(): Promise<TicketResult> {
+  const result = await apiFetch<{ ticket: string; streamPath?: string }>('/realtime/ticket', { method: 'POST', body: JSON.stringify({}) })
+  if (result.success && result.data?.ticket) {
+    return { ok: true, url: `${API_BASE_URL}/realtime/stream?ticket=${encodeURIComponent(result.data.ticket)}` }
+  }
+  if (result.code === 'realtime_disabled') return { ok: false, disabled: true }
+  if (result.code === 'too_many_streams' || result.code === 'rate_limited') return { ok: false, retryAfterMs: 30_000 }
+  return { ok: false }
+}
+
 export async function createPaymentIntent(bookingId: string) {
   return apiFetch<{ id: string; clientSecret: string; amount: number; currency: string; status: string }>('/payments/create-intent', {
     method: 'POST', body: JSON.stringify({ bookingId }),
@@ -287,6 +302,7 @@ export const apiService = {
   listPendingRatings, submitRating, getSupportConfig, createSupportReport, listSupportReports,
   listJobMessages, sendJobMessage, markJobMessagesRead, blockJobParty,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, updateDriverVehicle, createPaymentIntent,
+  createRealtimeTicket,
 }
 
 export { normalizeApiBaseUrl }

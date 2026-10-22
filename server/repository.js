@@ -683,6 +683,23 @@ class PostgresRepository {
   }
 
   /**
+   * B11: who to tell when jobs end on their own (expiry sweep): each job's customer, driver, service
+   * and pickup point. Server-side only — the realtime hub never puts these in an event.
+   */
+  async getRealtimeTargets(bookingIds) {
+    if (!bookingIds || !bookingIds.length) return [];
+    const result = await this.pool.query(`
+      select b.id, b.customer_id, b.driver_id, b.service_type, b.location_lat, b.location_lng, coalesce(v.is_electric, false) as vehicle_is_electric
+      from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
+      where b.id = any($1::uuid[])
+    `, [bookingIds]);
+    return result.rows.map((row) => ({
+      id: row.id, customerId: row.customer_id, driverId: row.driver_id || null, serviceType: row.service_type,
+      vehicleIsElectric: Boolean(row.vehicle_is_electric), pickup: { lat: row.location_lat, lng: row.location_lng },
+    }));
+  }
+
+  /**
    * Open requests this driver's equipment can perform. `capability` comes from
    * equipmentCapability() in driverVehicle.js; without one, nothing is returned (fail closed).
    * `area` is a lat/lng box around the driver (nearby.js boundingBox); candidates are returned

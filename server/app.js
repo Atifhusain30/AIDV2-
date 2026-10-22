@@ -31,6 +31,7 @@ const { createLimiters, rateLimitsFromEnv, sendRateLimited } = require('./rateLi
 const {
   securityHeaders, corsGuard, requestContext, notFound, errorHandler, silentLogger, DEFAULT_CORS_ORIGINS,
 } = require('./security');
+const { createRealtimeHub, notifyEnded } = require('./realtime');
 
 // E4 answer codes the apps act on.
 const ACTIVE_REQUEST_CODE = 'active_request_exists';
@@ -93,16 +94,31 @@ function validVehicle(input) {
 
 function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = DEFAULT_CORS_ORIGINS, requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now(),
   logger = silentLogger, rateLimits = rateLimitsFromEnv(), rateLimitStore, trustProxy = false, hsts = { enabled: false },
-  jsonBodyLimit = '100kb', documentMaxBytes = 10 * 1024 * 1024 }) {
+  jsonBodyLimit = '100kb', documentMaxBytes = 10 * 1024 * 1024, realtime, realtimeEnabled = true }) {
   const app = express();
+  // B11: realtime hub (realtime.js). One per app unless index.js passes a shared one (the expiry sweep uses it too).
+  const hub = realtime || createRealtimeHub({ clock, radiusMiles: requestRadiusMiles, logger });
+  app.locals.realtime = hub;
+  // A realtime signal must never break or slow down the write that caused it.
+  const notify = (fn) => {
+    try { fn(); } catch (error) { logger.warn({ msg: 'realtime notify failed', error: error && error.message }); }
+  };
+  // E4 expiry (lazy, per caller) + B11: whoever is affected hears that their job ended.
+  const expireStale = async (scope) => {
+    const result = await repository.expireStaleBookings(scope);
+    if (result && ((result.expired && result.expired.length) || (result.released && result.released.length))) {
+      notifyEnded(hub, repository, result).catch((error) => logger.warn({ msg: 'realtime expiry notify failed', error: error && error.message }));
+    }
+    return result;
+  };
   const limit = createLimiters({ limits: rateLimits, store: rateLimitStore, clock });
   const documentUpload = documentUploader(documentMaxBytes);
   const requestExpiryMinutes = repository.requestExpiryMinutes || DEFAULT_REQUEST_EXPIRY_MINUTES;
   // E4: end stale work for this caller before answering (the interval sweep in index.js does the rest).
   const expireStaleFor = (auth) => {
     const role = auth.profile.role;
-    if (role === 'customer') return repository.expireStaleBookings({ customerId: auth.identity.id });
-    if (role === 'driver') return repository.expireStaleBookings({ driverId: auth.identity.id });
+    if (role === 'customer') return expireStale({ customerId: auth.identity.id });
+    if (role === 'driver') return expireStale({ driverId: auth.identity.id });
     return null;
   };
   const activeRequestConflict = (res, booking) => res.status(409).json({
@@ -281,6 +297,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         if (error?.code !== ACTIVE_REQUEST_CODE) throw error;
         return activeRequestConflict(res, await repository.getActiveBooking(req.auth.identity.id, 'customer'));
       }
+      notify(() => { hub.requestsChanged(booking); hub.bookingChanged(booking, 'created'); });
       res.status(201).json(booking);
     } catch (error) { next(error); }
   });
@@ -372,6 +389,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         const now = latest ? await chatFor(latest, req.auth) : { state: 'unavailable' };
         return chatClosed(res, now.state === 'open' ? 'unavailable' : now.state);
       }
+      if (!saved.duplicate) notify(() => hub.chatChanged(booking));
       res.status(saved.duplicate ? 200 : 201).json(saved.message);
     } catch (error) { next(error); }
   });
@@ -385,6 +403,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       const chat = await chatFor(booking, req.auth);
       if (chat.state === 'closed' || chat.state === 'unavailable') return chatClosed(res, chat.state);
       const marked = await repository.markJobMessagesRead(booking.id, req.auth.identity.id, cursor.after);
+      if (marked) notify(() => hub.chatChanged(booking));
       res.json({ marked });
     } catch (error) { next(error); }
   });
@@ -398,6 +417,11 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       const otherId = otherParty(booking, role);
       if (!otherId) return res.status(409).json({ error: 'There is no one to block on this job yet.', code: CHAT_CODES.noOneToBlock });
       const result = await repository.blockUser({ blockerId: req.auth.identity.id, blockerRole: role, blockedId: otherId, bookingId: booking.id, bookingStatus: booking.status });
+      if (result.created) {
+        // Both chats close; the driver's request list drops this customer's requests from now on.
+        const driverId = role === 'driver' ? req.auth.identity.id : otherId;
+        notify(() => { hub.bookingChanged(booking, 'block'); hub.chatChanged(booking); hub.requestsChanged(null, { alsoTo: [driverId] }); });
+      }
       res.status(result.created ? 201 : 200).json({
         blocked: true, alreadyBlocked: !result.created, guidance: blockGuidance(role, booking.status), chat: await chatFor(booking, req.auth),
       });
@@ -428,7 +452,50 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         const latest = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
         return res.status(409).json({ error: 'This job was just updated. Showing the latest status.', currentStatus: latest?.status, booking: latest });
       }
+      notify(() => {
+        hub.bookingChanged(booking, nextStatus === 'cancelled' ? 'cancelled' : 'status');
+        // A cancelled open request disappears from nearby drivers' lists.
+        if (verdict.from === 'searching' || verdict.from === 'pending') hub.requestsChanged(current);
+        // B15: both people now have a job to rate.
+        if (nextStatus === 'completed') hub.ratingsChanged([booking.customerId, booking.driverId]);
+      });
       res.json(booking);
+    } catch (error) { next(error); }
+  });
+
+  // ---- B11: realtime channel (rules in realtime.js) ----
+  // Step 1: a signed-in customer or driver swaps their session for a 30-second, single-use stream ticket.
+  app.post('/api/realtime/ticket', authenticate, limit.realtimeTicket, (req, res) => {
+    if (!realtimeEnabled) return res.status(503).json({ error: 'Live updates are off; the app keeps checking on its own.', code: 'realtime_disabled' });
+    const { profile, identity } = req.auth;
+    if (!isParty(profile.role)) return res.status(403).json({ error: 'Live updates are for customers and drivers' });
+    if (!hub.canConnect(identity.id)) {
+      return sendRateLimited(res, 30, { error: 'Too many live connections for this account. Close another AID window and try again.', code: 'too_many_streams' });
+    }
+    const driver = profile.role === 'driver' ? {
+      // Only a driver who may work hears about new requests (the request list repeats these checks).
+      isOnline: Boolean(profile.isOnline) && profile.verificationStatus === 'verified' && credentialsCurrent(profile),
+      equipmentType: profile.driverVehicle?.equipmentType || null,
+    } : null;
+    res.json({ ...hub.issueTicket({ userId: identity.id, role: profile.role, driver }), streamPath: '/api/realtime/stream' });
+  });
+  // Step 2: open the event stream with the ticket (EventSource can't send an Authorization header).
+  const redeemStreamTicket = (req, res, next) => {
+    const session = hub.redeemTicket(typeof req.query.ticket === 'string' ? req.query.ticket : '');
+    if (!session) return res.status(401).json({ error: 'This live-update ticket is invalid or expired. Ask for a new one.', code: 'invalid_ticket' });
+    req.auth = { identity: { id: session.userId }, profile: { role: session.role } };
+    req.realtimeSession = session;
+    next();
+  };
+  app.get('/api/realtime/stream', redeemStreamTicket, limit.realtimeStream, async (req, res, next) => {
+    try {
+      const session = req.realtimeSession;
+      const tooMany = () => sendRateLimited(res, 30, { error: 'Too many live connections for this account.', code: 'too_many_streams' });
+      if (!hub.canConnect(session.userId)) return tooMany();
+      const position = session.role === 'driver'
+        ? await repository.getDriverPosition(session.userId, LOCATION_MAX_AGE_MINUTES).catch(() => null)
+        : null;
+      if (!hub.attach(session, req, res, { position })) return tooMany();
     } catch (error) { next(error); }
   });
 
@@ -495,6 +562,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       }
       // The booking changed between the checks and the insert (e.g. the window just closed).
       if (!saved) return res.status(409).json({ error: 'This job can no longer be rated', code: RATING_CODES.windowClosed });
+      notify(() => hub.ratingsChanged([userId]));
       res.status(201).json(saved);
     } catch (error) { next(error); }
   });
@@ -529,6 +597,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         await repository.updateDriverPosition(driverId, position);
       }
       const from = await repository.getDriverPosition(driverId, LOCATION_MAX_AGE_MINUTES);
+      // B11: the realtime hub matches new requests against this position (kept in memory only).
+      hub.updateDriver(driverId, { position: from || null, isOnline: true });
       if (!from) return res.json({ status: LOCATION_REQUIRED_CODE, radiusMiles: requestRadiusMiles, requests: [] });
       const capability = equipmentCapability(req.auth.profile.driverVehicle.equipmentType);
       // B12: requests from a customer either side has blocked are never listed to this driver.
@@ -544,14 +614,15 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     try {
       if (typeof req.body.isOnline !== 'boolean') return res.status(400).json({ error: 'isOnline must be a boolean' });
       await repository.updateDriverOnlineStatus(req.auth.identity.id, req.body.isOnline);
+      hub.updateDriver(req.auth.identity.id, { isOnline: req.body.isOnline });
       res.json({ isOnline: req.body.isOnline });
     } catch (error) { next(error); }
   });
   app.post('/api/bookings/:bookingId/accept', authenticate, limit.accept, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
     try {
       // A job this driver went silent on, or a request past its window, ends first (E4).
-      await repository.expireStaleBookings({ driverId: req.auth.identity.id });
-      await repository.expireStaleBookings({ bookingId: req.params.bookingId });
+      await expireStale({ driverId: req.auth.identity.id });
+      await expireStale({ bookingId: req.params.bookingId });
       // One job at a time (also enforced atomically in acceptBooking); this gives the clearer message.
       const current = await repository.getActiveBooking(req.auth.identity.id, 'driver');
       if (current) return res.status(409).json({ error: 'Finish or cancel your current job before accepting another', code: 'driver_busy' });
@@ -578,13 +649,14 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (!booking) {
         // Something changed between the checks above and the atomic accept: the request ran out of
         // time or was taken, or this driver's other accept landed first (one job at a time).
-        await repository.expireStaleBookings({ bookingId: req.params.bookingId });
+        await expireStale({ bookingId: req.params.bookingId });
         if (await repository.getBookingStatus(req.params.bookingId) === 'expired') return expiredRequest(res);
         if (await repository.getActiveBooking(req.auth.identity.id, 'driver')) {
           return res.status(409).json({ error: 'Finish or cancel your current job before accepting another', code: 'driver_busy' });
         }
         return res.status(409).json({ error: 'Booking is no longer available' });
       }
+      notify(() => { hub.bookingChanged(booking, 'accepted'); hub.requestsChanged({ ...open, driverId: booking.driverId }); });
       res.json(booking);
     } catch (error) { next(error); }
   });
@@ -594,6 +666,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (!validCoordinates(location)) return res.status(400).json({ error: 'Valid coordinates are required' });
       const booking = await repository.updateDriverLocation(req.params.bookingId, req.auth.identity.id, { lat: location.lat, lng: location.lng });
       if (!booking) return res.status(404).json({ error: 'Active booking not found' });
+      notify(() => hub.bookingChanged(booking, 'location', { except: req.auth.identity.id }));
       res.json(booking);
     } catch (error) { next(error); }
   });
@@ -603,7 +676,9 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     try {
       const result = cleanDriverVehicle(req.body);
       if (!result.ok) return res.status(400).json({ error: result.error, field: result.field });
-      res.json(await repository.updateDriverVehicle(req.auth.identity.id, result.vehicle));
+      const saved = await repository.updateDriverVehicle(req.auth.identity.id, result.vehicle);
+      hub.updateDriver(req.auth.identity.id, { equipmentType: result.vehicle.equipmentType });
+      res.json(saved);
     } catch (error) { next(error); }
   });
 

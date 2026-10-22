@@ -4,7 +4,7 @@
  * database tidy between requests; an overdue request is never listed or accepted even before it runs.
  * Never overlaps itself; errors are logged and the next tick tries again. Returns stop().
  */
-function startExpirySweep({ repository, intervalMs, logger = console }) {
+function startExpirySweep({ repository, intervalMs, logger = console, onExpired = null }) {
   let running = false;
   async function tick() {
     if (running) return null;
@@ -13,6 +13,10 @@ function startExpirySweep({ repository, intervalMs, logger = console }) {
       const result = await repository.expireStaleBookings();
       if (result.expired.length || result.released.length) {
         logger.log(`[AID expiry] expired ${result.expired.length} unaccepted request(s), released ${result.released.length} silent job(s)`);
+        // B11: tell the affected customers/drivers (and nearby drivers) right away.
+        if (onExpired) {
+          try { await onExpired(result); } catch (error) { logger.error('[AID expiry] realtime notify failed:', error.message || error); }
+        }
       }
       return result;
     } catch (error) {

@@ -15,6 +15,7 @@ import { ratingSummary } from '../../lib/ratings'
 import { showChatEntry, type BookingChat } from '../../lib/chat'
 import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
+import RealtimeNotice from '../../components/ui/RealtimeNotice'
 
 interface DriverJobScreenProps {
   onBack: () => void
@@ -92,6 +93,7 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
 
   return (
     <div className="job-screen safe-top">
+      <RealtimeNotice />
       <header className="job-header">
         <button type="button" className="job-header__back" aria-label="Back to dashboard" onClick={onBack}><ChevronLeft size={22} /></button>
         <div><small>ACTIVE JOB</small><h1>{job.service.name}</h1></div>

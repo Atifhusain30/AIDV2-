@@ -26,6 +26,13 @@ import { driverVehicleSummary, vehicleComplete, VEHICLE_REQUIRED_COPY } from '..
 import { formatDistance, LOCATION_PROMPT_COPY } from '../../lib/nearbyRequests'
 import { completedTodayCount, driverRatingLabel, driverRatingNote, timeOfDayGreeting } from '../../lib/driverStats'
 import { apiService } from '../../services/api'
+import RealtimeNotice from '../../components/ui/RealtimeNotice'
+import { pollInterval } from '../../lib/realtime'
+import { useCoalescedRefresh, useRealtimeConnected, useRealtimeEvents } from '../../lib/useRealtimeStatus'
+
+/** Request list (with one GPS reading per refresh, B8): every 30 s; 60 s as a safety net while live updates are up. */
+export const REQUESTS_POLL_MS = 30_000
+const REQUESTS_SAFETY_POLL_MS = 60_000
 
 interface DriverHomeScreenProps {
   onOpenOnboarding: () => void
@@ -89,12 +96,24 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
     return () => { cancelled = true }
   }, [activeJobId])
 
+  // B11: a request near this driver appeared or was taken/cancelled/expired → re-fetch the normal,
+  // server-filtered list at once. Polling stays as the fallback (slower while live updates are up).
+  const realtimeConnected = useRealtimeConnected()
+  const listening = isOnline && canWork
+  const refreshRequests = useCoalescedRefresh(async () => { await fetchIncomingRequests() })
+  useRealtimeEvents((event) => {
+    if (listening && (event.type === 'requests' || event.type === 'resync')) void refreshRequests()
+  })
   useEffect(() => {
-    if (!isOnline || !canWork) return
-    fetchIncomingRequests()
-    const timer = window.setInterval(fetchIncomingRequests, 30000)
+    if (!listening) return
+    void refreshRequests()
+  }, [refreshRequests, listening])
+  useEffect(() => {
+    if (!listening) return
+    const every = realtimeConnected ? Math.max(REQUESTS_SAFETY_POLL_MS, pollInterval(REQUESTS_POLL_MS, true)) : REQUESTS_POLL_MS
+    const timer = window.setInterval(() => void refreshRequests(), every)
     return () => window.clearInterval(timer)
-  }, [fetchIncomingRequests, isOnline, canWork])
+  }, [refreshRequests, listening, realtimeConnected])
 
   // Going offline is always allowed; going online requires eligibility and vehicle details.
   const toggleAvailability = () => {
@@ -109,6 +128,7 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
 
   return (
     <div className="driver-work safe-top">
+      {listening && <RealtimeNotice />}
       <header className="driver-work__header">
         <div>
           <AidBrand compact label="DRIVER" />

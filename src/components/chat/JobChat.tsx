@@ -17,6 +17,9 @@ import {
   type BookingChat, type ChatMessage, type ChatState, type PendingMessage,
 } from '../../lib/chat'
 import type { SupportAudience } from '../../lib/support'
+import { pollInterval } from '../../lib/realtime'
+import { useRealtimeConnected, useRealtimeEvents } from '../../lib/useRealtimeStatus'
+import RealtimeNotice from '../ui/RealtimeNotice'
 
 interface JobChatProps {
   bookingId: string
@@ -54,6 +57,8 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
   const ids = { title: useId(), input: useId(), count: useId(), menu: useId() }
   const onChatChangeRef = useRef(onChatChange)
   onChatChangeRef.current = onChatChange
+  const refreshRef = useRef<(() => void) | null>(null)
+  const realtimeConnected = useRealtimeConnected()
 
   const applyState = useCallback((state: ChatState, extra: Partial<BookingChat> = {}) => {
     setChat((current) => ({ ...current, state, ...extra }))
@@ -100,16 +105,26 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
         inFlight = false
       }
     }
+    refreshRef.current = () => void refresh()
     void refresh(true)
-    const timer = window.setInterval(() => void refresh(), CHAT_POLL_MS)
     const onVisible = () => { if (document.visibilityState === 'visible') void refresh() }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
       stopped = true
-      window.clearInterval(timer)
+      refreshRef.current = null
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [bookingId, applyState])
+
+  // B11: a new message (or the chat closing) arrives as a live signal; polling is the fallback —
+  // every CHAT_POLL_MS while live updates are down, a slow safety net while they're up.
+  useRealtimeEvents((event) => {
+    if (event.type === 'resync' || ((event.type === 'chat' || event.type === 'booking') && event.bookingId === bookingId)) refreshRef.current?.()
+  })
+  useEffect(() => {
+    const timer = window.setInterval(() => refreshRef.current?.(), pollInterval(CHAT_POLL_MS, realtimeConnected))
+    return () => window.clearInterval(timer)
+  }, [bookingId, realtimeConnected])
 
   // Keep the newest message in view.
   useEffect(() => {
@@ -183,6 +198,7 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
   // Rendered on <body> so it sits above the bottom navigation and isn't clipped by animated job screens.
   return createPortal(
     <div className="chat-screen" role="dialog" aria-modal="true" aria-labelledby={ids.title}>
+      <RealtimeNotice />
       <header className="chat-header">
         <button type="button" className="chat-icon-button" aria-label="Close chat" onClick={onClose}><ChevronLeft size={22} aria-hidden="true" /></button>
         <div className="chat-header__title">
