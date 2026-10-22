@@ -100,6 +100,7 @@ describe('customer live tracking', () => {
     vi.mocked(apiService.updateBookingStatus).mockResolvedValue({ success: true, data: job({ status: 'cancelled' }) })
     useAppStore.setState({ activeBooking: job({ status: 'en_route' }) })
     render(<CustomerTrackingScreen booking={job({ status: 'en_route' })} />)
+    openMore()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this request?' })
     expect(within(dialog).getByText(/Marcus is already on the way/)).toBeTruthy()
@@ -111,6 +112,7 @@ describe('customer live tracking', () => {
 
   it('keeps the request when the customer backs out of cancelling', () => {
     render(<CustomerTrackingScreen booking={job({ status: 'accepted' })} />)
+    openMore()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
     fireEvent.click(screen.getByRole('button', { name: 'Keep request' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -120,6 +122,7 @@ describe('customer live tracking', () => {
   it('shows the server reason when a cancel is refused (e.g. the driver just arrived)', async () => {
     vi.mocked(apiService.updateBookingStatus).mockResolvedValue({ success: false, error: 'Your driver has already arrived, so this request can no longer be cancelled in the app.' })
     render(<CustomerTrackingScreen booking={job({ status: 'en_route' })} />)
+    openMore()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
     fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel request' }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/already arrived/)
@@ -128,9 +131,10 @@ describe('customer live tracking', () => {
   it('once the driver arrives there is no cancel, only reporting a problem', () => {
     for (const status of ['arrived', 'in_progress'] as const) {
       render(<CustomerTrackingScreen booking={job({ status, driverEta: undefined })} />)
+      expect(screen.getByText(status === 'arrived' ? /Marcus is here, so this request can't be cancelled/ : /Service has started/)).toBeTruthy()
+      openMore()
       expect(screen.queryByRole('button', { name: 'Cancel request' })).toBeNull()
       expect(screen.getByRole('button', { name: 'Report a problem' })).toBeTruthy()
-      expect(screen.getByText(status === 'arrived' ? /Marcus is here, so this request can't be cancelled/ : /Service has started/)).toBeTruthy()
       cleanup()
     }
   })
@@ -151,6 +155,7 @@ describe('customer live tracking', () => {
   it('reports a problem on this job through the shared support report (B18)', async () => {
     vi.mocked(apiService.createSupportReport).mockResolvedValue({ success: true, data: { id: '1', category: 'vehicle_damage', categoryLabel: 'Damage to my vehicle', message: '', status: 'open', booking: { id: 'booking-9', serviceName: 'Towing' }, createdAt: '2026-10-22T10:00:00Z', updatedAt: null, resolvedAt: null } })
     render(<CustomerTrackingScreen booking={job({ status: 'in_progress' })} />)
+    openMore()
     fireEvent.click(screen.getByRole('button', { name: 'Report a problem' }))
     const send = screen.getByRole('button', { name: 'Send report' })
     fireEvent.click(send)
@@ -190,7 +195,7 @@ describe('customer live tracking', () => {
     expect(screen.getByRole('button', { name: 'Message Marcus' })).toBeTruthy()
   })
 
-  it('design: map first, one sheet — ETA, compact progress, driver with rating and jobs on one line, quiet help rows', () => {
+  it('design: map first, one sheet — ETA, compact progress, driver card, Call · Message · ⋯ with quiet help rows behind ⋯', () => {
     const { container } = render(<CustomerTrackingScreen booking={job()} />)
     const progress = screen.getByRole('group', { name: 'Request progress' })
     expect(progress.textContent).toContain('On the way · Step 2 of 5')
@@ -198,12 +203,54 @@ describe('customer live tracking', () => {
     const meta = screen.getByLabelText('Rated 4.9 out of 5 from 150 ratings').parentElement!
     expect(meta.className).toContain('ui-meta')
     expect(meta.textContent).toMatch(/4\.9 \(150\) · 212 jobs/)
-    // The old five-circle row is gone; help actions are quiet rows, not four boxed buttons.
     expect(container.querySelector('.job-steps')).toBeNull()
-    const help = screen.getByRole('group', { name: 'Help with this request' })
+    // The reference's action row: Call · Message · ⋯ (the ⋯ holds the rest).
+    const actions = screen.getByRole('group', { name: 'Contact your driver' })
+    expect(within(actions).getByRole('link', { name: 'Call Marcus' })).toBeTruthy()
+    expect(within(actions).getByRole('button', { name: 'More options' })).toBeTruthy()
+    expect(screen.queryByRole('group', { name: 'Help with this request' })).toBeNull()
+    const sheet = openMore()
+    const help = within(sheet).getByRole('group', { name: 'Help with this request' })
     for (const name of ['Report a problem', 'Safety', 'Call 911', 'Cancel request']) {
       expect(within(help).getByRole('button', { name }).className).toContain('ui-row')
     }
+  })
+
+  it('the ETA is the largest text and also sits on the map as a chip; only a real ETA is shown', async () => {
+    render(<CustomerTrackingScreen booking={job()} />)
+    expect(screen.getByRole('heading', { level: 1, name: '27 min' })).toBeTruthy()
+    expect(document.querySelector('.track-eta-chip')?.textContent).toBe('27 min')
+    cleanup()
+    render(<CustomerTrackingScreen booking={job({ driverEta: undefined, driverLocation: undefined })} />)
+    expect(document.querySelector('.track-eta-chip')).toBeNull()
+  })
+
+  it('arrived: "I\'m with my driver" only changes this view (no server call); "I need a different driver" goes to Report a problem (no cancel after arrival)', () => {
+    render(<CustomerTrackingScreen booking={job({ status: 'arrived', driverEta: undefined })} />)
+    expect(document.querySelector('.track-here')?.textContent).toMatch(/Driver is here.*White Ford F-550 Flatbed/)
+    fireEvent.click(screen.getByRole('button', { name: "I'm with my driver" }))
+    expect(apiService.updateBookingStatus).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: "I'm with my driver" })).toBeNull()
+    expect(screen.getByText(/Marcus will start the service/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'I need a different driver' }))
+    expect(screen.getByRole('dialog', { name: 'Report an issue' })).toBeTruthy()
+    expect(apiService.updateBookingStatus).not.toHaveBeenCalled()
+  })
+
+  it('in service: a progress ring and a step checklist with the real times from the server', () => {
+    const arrivedAt = new Date('2026-10-22T18:52:00Z')
+    const startedAt = new Date('2026-10-22T18:55:00Z')
+    render(<CustomerTrackingScreen booking={job({ status: 'in_progress', dropoffLocation: undefined, service: { id: 'flat_tire', name: 'Flat tire', description: '', basePrice: 79, estimatedTime: 35 }, arrivedAt, startedAt, driverEta: undefined })} />)
+    expect(screen.getByRole('progressbar', { name: 'Service progress' })).toBeTruthy()
+    const steps = screen.getByRole('list', { name: 'Service steps' })
+    const items = within(steps).getAllByRole('listitem')
+    const clock = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    expect(items[0].textContent).toContain('Arrived at your location')
+    expect(items[0].textContent).toContain(clock(arrivedAt))
+    expect(items[1].textContent).toContain('Service started')
+    expect(items[1].textContent).toContain(clock(startedAt))
+    expect(items[2].textContent).toContain('Complete')
+    expect(items[2].className).not.toContain('is-done')
   })
 
   it('design: Back to Home sits on the map', () => {
@@ -212,16 +259,23 @@ describe('customer live tracking', () => {
     expect(useAppStore.getState().currentScreen).toBe('home')
   })
 
-  it('offers Safety and Call 911 (confirm first) on the tracking screen', () => {
+  it('offers Safety and Call 911 (confirm first): a shield on the map, and Call 911 under ⋯', () => {
     render(<CustomerTrackingScreen booking={job()} />)
     expect(screen.queryByRole('link', { name: /911/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Safety and 911' }))
+    const sheet = screen.getByRole('dialog', { name: 'Safety' })
+    expect(within(sheet).getByText(/driver's name, vehicle and plate/)).toBeTruthy()
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close safety' }))
+
+    openMore()
     fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
     const confirm = screen.getByRole('alertdialog', { name: 'Call 911?' })
     expect(within(confirm).getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
-    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Safety' }))
-    const sheet = screen.getByRole('dialog', { name: 'Safety' })
-    expect(within(sheet).getByText(/driver's name, vehicle and plate/)).toBeTruthy()
   })
 })
+
+/** Opens the ⋯ sheet (Report a problem, Safety, Call 911, Cancel request). */
+function openMore() {
+  fireEvent.click(screen.getByRole('button', { name: 'More options' }))
+  return screen.getByRole('dialog', { name: 'More options' })
+}

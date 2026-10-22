@@ -6,7 +6,7 @@
  */
 
 import { useRef, useState, type ReactNode } from 'react'
-import { ChevronLeft, Flag, MapPin } from 'lucide-react'
+import { ChevronLeft, Flag, MapPin, ShieldCheck } from 'lucide-react'
 import { Skeleton } from '../ui/Skeleton'
 import ChunkBoundary from '../ui/ChunkBoundary'
 import { lazyWithRetry } from '../../lib/lazyWithRetry'
@@ -15,7 +15,7 @@ const LiveDriverMap = lazyWithRetry(() => import('./LiveDriverMap'))
 
 type Point = { lat: number; lng: number }
 
-export function TrackLayout({ label, pickup, driver, stale = false, showConnector = false, mapSummary, chip, onBack, children }: {
+export function TrackLayout({ label, pickup, driver, stale = false, showConnector = false, mapSummary, chip, onBack, onSafety, overlay, children }: {
   label: string
   pickup: Point
   driver: Point | null
@@ -26,6 +26,10 @@ export function TrackLayout({ label, pickup, driver, stale = false, showConnecto
   /** Status chip over the map (role="status" lives inside). */
   chip?: ReactNode
   onBack?: () => void
+  /** Shield button top-right on the map: Safety tips and Call 911 (behind its confirm step). */
+  onSafety?: () => void
+  /** Decorative layer over the map (ETA chip, searching ring). Hidden from screen readers. */
+  overlay?: ReactNode
   children: ReactNode
 }) {
   const hasPickup = Number.isFinite(pickup.lat) && Number.isFinite(pickup.lng)
@@ -60,7 +64,13 @@ export function TrackLayout({ label, pickup, driver, stale = false, showConnecto
             </button>
           )}
           {chip}
+          {onSafety && (
+            <button type="button" className="track-v2__back track-v2__safety" aria-label="Safety and 911" aria-haspopup="dialog" onClick={onSafety}>
+              <ShieldCheck size={20} aria-hidden="true" />
+            </button>
+          )}
         </div>
+        {overlay && <div className="track-v2__overlay" aria-hidden="true">{overlay}</div>}
       </section>
       <section ref={panel} className="track-v2__panel">
         <button type="button" className="track-v2__handle" aria-label={expanded ? 'Show the map' : 'Show all details'} aria-expanded={expanded} onClick={toggle}>

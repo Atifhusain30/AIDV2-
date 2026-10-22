@@ -30,10 +30,19 @@ describe('customer Updates screen (no simulated data)', () => {
   it('while searching shows only the real request: no driver, ETA, messages or "mark completed"', () => {
     useAppStore.setState({ activeBooking: searching })
     render(<UpdatesScreen />)
-    expect(screen.getByText('Looking for a driver')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Finding a driver' })).toBeTruthy()
+    expect(screen.getByText(/Notifying nearby verified drivers/)).toBeTruthy()
     expect(screen.getByText('100 Elm St')).toBeTruthy()
     expect(screen.queryByText(/min away|Mark Completed|Chat with|typing/i)).toBeNull()
     expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('no fake stats while searching (no "drivers nearby", no average arrival) and a quiet outline Cancel', () => {
+    useAppStore.setState({ activeBooking: searching })
+    render(<UpdatesScreen />)
+    expect(screen.queryByText(/drivers? nearby|avg|average arrival|\d+ drivers/i)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Cancel request' }).className).toContain('ui-btn--secondary')
+    expect(screen.getByRole('button', { name: 'Safety and 911' })).toBeTruthy()
   })
 
   it('cancels a searching request through the API', async () => {

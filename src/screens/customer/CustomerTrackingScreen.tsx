@@ -5,23 +5,25 @@
  */
 
 import { useEffect, useState } from 'react'
-import { AlertCircle, Car, Clock3, Flag, Info, Phone, Star, XCircle } from 'lucide-react'
+import { AlertCircle, Battery, Check, CircleDot, Clock3, Droplets, Flag, Fuel, Info, KeyRound, MoreHorizontal, Phone, ShieldCheck, Truck, Wrench, XCircle, Zap } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { apiService } from '../../services/api'
 import { formatPrice } from '../../lib/money'
 import { arrivalClock, driverTracking, driverVehicleLabel, formatAge } from '../../lib/customerTracking'
 import { CUSTOMER_CANCEL_REASONS, CUSTOMER_CANCELLABLE, REPORTABLE, customerCancelText, customerNoCancelText } from '../../lib/jobLifecycle'
 import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
-import { SafetyActions } from '../../components/safety/Safety'
-import type { Booking, BookingStatus } from '../../types'
-import { jobCountLabel, ratingSummary } from '../../lib/ratings'
+import { Call911Sheet, SafetySheet } from '../../components/safety/Safety'
+import type { Booking, BookingStatus, ServiceType } from '../../types'
+import BottomSheet from '../../components/ui/BottomSheet'
+import Button from '../../components/ui/Button'
+import DriverCard from '../../components/ui/DriverCard'
+import ProgressRing from '../../components/ui/ProgressRing'
 import { showChatEntry, type BookingChat } from '../../lib/chat'
 import { MessageButton } from '../../components/chat/MessageButton'
 import ChunkBoundary from '../../components/ui/ChunkBoundary'
 import { lazyWithRetry } from '../../lib/lazyWithRetry'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
 import LiveRegion from '../../components/ui/LiveRegion'
-import PersonAvatar from '../../components/ui/PersonAvatar'
 import StepProgress from '../../components/ui/StepProgress'
 import { List, ListRow } from '../../components/ui/ListRow'
 import { TrackLayout, TripStops } from '../../components/tracking/TrackLayout'
@@ -38,6 +40,10 @@ const STEPS: { id: BookingStatus; label: string }[] = [
   { id: 'completed', label: 'Done' },
 ]
 
+const SERVICE_ICONS: Partial<Record<ServiceType, typeof Wrench>> = {
+  battery_jump: Battery, flat_tire: CircleDot, towing: Truck, lockout: KeyRound, fuel_delivery: Fuel, ev_charging: Zap, oil_change: Droplets,
+}
+
 const CLOCK_TICK_MS = 5000
 const HEADER_LABEL: Partial<Record<BookingStatus, string>> = {
   accepted: 'Driver confirmed', en_route: 'Driver on the way', arrived: 'Driver has arrived', in_progress: 'Service in progress',
@@ -46,7 +52,9 @@ const HEADER_LABEL: Partial<Record<BookingStatus, string>> = {
 export default function CustomerTrackingScreen({ booking }: { booking: Booking }) {
   const { setActiveBooking, updateBookingInHistory, setCurrentScreen } = useAppStore()
   const [now, setNow] = useState(() => Date.now())
-  const [sheet, setSheet] = useState<'cancel' | 'report' | null>(null)
+  const [sheet, setSheet] = useState<'more' | 'safety' | '911' | 'cancel' | 'report' | null>(null)
+  // "I'm with my driver": a local acknowledgement only — the driver starts the service on their side.
+  const [withDriver, setWithDriver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
@@ -65,9 +73,6 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
 
   const driver = booking.driver
   const firstName = driver?.firstName || 'Your driver'
-  // B15: real average (count) once there are enough ratings; otherwise "New on AID".
-  const driverRating = ratingSummary(driver)
-  const driverJobs = jobCountLabel(driver?.totalJobs)
   const tracking = driverTracking(booking, now)
   const vehicle = driverVehicleLabel(driver?.vehicle)
   const plate = driver?.vehicle?.plate?.trim()
@@ -138,20 +143,63 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
     </span>
   )
 
+  // In service: a checklist with the server's real timestamps; the ring shows how many steps are done.
+  const clock = (date?: Date) => (date ? new Date(date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : null)
+  const serviceSteps = [
+    { label: 'Arrived at your location', at: clock(booking.arrivedAt), done: true },
+    { label: isTow ? 'Vehicle loaded, heading to drop-off' : 'Service started', at: clock(booking.startedAt), done: true },
+    { label: 'Complete', at: null, done: false },
+  ]
+  const ServiceIcon = SERVICE_ICONS[booking.service.id] ?? Wrench
+  const showEtaChip = tracking.phase === 'live' && tracking.eta
+
   return (
     <TrackLayout label="Live tracking" pickup={pickup} driver={tracking.location} stale={tracking.phase === 'stale'}
-      showConnector={tracking.phase === 'live' || tracking.phase === 'stale'} mapSummary={mapSummary} chip={chip} onBack={() => setCurrentScreen('home')}>
+      showConnector={tracking.phase === 'live' || tracking.phase === 'stale'} mapSummary={mapSummary} chip={chip}
+      onBack={() => setCurrentScreen('home')} onSafety={() => setSheet('safety')}
+      overlay={showEtaChip ? <span className="track-eta-chip">{tracking.eta!.minutes} min</span> : undefined}>
       <LiveRegion message={liveText} />
       <RealtimeNotice />
 
-      <div className="track-eta">
-        <p className="track-eta__eyebrow">{HEADER_LABEL[booking.status] ?? 'Active request'}</p>
-        <h1>{headline}</h1>
-        {detail && <p className="track-eta__detail">{detail}</p>}
-        {tracking.eta && <small><Clock3 size={13} aria-hidden="true" /> Approximate — based on distance, not live traffic</small>}
-      </div>
+      {tracking.phase === 'in_service' ? (
+        <div className="track-service">
+          {isTow && <p className="track-eta__eyebrow">{HEADER_LABEL[booking.status]}</p>}
+          <ProgressRing value={serviceSteps.filter((step) => step.done).length / serviceSteps.length} label="Service progress" size={136} stroke={6}>
+            <ServiceIcon size={28} aria-hidden="true" />
+          </ProgressRing>
+          <h1>{headline}</h1>
+          {detail && <p className="track-eta__detail">{detail}</p>}
+          <ol className="track-steps" aria-label="Service steps">
+            {serviceSteps.map((step) => (
+              <li key={step.label} className={step.done ? 'is-done' : ''}>
+                <span className="track-steps__dot" aria-hidden="true">{step.done && <Check size={13} />}</span>
+                <span className="track-steps__label">{step.label}</span>
+                {step.at && <time>{step.at}</time>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : (
+        <div className="track-eta">
+          <p className="track-eta__eyebrow">{HEADER_LABEL[booking.status] ?? 'Active request'}</p>
+          <h1>{headline}</h1>
+          {detail && <p className={`track-eta__detail${tracking.phase === 'live' && tracking.eta ? ' is-live' : ''}`}>{detail}</p>}
+          {tracking.eta && <small><Clock3 size={13} aria-hidden="true" /> Approximate — based on distance, not live traffic</small>}
+        </div>
+      )}
 
-      <StepProgress label="Request progress" current={stepIndex} steps={STEPS} />
+      {tracking.phase === 'arrived' && (
+        <div className="track-here">
+          <p><span className="track-here__dot" aria-hidden="true" /> Driver is here{vehicle ? ` — ${vehicle}` : ''}</p>
+          {withDriver
+            ? <p className="track-here__note">{firstName} will start the service and you'll see each step here.</p>
+            : <Button block onClick={() => setWithDriver(true)}>I'm with my driver</Button>}
+          {/* No cancelling after arrival (B10): a wrong or unsafe driver is reported to support. */}
+          <Button block variant="ghost" aria-haspopup="dialog" onClick={() => setSheet('report')}>I need a different driver</Button>
+        </div>
+      )}
+
+      {tracking.phase !== 'in_service' && <StepProgress label="Request progress" current={stepIndex} steps={STEPS} />}
 
       {tracking.phase === 'stale' && (
         <div className="ui-alert ui-alert--warning" role="alert">
@@ -160,32 +208,28 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
         </div>
       )}
 
-      <div className="track-card">
-        <div className="track-person" aria-label="Your driver" role="group">
-          <PersonAvatar name={driver?.name || firstName} />
-          <div className="track-person__text">
-            <strong>{driver?.name || 'Your driver'}</strong>
-            <span className="ui-meta">
-              {driverRating
-                ? <><span className="ui-rating" aria-label={driverRating.label}><Star size={13} aria-hidden="true" /> {driverRating.value} ({driverRating.count})</span>{driverJobs && <> · {driverJobs}</>}</>
-                : <span>New on AID{driverJobs && <> · {driverJobs}</>}</span>}
-            </span>
-          </div>
-          <div className="track-person__actions">
-            {showChatEntry(booking.chat) && (
-              <MessageButton name={firstName} unread={chatOpen ? 0 : booking.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
-            )}
-            {driver?.phone && (
+      <DriverCard name={driver?.name || 'Your driver'} rating={driver} totalJobs={driver?.totalJobs} vehicle={vehicle || null} plate={plate || null}>
+        <div className="track-actions" role="group" aria-label="Contact your driver">
+          {driver?.phone && (
+            <span className="track-action">
               <a className="ui-icon-btn" href={`tel:${driver.phone}`} aria-label={`Call ${firstName}`}><Phone size={19} aria-hidden="true" /></a>
-            )}
-          </div>
+              <span aria-hidden="true">Call</span>
+            </span>
+          )}
+          {showChatEntry(booking.chat) && (
+            <span className="track-action">
+              <MessageButton name={firstName} unread={chatOpen ? 0 : booking.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
+              <span aria-hidden="true">Message</span>
+            </span>
+          )}
+          <span className="track-action">
+            <button type="button" className="ui-icon-btn" aria-label="More options" aria-haspopup="dialog" onClick={() => setSheet('more')}>
+              <MoreHorizontal size={20} aria-hidden="true" />
+            </button>
+            <span aria-hidden="true">More</span>
+          </span>
         </div>
-        <div className="track-vehicle" role="group" aria-label="Driver vehicle">
-          <Car size={18} aria-hidden="true" />
-          <span><small>Look for</small><strong>{vehicle || 'Vehicle details not added yet'}</strong></span>
-          {plate && <span className="ui-plate">{plate}</span>}
-        </div>
-      </div>
+      </DriverCard>
 
       <div className="track-card">
         <TripStops pickup={booking.location.address} dropoff={booking.dropoffLocation?.address} done={isTow && booking.status === 'in_progress'} />
@@ -195,11 +239,18 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
       {error && <p className="ui-alert ui-alert--danger" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
       {noCancelText && <p className="ui-alert"><Info size={15} aria-hidden="true" /> {noCancelText}</p>}
 
-      <List label="Help with this request" className="track-more">
-        {REPORTABLE.has(booking.status) && <ListRow icon={<Flag size={18} />} title="Report a problem" hasPopup disabled={busy} onClick={() => setSheet('report')} />}
-        <SafetyActions audience="customer" />
-        {canCancel && <ListRow icon={<XCircle size={18} />} title="Cancel request" tone="danger" hasPopup chevron={false} disabled={busy} onClick={() => setSheet('cancel')} />}
-      </List>
+      {sheet === 'more' && (
+        <BottomSheet title="More options" closeLabel="Close options" onClose={() => setSheet(null)}>
+          <List label="Help with this request" className="track-more">
+            {REPORTABLE.has(booking.status) && <ListRow icon={<Flag size={18} />} title="Report a problem" hasPopup disabled={busy} onClick={() => setSheet('report')} />}
+            <ListRow icon={<ShieldCheck size={19} />} title="Safety" hasPopup onClick={() => setSheet('safety')} />
+            <ListRow icon={<Phone size={18} />} title="Call 911" tone="danger" hasPopup chevron={false} onClick={() => setSheet('911')} />
+            {canCancel && <ListRow icon={<XCircle size={18} />} title="Cancel request" tone="danger" hasPopup chevron={false} disabled={busy} onClick={() => setSheet('cancel')} />}
+          </List>
+        </BottomSheet>
+      )}
+      {sheet === 'safety' && <SafetySheet audience="customer" onClose={() => setSheet(null)} />}
+      {sheet === '911' && <Call911Sheet onBack={() => setSheet(null)} backLabel="Cancel" onClose={() => setSheet(null)} />}
 
       {sheet === 'cancel' && (
         <ConfirmSheet

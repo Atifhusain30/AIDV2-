@@ -424,7 +424,8 @@ body::before { content: ""; position: fixed; z-index: 44; top: 0; right: 0; left
 /* Customer live tracking (after a driver accepts) */
 /* Full-bleed map + bottom sheet (Uber-style). The map is sticky so the sheet scrolls over it. */
 .track-v2 { position: relative; min-height: 100dvh; background: var(--aid-ink); color: var(--aid-ivory); }
-.track-v2__map { position: sticky; z-index: 0; top: 0; height: 56dvh; overflow: hidden; background: #111115; isolation: isolate; }
+/* Standards checklist: the map keeps at least 55% of the screen (60dvh less the sheet's 24px overlap). */
+.track-v2__map { position: sticky; z-index: 0; top: 0; height: 60dvh; overflow: hidden; background: #111115; isolation: isolate; }
 .track-v2__canvas { position: absolute; inset: 0; }
 .track-v2__canvas .leaflet-tile-pane { filter: invert(1) hue-rotate(200deg) brightness(.82) contrast(.9) saturate(.35); }
 .track-v2__map::after { content: ""; position: absolute; z-index: 400; inset: auto 0 0; height: 48px; background: linear-gradient(to bottom, transparent, rgba(11, 11, 15, .55)); pointer-events: none; }
@@ -468,6 +469,43 @@ body::before { content: ""; position: fixed; z-index: 44; top: 0; right: 0; left
 .track-trip__price { display: flex; align-items: center; justify-content: space-between; padding-top: 12px; border-top: 1px solid var(--aid-line); color: var(--aid-text-2); font-size: var(--aid-fs-sm); }
 .track-trip__price strong { color: var(--aid-ivory); font-size: var(--aid-fs-base); }
 .track-more .ui-row { min-height: 52px; }
+/* Completion ("All set!") */
+.complete-sheet .ui-sheet__header { text-align: center; }
+.complete-check { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 4px; border-radius: 50%; background: #34d399; color: #000; }
+.complete-card { display: grid; gap: 4px; padding: 4px 14px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
+.complete-card__total { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--aid-line); color: var(--aid-text-2); font-size: var(--aid-fs-sm); }
+.complete-card__total strong { color: var(--aid-ivory); font-size: var(--aid-fs-xl); font-weight: 700; }
+.complete-card .ui-list { border: 0; background: transparent; }
+/* Owner reference: safety shield top-right, ETA chip on the map, Call · Message · More row. */
+.track-v2__safety { margin-left: auto; }
+/* The quiet outline Cancel under "Finding a driver". */
+.track-v2__panel > .ui-btn--secondary { border-color: var(--aid-line-strong); background: transparent; }
+.track-v2__overlay { position: absolute; z-index: 450; inset: 0; pointer-events: none; }
+.track-eta-chip { position: absolute; bottom: 40px; left: 50%; padding: 6px 14px; border: 1px solid var(--aid-line-strong); border-radius: var(--aid-radius-pill); background: var(--aid-ink); color: var(--aid-ivory); font-size: var(--aid-fs-base); font-weight: 700; transform: translateX(-50%); }
+.track-finding { position: absolute; top: 50%; left: 50%; width: 0; height: 0; }
+.track-finding__ring { position: absolute; top: -48px; left: -48px; width: 96px; height: 96px; border: 1.5px solid rgba(255, 255, 255, .5); border-radius: 50%; animation: track-finding 2.8s ease-out infinite; }
+.track-finding__ring--late { animation-delay: 1.4s; }
+@keyframes track-finding { from { transform: scale(.35); opacity: .9; } to { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .track-finding__ring { animation: none; opacity: .5; } .track-finding__ring--late { display: none; } }
+.track-eta__detail.is-live { color: #34d399; font-weight: 600; }
+.track-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; padding-top: 12px; border-top: 1px solid var(--aid-line); }
+.track-action { display: grid; justify-items: center; gap: 4px; color: var(--aid-text-2); font-size: var(--aid-fs-xs); font-weight: 500; }
+.track-action .ui-icon-btn { width: 100%; height: 44px; border-radius: var(--aid-radius-pill); }
+.track-here { display: grid; gap: 8px; padding: 14px; border: 1px solid rgba(52, 211, 153, .35); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
+.track-here p { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: var(--aid-fs-base); font-weight: 600; }
+.track-here p.track-here__note { display: block; color: var(--aid-text-2); font-size: var(--aid-fs-sm); font-weight: 400; }
+.track-here__dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #34d399; }
+.track-service { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.track-service h1 { margin-top: 4px; font-size: var(--aid-fs-xl); font-weight: 700; letter-spacing: -.02em; }
+.track-service .ui-ring__center { color: var(--aid-signal-strong); }
+.track-steps { display: grid; gap: 0; width: 100%; margin-top: 8px; padding: 4px 14px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); text-align: left; }
+.track-steps li { display: flex; align-items: center; gap: 12px; min-height: 48px; color: var(--aid-text-3); font-size: var(--aid-fs-base); }
+.track-steps li + li { border-top: 1px solid var(--aid-line); }
+.track-steps li.is-done { color: var(--aid-ivory); }
+.track-steps__dot { display: grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1.5px solid var(--aid-line-strong); border-radius: 50%; }
+.track-steps li.is-done .track-steps__dot { border-color: var(--aid-signal); background: var(--aid-signal); color: #fff; }
+.track-steps__label { flex: 1; }
+.track-steps time { color: var(--aid-text-3); font-size: var(--aid-fs-sm); }
 .track-searching-bar { position: relative; height: 4px; overflow: hidden; border-radius: 2px; background: rgba(255, 255, 255, .1); }
 .track-searching-bar span { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: 2px; background: var(--aid-signal-strong); animation: track-searching 1.6s ease-in-out infinite; }
 @keyframes track-searching { from { transform: translateX(-100%); } to { transform: translateX(300%); } }

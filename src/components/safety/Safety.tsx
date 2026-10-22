@@ -32,7 +32,7 @@ const GUIDANCE: Record<SafetyAudience, string[]> = {
 const TIP_ICONS = [AlertTriangle, MapPin, Car, UserCheck]
 
 /** Confirm step before dialing. The tel:911 link only exists here, never one tap from a screen. */
-function Call911Sheet({ onBack, backLabel, onClose }: { onBack: () => void; backLabel: string; onClose: () => void }) {
+export function Call911Sheet({ onBack, backLabel, onClose }: { onBack: () => void; backLabel: string; onClose: () => void }) {
   return (
     <BottomSheet
       title="Call 911?" titleId="call-911-title" describedBy="call-911-text" role="alertdialog" showClose={false} onClose={onClose}

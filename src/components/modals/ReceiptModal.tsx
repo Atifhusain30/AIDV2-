@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { CalendarDays, Car, Check, CreditCard, MapPin, Star } from 'lucide-react'
+import { CalendarDays, Car, Check, CreditCard, MapPin, ReceiptText, Star } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import BottomSheet from '../ui/BottomSheet'
@@ -38,8 +38,10 @@ export default function ReceiptModal() {
   const [pendingRating, setPendingRating] = useState<PendingRating | null>(null)
   const [ratingOpen, setRatingOpen] = useState(false)
   const [rated, setRated] = useState(false)
+  const [summary, setSummary] = useState(true)
 
   useEffect(() => {
+    setSummary(true)
     setPendingRating(null)
     setRatingOpen(false)
     setRated(false)
@@ -94,6 +96,55 @@ export default function ReceiptModal() {
     )
   }
 
+  const ratePrompt = rated ? (
+    <p className="rating-done" role="status"><Star size={16} aria-hidden="true" /> Thanks — your rating is saved.</p>
+  ) : pendingRating && (
+    <button type="button" className="rating-prompt" onClick={() => setRatingOpen(true)}>
+      <Star size={20} aria-hidden="true" />
+      <span>Rate {pendingRating.rateeFirstName || 'your driver'}<small>Until {new Date(pendingRating.rateBy).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</small></span>
+    </button>
+  )
+  const ratingSheet = ratingOpen && pendingRating && (
+    <ChunkBoundary>
+      <RatingSheet
+        pending={pendingRating}
+        context="after_job"
+        onRated={() => { setRated(true); setRatingOpen(false) }}
+        onSkip={() => { if (userId) markRatingSkipped(userId, pendingRating.bookingId); setRatingOpen(false) }}
+      />
+    </ChunkBoundary>
+  )
+
+  // Owner reference "Complete": the first time a finished job is shown, a calm summary with the
+  // total and the facts; the itemised receipt is one tap away. Nothing here about charging.
+  if (summary && !booking.receiptViewed) {
+    return (
+      <>
+        <BottomSheet title="All set!" titleId="complete-title" subtitle="Thanks for using AID. We hope your day gets better from here."
+          closeLabel="Close" className="receipt-sheet complete-sheet" onClose={handleDone}
+          footer={(
+            <>
+              <Button size="lg" block onClick={handleDone}>Done</Button>
+              <Button variant="ghost" block icon={<ReceiptText size={18} aria-hidden="true" />} onClick={() => setSummary(false)}>View receipt</Button>
+            </>
+          )}>
+          <span className="complete-check" aria-hidden="true"><Check size={30} /></span>
+          <div className="complete-card">
+            <p className="complete-card__total"><span>{isFinal ? 'Total' : 'Quoted total'}</span><strong>{formatPrice(grandTotal)}</strong></p>
+            <List label="Service summary">
+              <InfoRow icon={<CalendarDays size={18} />} title={`${date} at ${time}`} subtitle={booking.service.name} />
+              <InfoRow icon={<MapPin size={18} />} title={booking.location.address} subtitle="Location" />
+              {booking.vehicle && <InfoRow icon={<Car size={18} />} title={`${booking.vehicle.label}${booking.vehicle.plate ? ` · ${booking.vehicle.plate}` : ''}`} subtitle="Vehicle" />}
+              {driverName && <InfoRow icon={<PersonAvatar name={driverName} size="sm" />} title={driverName} subtitle="Driver" />}
+            </List>
+          </div>
+          {ratePrompt}
+        </BottomSheet>
+        {ratingSheet}
+      </>
+    )
+  }
+
   const footer = paid || processing
     ? <Button size="lg" block onClick={handleDone}>Done</Button>
     : (
@@ -113,14 +164,7 @@ export default function ReceiptModal() {
         </div>
 
         {/* B15: rate the driver (only while the server says this job can still be rated) */}
-        {rated ? (
-          <p className="rating-done" role="status"><Star size={16} aria-hidden="true" /> Thanks — your rating is saved.</p>
-        ) : pendingRating && (
-          <button type="button" className="rating-prompt" onClick={() => setRatingOpen(true)}>
-            <Star size={20} aria-hidden="true" />
-            <span>Rate {pendingRating.rateeFirstName || 'your driver'}<small>Until {new Date(pendingRating.rateBy).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</small></span>
-          </button>
-        )}
+        {ratePrompt}
 
         <List label="Service details">
           {driverName && <InfoRow icon={<PersonAvatar name={driverName} size="sm" />} title={driverName} subtitle="Driver" />}
@@ -151,16 +195,7 @@ export default function ReceiptModal() {
         </div>
         {paymentError && <p className="ui-alert ui-alert--danger" role="alert">{paymentError}</p>}
       </BottomSheet>
-      {ratingOpen && pendingRating && (
-        <ChunkBoundary>
-          <RatingSheet
-            pending={pendingRating}
-            context="after_job"
-            onRated={() => { setRated(true); setRatingOpen(false) }}
-            onSkip={() => { if (userId) markRatingSkipped(userId, pendingRating.bookingId); setRatingOpen(false) }}
-          />
-        </ChunkBoundary>
-      )}
+      {ratingSheet}
     </>
   )
 }

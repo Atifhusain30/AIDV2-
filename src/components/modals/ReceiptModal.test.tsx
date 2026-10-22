@@ -28,9 +28,33 @@ describe('ReceiptModal secure checkout', () => {
     useAppStore.setState({ receiptBookingId: booking.id, bookingHistory: [booking] })
   })
 
+  afterEach(() => cleanup())
+
+  it('right after the job: "All set!" with the total, date, address, vehicle and driver, then View receipt or Done', () => {
+    const done = { ...booking, finalPrice: 79, vehicle: { label: '2020 Honda Civic', plate: 'ABC123' }, driver: { id: 'd1', name: 'Marcus T.', firstName: 'Marcus', rating: null, totalJobs: 3, vehicle: null } } as unknown as Booking
+    useAppStore.setState({ receiptBookingId: done.id, bookingHistory: [done] })
+    render(<ReceiptModal />)
+    const sheet = screen.getByRole('dialog', { name: 'All set!' })
+    expect(within(sheet).getByText(/^\$79(\.00)?$/)).toBeTruthy()
+    expect(within(sheet).getByText('100 Main Street')).toBeTruthy()
+    expect(within(sheet).getByText(/2020 Honda Civic/)).toBeTruthy()
+    expect(within(sheet).getByText('Marcus T.')).toBeTruthy()
+    // Nothing about charging on the completion summary (payments aren't live yet).
+    expect(within(sheet).queryByText(/charged|Pay securely/i)).toBeNull()
+    fireEvent.click(within(sheet).getByRole('button', { name: 'View receipt' }))
+    expect(screen.getByRole('dialog', { name: 'Receipt' })).toBeTruthy()
+  })
+
+  it('a receipt opened again later goes straight to the receipt', () => {
+    useAppStore.setState({ receiptBookingId: booking.id, bookingHistory: [{ ...booking, receiptViewed: true }] })
+    render(<ReceiptModal />)
+    expect(screen.getByRole('dialog', { name: 'Receipt' })).toBeTruthy()
+  })
+
   it('opens the Stripe-hosted checkout from an unpaid receipt', async () => {
     render(<ReceiptModal />)
     expect(screen.queryByText('Visa •••• 4242')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'View receipt' }))
     fireEvent.click(screen.getByRole('button', { name: 'Pay securely' }))
     // F6: Stripe's checkout is lazy-loaded, so it appears once its code has loaded.
     expect(await screen.findByTestId('stripe-checkout')).toBeTruthy()
