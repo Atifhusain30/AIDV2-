@@ -4,7 +4,8 @@
  */
 
 import { useEffect, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
+import Dialog from '../ui/Dialog'
 import {
   X,
   Receipt,
@@ -116,42 +117,29 @@ export default function ReceiptModal() {
 
   return (
     <>
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-        onClick={handleDone}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-gradient-to-b from-[#1a1a3e] to-[#12122a] rounded-3xl border border-white/10 shadow-2xl"
-        >
+    <Dialog labelledBy="receipt-title" onClose={handleDone} handle={false}
+      backdropClassName="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-gradient-to-b from-[#1a1a3e] to-[#12122a] rounded-3xl border border-white/10 shadow-2xl aid-pop-in">
           {/* Header */}
           <div className="sticky top-0 z-10 bg-gradient-to-b from-[#1a1a3e] to-transparent p-6 pb-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <Receipt size={20} className="text-emerald-400" />
+                  <Receipt size={20} className="text-emerald-400" aria-hidden="true" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">Receipt</h2>
+                  <h2 id="receipt-title" className="text-xl font-bold text-white">Receipt</h2>
                   <p className="text-xs text-gray-400">Service completed</p>
                 </div>
               </div>
-              <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
+              <button
+                type="button"
                 onClick={handleDone}
-                className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+                aria-label="Close receipt"
+                className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
               >
-                <X size={18} />
-              </motion.button>
+                <X size={18} aria-hidden="true" />
+              </button>
             </div>
           </div>
           
@@ -197,10 +185,10 @@ export default function ReceiptModal() {
                 </div>
                 {booking.vehicle && (
                   <div className="flex items-center gap-2 text-gray-400 text-sm">
-                    <span className="text-gray-500">Vehicle:</span>
+                    <span className="text-gray-400">Vehicle:</span>
                     <span>{booking.vehicle.label}</span>
                     {booking.vehicle.plate && (
-                      <span className="text-gray-500">({booking.vehicle.plate})</span>
+                      <span className="text-gray-400">({booking.vehicle.plate})</span>
                     )}
                   </div>
                 )}
@@ -294,9 +282,7 @@ export default function ReceiptModal() {
               Done
             </motion.button>
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+    </Dialog>
     {ratingSheet}
     </>
   )

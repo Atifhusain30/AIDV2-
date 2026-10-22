@@ -1,5 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { MotionConfig } from 'framer-motion'
 import App from './App'
 import './index.css'
 import 'leaflet/dist/leaflet.css'
@@ -11,7 +12,10 @@ initializeCapacitor()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    {/* F4: framer-motion follows the phone's Reduce Motion setting (slides/scales become fades or nothing). */}
+    <MotionConfig reducedMotion="user">
+      <App />
+    </MotionConfig>
   </React.StrictMode>,
 )
 

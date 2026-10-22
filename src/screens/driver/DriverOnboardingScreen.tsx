@@ -12,6 +12,7 @@ import { documentService, DOCUMENT_REQUIREMENTS, REQUIRED_DOCUMENT_TYPES } from 
 import type { Driver, DriverDocument, DriverDocumentType, DriverVerification } from '../../types'
 import { driverVehicleSummary, equipmentLabel, vehicleComplete } from '../../lib/driverVehicle'
 import { formatCalendarDate } from '../../lib/dates'
+import Dialog from '../../components/ui/Dialog'
 
 interface DriverOnboardingScreenProps {
   onComplete: () => void
@@ -113,14 +114,12 @@ function UploadSheet({ type, onClose }: { type: DriverDocumentType; onClose: () 
   }
 
   return (
-    <div className="account-sheet-backdrop" role="presentation" onMouseDown={() => !isUploading && onClose()}>
-      <section className="account-sheet verify-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="account-sheet__handle" />
+    <Dialog labelledBy={titleId} describedBy={`${titleId}-hint`} className="account-sheet verify-sheet" dismissible={!isUploading} onClose={onClose}>
         <div className="account-sheet__header">
           <div><small>UPLOAD DOCUMENT</small><h2 id={titleId}>{requirement.label}</h2></div>
           <button type="button" aria-label="Close" disabled={isUploading} onClick={onClose}><X size={20} /></button>
         </div>
-        <p className="verify-sheet__hint">{requirement.hint}</p>
+        <p id={`${titleId}-hint`} className="verify-sheet__hint">{requirement.hint}</p>
 
         {requirement.requiresExpiration && (
           <label className="verify-sheet__field" htmlFor={dateId}>
@@ -141,8 +140,7 @@ function UploadSheet({ type, onClose }: { type: DriverDocumentType; onClose: () 
           </button>
         </div>
         <p className="verify-sheet__privacy">Documents are stored privately and only seen by the AID review team.</p>
-      </section>
-    </div>
+    </Dialog>
   )
 }
 
@@ -159,6 +157,7 @@ export default function DriverOnboardingScreen({ onComplete, onOpenVehicle }: Dr
     return (
       <div className="driver-work verify safe-top safe-bottom">
         <button type="button" className="verify__back" onClick={onComplete}><ArrowLeft size={18} aria-hidden="true" /> Back to work</button>
+        <h1 className="sr-only">Driver verification</h1>
         <div className="driver-empty-state" role="status"><Loader2 size={25} className="animate-spin" aria-hidden="true" /><strong>Loading your verification</strong></div>
       </div>
     )

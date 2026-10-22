@@ -53,6 +53,16 @@ import {
 type AppMode = 'select' | 'customer' | 'driver'
 type DriverView = 'home' | 'onboarding' | 'job' | 'settings' | 'vehicle' | 'help'
 
+const CUSTOMER_TITLES: Record<string, string> = { home: 'Home', history: 'Activity', chat: 'Updates', profile: 'Account' }
+const DRIVER_TITLES: Record<DriverView, string> = {
+  home: 'Driver home', onboarding: 'Verification', job: 'Active job', settings: 'Settings', vehicle: 'Vehicle & equipment', help: 'Help & Support',
+}
+
+/** Sets document.title as "<screen> · AID" while the screen is shown. */
+function useDocumentTitle(title: string | null) {
+  useEffect(() => { if (title) document.title = `${title} · AID` }, [title])
+}
+
 // Intro screen to select customer or driver
 function AppModeSelector({
   onSelectCustomer,
@@ -84,10 +94,10 @@ function AppModeSelector({
           <p>One trusted place to request help, follow every update, or earn by helping drivers get moving again.</p>
         </div>
 
-        <div className="mode-selector__trust" aria-label="Service benefits">
-          <span><Clock3 size={15} /> Clear arrival times</span>
-          <span><ShieldCheck size={15} /> Verified providers</span>
-          <span><MapPinned size={15} /> Live progress</span>
+        <div className="mode-selector__trust" role="group" aria-label="Service benefits">
+          <span><Clock3 size={15} aria-hidden="true" /> Clear arrival times</span>
+          <span><ShieldCheck size={15} aria-hidden="true" /> Verified providers</span>
+          <span><MapPinned size={15} aria-hidden="true" /> Live progress</span>
         </div>
 
         <div className="mode-selector__roles">
@@ -136,6 +146,9 @@ function CustomerApp() {
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // F4: each screen has its own page title (read by screen readers on web / the admin site).
+  useDocumentTitle(CUSTOMER_TITLES[currentScreen] ?? 'Home')
 
   const renderScreen = () => {
     switch (currentScreen) {
@@ -190,6 +203,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
   // The vehicle screen returns to wherever it was opened from (home, onboarding or settings).
   const [vehicleReturn, setVehicleReturn] = useState<DriverView>('home')
   const openVehicle = (from: DriverView) => { setVehicleReturn(from); setCurrentView('vehicle') }
+  useDocumentTitle(DRIVER_TITLES[currentView])
   // Share GPS with the customer on every driver screen while a job is active.
   useJobLocationSharing()
   // Notice a customer cancellation (or any server-side change) to the active job.
@@ -227,7 +241,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
     <>
     <AnimatePresence mode="wait">
       {currentView === 'home' && (
-        <motion.div
+        <motion.main
           key="home"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -239,11 +253,11 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
             onOpenSettings={() => setCurrentView('settings')}
             onOpenActiveJob={() => setCurrentView('job')}
           />
-        </motion.div>
+        </motion.main>
       )}
 
       {currentView === 'onboarding' && (
-        <motion.div
+        <motion.main
           key="onboarding"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -254,11 +268,11 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
             onSkip={() => setCurrentView('home')}
             onOpenVehicle={() => openVehicle('onboarding')}
           />
-        </motion.div>
+        </motion.main>
       )}
 
       {currentView === 'vehicle' && (
-        <motion.div
+        <motion.main
           key="vehicle"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -269,11 +283,11 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
             onBack={() => setCurrentView(vehicleReturn)}
             onSaved={() => setCurrentView(vehicleReturn)}
           />
-        </motion.div>
+        </motion.main>
       )}
 
       {currentView === 'job' && (
-        <motion.div
+        <motion.main
           key="job"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -283,28 +297,29 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
             onBack={() => setCurrentView('home')}
             onCompleted={(job) => void askToRate(job)}
           />
-        </motion.div>
+        </motion.main>
       )}
 
       {currentView === 'help' && (
-        <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="driver-help">
+        <motion.main key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="driver-help">
           <HelpSupportScreen audience="driver" onBack={() => setCurrentView('settings')} />
-        </motion.div>
+        </motion.main>
       )}
 
       {currentView === 'settings' && (
-        <motion.div
+        <motion.main
           key="settings"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="driver-settings min-h-screen px-6 py-8 safe-top"
         >
-          <button 
+          <button
+            type="button"
             onClick={() => setCurrentView('home')}
-            className="text-gray-400 mb-6"
+            className="text-gray-400 mb-4 -ml-2 min-h-[44px] px-2"
           >
-            ← Back
+            <span aria-hidden="true">← </span>Back
           </button>
           <h1 className="text-2xl font-bold text-white mb-6">Settings</h1>
           
@@ -314,7 +329,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
               className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
             >
               <span className="text-white">Documents</span>
-              <p className="text-gray-500 text-sm">Manage your verification documents</p>
+              <p className="text-gray-400 text-sm">Manage your verification documents</p>
             </button>
 
             <button
@@ -322,7 +337,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
               className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
             >
               <span className="text-white">Vehicle & equipment</span>
-              <p className="text-gray-500 text-sm">{driverVehicleSummary((user as Driver | null)?.vehicle) || 'Add the vehicle customers will look for'}</p>
+              <p className="text-gray-400 text-sm">{driverVehicleSummary((user as Driver | null)?.vehicle) || 'Add the vehicle customers will look for'}</p>
             </button>
             
             <button
@@ -330,7 +345,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
               className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
             >
               <span className="text-white">Help &amp; Support</span>
-              <p className="text-gray-500 text-sm">Report a problem, your reports, common questions</p>
+              <p className="text-gray-400 text-sm">Report a problem, your reports, common questions</p>
             </button>
 
             <div className="account-menu">
@@ -344,7 +359,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
               Log Out
             </button>
           </div>
-        </motion.div>
+        </motion.main>
       )}
     </AnimatePresence>
     {/* Mounted once per app open so the reminder runs once (never re-triggered by the sheet below). */}
@@ -458,6 +473,9 @@ function App() {
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the account or its role changes
   }, [token, user?.id, userRole])
+
+  // Signed in, the customer / driver shells set the title for each screen.
+  useDocumentTitle(appMode === 'select' ? 'Roadside assistance' : !isAuthenticated ? (appMode === 'driver' ? 'Driver sign in' : 'Sign in') : null)
 
   // E6: the one sign-out; with nobody signed in this portal shows its sign-in screen.
   const handleLogout = () => { void signOut('user') }

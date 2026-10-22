@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { createPortal } from 'react-dom'
+import Dialog from '../components/ui/Dialog'
 import {
   Car,
   Check,
@@ -173,11 +173,10 @@ export default function ProfileScreen() {
       )}
       <p className="account-version">AID Roadside · Version 1.0</p>
 
-      {showVehicleForm && createPortal(
-        <div className="account-sheet-backdrop" role="presentation" onMouseDown={() => setShowVehicleForm(false)}>
-          <form className="account-sheet" aria-label="Add vehicle form" onSubmit={submitVehicle} onMouseDown={(event) => event.stopPropagation()}>
-            <div className="account-sheet__handle" />
-            <div className="account-sheet__header"><div><small>YOUR GARAGE</small><h2>Add a vehicle</h2></div><button type="button" aria-label="Close vehicle form" onClick={() => setShowVehicleForm(false)}><X size={20} /></button></div>
+      {showVehicleForm && (
+        <Dialog labelledBy="add-vehicle-title" onClose={() => setShowVehicleForm(false)}>
+          <form aria-labelledby="add-vehicle-title" onSubmit={submitVehicle}>
+            <div className="account-sheet__header"><div><small>YOUR GARAGE</small><h2 id="add-vehicle-title">Add a vehicle</h2></div><button type="button" aria-label="Close vehicle form" onClick={() => setShowVehicleForm(false)}><X size={20} /></button></div>
             <div className="account-sheet__grid">
               <label><span>Make</span><input required value={vehicleForm.make} onChange={(event) => setVehicleForm({ ...vehicleForm, make: event.target.value })} placeholder="Toyota" /></label>
               <label><span>Model</span><input required value={vehicleForm.model} onChange={(event) => setVehicleForm({ ...vehicleForm, model: event.target.value })} placeholder="Camry" /></label>
@@ -187,21 +186,16 @@ export default function ProfileScreen() {
             </div>
             <button type="submit" className="account-sheet__submit">Save vehicle</button>
           </form>
-        </div>,
-        document.body,
+        </Dialog>
       )}
-      {showDeleteConfirmation && createPortal(
-        <div className="account-sheet-backdrop" role="presentation" onMouseDown={() => !isDeletingAccount && setShowDeleteConfirmation(false)}>
-          <section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby="delete-account-title" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="account-sheet__handle" />
-            <div className="account-sheet__header"><div><small>PERMANENT ACTION</small><h2 id="delete-account-title">Permanently delete account?</h2></div><button type="button" aria-label="Close account deletion" disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}><X size={20} /></button></div>
-            <p>This removes your account, saved vehicles, active requests, driver documents, and marketplace history. This cannot be undone.</p>
+      {showDeleteConfirmation && (
+        <Dialog labelledBy="delete-account-title" describedBy="delete-account-text" role="alertdialog" dismissible={!isDeletingAccount} onClose={() => setShowDeleteConfirmation(false)}>
+            <div className="account-sheet__header"><div><small>PERMANENT ACTION</small><h2 id="delete-account-title">Permanently delete account?</h2></div><button type="button" aria-label="Close account deletion" disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}><X size={20} aria-hidden="true" /></button></div>
+            <p id="delete-account-text">This removes your account, saved vehicles, active requests, driver documents, and marketplace history. This cannot be undone.</p>
             {deleteError && <p role="alert" className="text-red-400">{deleteError}</p>}
             <button type="button" className="account-sheet__submit bg-red-600" disabled={isDeletingAccount} onClick={() => void handleDeleteAccount()}>{isDeletingAccount ? 'Deleting account…' : 'Delete my account permanently'}</button>
             <button type="button" className="account-signout" disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}>Keep my account</button>
-          </section>
-        </div>,
-        document.body,
+        </Dialog>
       )}
     </div>
   )

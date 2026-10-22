@@ -65,7 +65,8 @@ body {
 
 /* Fix iOS input zoom */
 input, textarea, select {
-  font-size: 16px !important;
+  /* ≥16px stops iOS zooming on focus; max() still grows with the user's text size (F4). */
+  font-size: max(16px, 1rem) !important;
 }
 
 /* Fix iOS button styling and remove delayed mobile taps */

@@ -4,6 +4,8 @@ import {
   Maximize2, RefreshCw, Search, ShieldCheck, UserCheck, Users, X,
 } from 'lucide-react'
 import { adminApi } from './api'
+import Dialog from '../../src/components/ui/Dialog'
+import FilterTabs, { tabId } from './FilterTabs'
 import ReportsInbox from './Reports'
 import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverRatings, DriverSummary, QueueFilter, ReportCounts, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
 
@@ -94,23 +96,17 @@ function StatusBadge({ status }: { status: VerificationStatus | ReviewDocument['
   return <span className={`badge badge--${status}`}>{label}</span>
 }
 
-function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+/** Same accessible dialog as the apps (F4): focus trap, Escape, inert background, focus returns. */
+function Modal({ title, onClose, children, wide = false, dismissible = true }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; dismissible?: boolean }) {
   const titleId = useId()
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className={`modal${wide ? ' modal--wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={(event) => event.stopPropagation()}>
-        <header className="modal__header">
-          <h2 id={titleId}>{title}</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}><X size={18} /></button>
-        </header>
-        {children}
-      </div>
-    </div>
+    <Dialog labelledBy={titleId} onClose={onClose} dismissible={dismissible} handle={false} backdropClassName="modal-backdrop" className={`modal${wide ? ' modal--wide' : ''}`}>
+      <header className="modal__header">
+        <h2 id={titleId}>{title}</h2>
+        <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}><X size={18} aria-hidden="true" /></button>
+      </header>
+      {children}
+    </Dialog>
   )
 }
 
@@ -480,7 +476,7 @@ function DriverReview({ driverId, nextDriverId, onNext, onBack, onChanged, notif
       </div>
 
       {pending && (
-        <Modal title={`${DECISIONS[pending].label}: ${fullName(driver)}`} onClose={() => !busy && setPending(null)}>
+        <Modal title={`${DECISIONS[pending].label}: ${fullName(driver)}`} dismissible={!busy} onClose={() => !busy && setPending(null)}>
           <p className="muted">
             {pending === 'suspend' ? 'The driver will be taken offline and cannot accept jobs until reinstated.' : 'The driver will be asked to fix their application and resubmit.'}
           </p>
@@ -515,6 +511,7 @@ function Queue({ filter, setFilter, drivers, counts, error, search, setSearch, o
     { id: 'verified', label: 'Verified drivers', icon: <ShieldCheck size={18} />, tone: 'ok' },
     { id: 'suspended', label: 'Suspended', icon: <Ban size={18} />, tone: 'danger' },
   ]
+  const panelId = useId()
 
   return (
     <div className="page">
@@ -538,21 +535,17 @@ function Queue({ filter, setFilter, drivers, counts, error, search, setSearch, o
 
       <div className="card card--flush">
         <div className="toolbar">
-          <div role="tablist" aria-label="Driver filters" className="tabs">
-            {FILTERS.map((item) => (
-              <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} className="tab" onClick={() => setFilter(item.id)}>
-                {item.label}{counts && <span className="tab__count">{counts[item.id]}</span>}
-              </button>
-            ))}
-          </div>
+          <FilterTabs label="Driver filters" tabs={FILTERS} value={filter} onChange={setFilter} panelId={panelId}
+            count={(id) => counts && <span className="tab__count">{counts[id]}</span>} />
           <label className="search">
             <Search size={16} aria-hidden="true" />
             <input type="search" aria-label="Search drivers" placeholder="Search name or email" value={search} onChange={(event) => setSearch(event.target.value)} />
           </label>
         </div>
 
+        <div role="tabpanel" id={panelId} aria-labelledby={tabId(panelId, filter)}>
         {error && <p role="alert" className="alert alert--inset">{error}</p>}
-        {drivers === null && !error && <div className="skeleton" aria-busy="true">Loading drivers…</div>}
+        {drivers === null && !error && <div className="skeleton" role="status" aria-busy="true">Loading drivers…</div>}
         {drivers?.length === 0 && (
           <div className="empty-state">
             <Users size={28} aria-hidden="true" />
@@ -562,8 +555,9 @@ function Queue({ filter, setFilter, drivers, counts, error, search, setSearch, o
         )}
         {drivers && drivers.length > 0 && (
           <table className="table">
+            <caption className="sr-only">Drivers — {FILTERS.find((item) => item.id === filter)?.label}</caption>
             <thead>
-              <tr><th>Driver</th><th>Status</th><th>Documents</th><th>Submitted</th><th>Eligible through</th><th aria-label="Open" /></tr>
+              <tr><th scope="col">Driver</th><th scope="col">Status</th><th scope="col">Documents</th><th scope="col">Submitted</th><th scope="col">Eligible through</th><th scope="col"><span className="sr-only">Open</span></th></tr>
             </thead>
             <tbody>
               {drivers.map((driver) => (
@@ -584,6 +578,7 @@ function Queue({ filter, setFilter, drivers, counts, error, search, setSearch, o
             </tbody>
           </table>
         )}
+        </div>
       </div>
     </div>
   )
@@ -667,7 +662,7 @@ function Dashboard({ admin, onSignOut }: { admin: AdminProfile; onSignOut: () =>
         <div className="sidebar__footer">
           <span className="avatar avatar--sm" aria-hidden="true">{initials(admin)}</span>
           <span className="sidebar__user"><strong>{fullName(admin)}</strong><small>{admin.email}</small></span>
-          <button type="button" className="icon-btn icon-btn--dark" aria-label="Sign out" title="Sign out" onClick={onSignOut}><LogOut size={17} /></button>
+          <button type="button" className="icon-btn icon-btn--dark" aria-label="Sign out" title="Sign out" onClick={onSignOut}><LogOut size={17} aria-hidden="true" /></button>
         </div>
       </nav>
 

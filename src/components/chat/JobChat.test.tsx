@@ -130,7 +130,7 @@ describe('job chat (B12)', () => {
     await screen.findByText('No messages yet')
     fireEvent.click(screen.getByRole('button', { name: 'Chat options' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Block Marcus' }))
-    const confirm = screen.getByRole('dialog', { name: 'Block Marcus?' })
+    const confirm = screen.getByRole('alertdialog', { name: 'Block Marcus?' })
     expect(within(confirm).getByText(/This doesn't cancel the job/)).toBeTruthy()
     expect(api.blockJobParty).not.toHaveBeenCalled()
     fireEvent.click(within(confirm).getByRole('button', { name: 'Block Marcus' }))

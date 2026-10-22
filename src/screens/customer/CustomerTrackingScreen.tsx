@@ -18,6 +18,8 @@ import { showChatEntry, type BookingChat } from '../../lib/chat'
 import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
+import LiveRegion from '../../components/ui/LiveRegion'
+import { useAnnounceOnChange, useAnnouncer, useEtaAnnouncement } from '../../lib/announce'
 
 const LiveDriverMap = lazy(() => import('../../components/tracking/LiveDriverMap'))
 
@@ -106,8 +108,22 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
       detail = tracking.eta ? `Arrives around ${arrivalClock(tracking.eta, now)} · ${tracking.eta.miles} mi away` : null
   }
 
+  // F4: what a screen reader hears without touching the screen — each status change, and a new
+  // ETA at most once a minute (not on every location update).
+  const [liveText, announce] = useAnnouncer()
+  useAnnounceOnChange(booking.status, detail ? `${headline}. ${detail}` : headline, announce)
+  useEtaAnnouncement(tracking.phase === 'live' ? tracking.eta?.minutes : null, (minutes) => `${firstName} is about ${minutes} min away`, announce)
+
+  // Text alternative to the map: where the driver is relative to the pickup.
+  const mapSummary = !tracking.location
+    ? `Map of your pickup at ${booking.location.address}. ${firstName}'s location isn't shown yet.`
+    : tracking.eta && tracking.phase === 'live'
+      ? `Map: ${firstName} is about ${tracking.eta.miles} miles and ${tracking.eta.minutes} minutes from your pickup at ${booking.location.address}.`
+      : `Map: ${firstName}'s ${tracking.phase === 'stale' ? 'last known ' : ''}position and your pickup at ${booking.location.address}.`
+
   return (
-    <div className="track-screen" aria-label="Live tracking">
+    <div className="track-screen" role="region" aria-label="Live tracking">
+      <LiveRegion message={liveText} />
       <RealtimeNotice />
       <header className="job-header track-header">
         <div><small>{HEADER_LABEL[booking.status] ?? 'ACTIVE REQUEST'}</small><h1>{booking.service.name}</h1></div>
@@ -115,10 +131,13 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
       </header>
 
       <section className="track-map" aria-label="Map">
+        <p className="sr-only">{hasPickup ? mapSummary : 'Map unavailable.'}</p>
         {hasPickup ? (
-          <Suspense fallback={<div className="track-map__loading"><Loader2 size={22} className="animate-spin" aria-label="Loading map" /></div>}>
-            <LiveDriverMap pickup={pickup} driver={tracking.location} stale={tracking.phase === 'stale'} showConnector={tracking.phase === 'live' || tracking.phase === 'stale'} />
-          </Suspense>
+          <div className="track-map__canvas" aria-hidden="true">
+            <Suspense fallback={<div className="track-map__loading"><Loader2 size={22} className="animate-spin" /></div>}>
+              <LiveDriverMap pickup={pickup} driver={tracking.location} stale={tracking.phase === 'stale'} showConnector={tracking.phase === 'live' || tracking.phase === 'stale'} />
+            </Suspense>
+          </div>
         ) : <div className="track-map__loading">Map unavailable</div>}
         <span className={`track-chip${tracking.phase === 'live' ? ' is-live' : tracking.phase === 'stale' ? ' is-stale' : ''}`} role="status">
           <i aria-hidden="true" />
@@ -159,7 +178,7 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
               <MessageButton name={firstName} unread={chatOpen ? 0 : booking.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
             )}
             {driver?.phone && (
-              <a className="job-call" href={`tel:${driver.phone}`} aria-label={`Call ${firstName}`}><Phone size={19} /></a>
+              <a className="job-call" href={`tel:${driver.phone}`} aria-label={`Call ${firstName}`}><Phone size={19} aria-hidden="true" /></a>
             )}
           </div>
         </div>

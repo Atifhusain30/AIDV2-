@@ -4,7 +4,7 @@
  * the server re-checks the category list, the job (yours only), the message and the hourly limit.
  */
 
-import { useId, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { AlertCircle, Check, CheckCircle2 } from 'lucide-react'
 import { apiService } from '../../services/api'
 import { REPORT_CATEGORIES, REPORT_MESSAGE_MAX, reportMessageRequired, type SupportAudience, type SupportReport } from '../../lib/support'
@@ -40,6 +40,8 @@ export default function ReportProblemForm({ audience, bookingId, jobs = [], titl
   const linkedJob = bookingId || jobId || null
   const needsMessage = reportMessageRequired(category, linkedJob)
   const choices = REPORT_CATEGORIES[audience]
+  const sentHeading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => { if (state === 'sent') sentHeading.current?.focus() }, [state])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -66,7 +68,8 @@ export default function ReportProblemForm({ audience, bookingId, jobs = [], titl
     return (
       <div className="support-sent" role="status">
         <CheckCircle2 size={34} aria-hidden="true" className="support-sent__icon" />
-        <h2 id={titleId} className="job-confirm__title">Report sent</h2>
+        {/* F4: the form (and its focused Send button) is gone — keep focus in the sheet on the result. */}
+        <h2 id={titleId} className="job-confirm__title" tabIndex={-1} ref={sentHeading}>Report sent</h2>
         <p className="job-confirm__text">
           The AID team will review it. You can follow its status under My reports in Help &amp; Support.
           {category === 'safety' ? ' If anyone is in danger, call 911 now.' : ''}

@@ -20,6 +20,7 @@ import type { SupportAudience } from '../../lib/support'
 import { pollInterval } from '../../lib/realtime'
 import { useRealtimeConnected, useRealtimeEvents } from '../../lib/useRealtimeStatus'
 import RealtimeNotice from '../ui/RealtimeNotice'
+import { useDialog } from '../ui/Dialog'
 
 interface JobChatProps {
   bookingId: string
@@ -132,16 +133,26 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
     if (list && typeof list.scrollTo === 'function') list.scrollTo({ top: list.scrollHeight })
   }, [messages.length, pending.length])
 
-  // Escape closes the chat (or the open sheet first).
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      if (sheet) setSheet(null)
-      else onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [sheet, onClose])
+  // F4: the shared dialog behaviour — focus starts in the message box (or the chat itself when it's
+  // closed), Tab stays in the chat, the screen behind is inert, focus goes back to the Message button.
+  // Escape closes the options menu first, then the chat; the report/block sheets handle their own.
+  const screenRef = useRef<HTMLDivElement>(null)
+  useDialog(screenRef, screenRef, {
+    initialFocus: inputRef,
+    onClose: () => { if (sheet === 'menu') setSheet(null); else if (!sheet) onClose() },
+  })
+
+  // Options menu: focus the first item when it opens; arrow keys move between items.
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (sheet === 'menu') menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus() }, [sheet])
+  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])
+    const at = items.indexOf(document.activeElement as HTMLElement)
+    const next = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1 }[event.key]
+    if (next === undefined || items.length === 0) return
+    event.preventDefault()
+    items[(next + items.length) % items.length].focus()
+  }
 
   const deliver = async (message: PendingMessage) => {
     setPending((current) => current.map((item) => (item.clientId === message.clientId ? { ...item, status: 'sending', error: undefined } : item)))
@@ -197,7 +208,7 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
 
   // Rendered on <body> so it sits above the bottom navigation and isn't clipped by animated job screens.
   return createPortal(
-    <div className="chat-screen" role="dialog" aria-modal="true" aria-labelledby={ids.title}>
+    <div ref={screenRef} className="chat-screen" role="dialog" aria-modal="true" aria-labelledby={ids.title} tabIndex={-1}>
       <RealtimeNotice />
       <header className="chat-header">
         <button type="button" className="chat-icon-button" aria-label="Close chat" onClick={onClose}><ChevronLeft size={22} aria-hidden="true" /></button>
@@ -210,7 +221,7 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
           <MoreVertical size={20} aria-hidden="true" />
         </button>
         {sheet === 'menu' && (
-          <div id={ids.menu} className="chat-menu" role="menu">
+          <div id={ids.menu} ref={menuRef} className="chat-menu" role="menu" aria-label="Chat options" onKeyDown={onMenuKeyDown}>
             <button type="button" role="menuitem" onClick={() => setSheet('report')}><Flag size={17} aria-hidden="true" /> Report {otherName}</button>
             {!chat.blockedByMe && (
               <button type="button" role="menuitem" className="chat-menu__danger" onClick={() => { setBlockError(null); setSheet('block') }}>
@@ -221,9 +232,11 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
         )}
       </header>
 
-      <ol ref={listRef} className="chat-list" role="log" aria-live="polite" aria-relevant="additions" aria-label={`Messages with ${otherName}`}>
+      {/* New messages are read out politely (role="log"); the list keeps its list semantics. */}
+      <div className="chat-log" role="log" aria-live="polite" aria-relevant="additions" aria-label={`Messages with ${otherName}`}>
+      <ol ref={listRef} className="chat-list">
         {!loaded && <li className="chat-status"><Loader2 size={18} className="animate-spin" aria-hidden="true" /> Loading messages…</li>}
-        {loadError && <li className="chat-status chat-status--error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {loadError}</li>}
+        {loadError && <li className="chat-status chat-status--error"><span role="alert"><AlertCircle size={16} aria-hidden="true" /> {loadError}</span></li>}
         {nothingYet && (
           <li className="chat-empty">
             <MessageCircle size={30} aria-hidden="true" />
@@ -258,6 +271,7 @@ export default function JobChat({ bookingId, audience, otherName, serviceName, i
           </li>
         ))}
       </ol>
+      </div>
 
       {closedText && (
         <div className={`chat-banner${chat.state === 'blocked' ? ' chat-banner--blocked' : ''}`} role="status">

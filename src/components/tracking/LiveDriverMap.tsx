@@ -48,6 +48,9 @@ export default function LiveDriverMap({ pickup, driver, stale = false, showConne
       center={[pickup.lat, pickup.lng]}
       zoom={15}
       scrollWheelZoom={false}
+      // F4: the map is a picture for sighted users; the screen gives a text summary instead,
+      // so nothing in it takes keyboard focus or is read out.
+      keyboard={false}
       zoomControl={false}
       attributionControl={false}
       style={{ height: '100%', width: '100%' }}
@@ -57,8 +60,8 @@ export default function LiveDriverMap({ pickup, driver, stale = false, showConne
       {driver && showConnector && (
         <Polyline positions={[[driver.lat, driver.lng], [pickup.lat, pickup.lng]]} pathOptions={{ color: '#a78bfa', weight: 3, opacity: 0.7, dashArray: '6 8' }} />
       )}
-      <Marker position={[pickup.lat, pickup.lng]} icon={pickupIcon} />
-      {driver && <Marker position={[driver.lat, driver.lng]} icon={driverIcon(stale)} />}
+      <Marker position={[pickup.lat, pickup.lng]} icon={pickupIcon} interactive={false} keyboard={false} />
+      {driver && <Marker position={[driver.lat, driver.lng]} icon={driverIcon(stale)} interactive={false} keyboard={false} />}
     </MapContainer>
   )
 }

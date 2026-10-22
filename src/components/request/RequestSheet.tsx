@@ -14,6 +14,7 @@ import { searchAddressSuggestions } from '../../services/locationService'
 import type { ServiceType } from '../../types'
 import { formatPrice } from '../../lib/money'
 import { isJobOver } from '../../lib/jobLifecycle'
+import Dialog from '../ui/Dialog'
 
 const ICONS: Partial<Record<ServiceType, typeof Battery>> = {
   battery_jump: Battery, flat_tire: CircleDot, towing: Truck, lockout: KeyRound,
@@ -77,6 +78,7 @@ function DropoffSearch({ value, onChange }: { value: Place | null; onChange: (pl
           placeholder="Search a shop, dealership, or home address"
           autoComplete="off"
           role="combobox"
+          aria-autocomplete="list"
           aria-expanded={results.length > 0}
           aria-controls={listId}
           value={query}
@@ -147,12 +149,14 @@ export default function RequestSheet() {
     resetServiceFormData()
   }, [resetServiceFormData, setActiveModal, submitting])
 
+  // Choosing / changing the service swaps the sheet's content (the tapped button disappears):
+  // move focus to the new title so screen readers announce the step and focus stays in the sheet.
+  const stepKey = serviceFormData.selectedService ?? ''
+  const firstStep = useRef(true)
   useEffect(() => {
-    if (!isOpen) return
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [close, isOpen])
+    if (firstStep.current) { firstStep.current = false; return }
+    document.getElementById(titleId)?.focus()
+  }, [stepKey, titleId])
 
   // Distance-priced services (towing): ask the server for the exact price once both ends are known.
   const selected = catalog?.find((item) => item.id === serviceFormData.selectedService && item.available) ?? null
@@ -219,15 +223,13 @@ export default function RequestSheet() {
   const ServiceIcon = (service && ICONS[service.id]) || Car
 
   return (
-    <div className="account-sheet-backdrop" role="presentation" onMouseDown={close}>
-      <section className="account-sheet request-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="account-sheet__handle" />
+    <Dialog labelledBy={titleId} className="account-sheet request-sheet" dismissible={!submitting} onClose={close}>
         <div className="account-sheet__header">
           <div>
             <small>{serviceFormData.selectedService ? 'REQUEST HELP' : 'WHAT HAPPENED?'}</small>
-            <h2 id={titleId}>{service?.name ?? (serviceFormData.selectedService && TITLES[serviceFormData.selectedService]) ?? 'Choose a service'}</h2>
+            <h2 id={titleId} tabIndex={-1}>{service?.name ?? (serviceFormData.selectedService && TITLES[serviceFormData.selectedService]) ?? 'Choose a service'}</h2>
           </div>
-          <button type="button" aria-label="Close" disabled={submitting} onClick={close}><X size={20} /></button>
+          <button type="button" aria-label="Close" disabled={submitting} onClick={close}><X size={20} aria-hidden="true" /></button>
         </div>
 
         {catalogError && (
@@ -302,7 +304,6 @@ export default function RequestSheet() {
             </div>
           </>
         )}
-      </section>
-    </div>
+    </Dialog>
   )
 }

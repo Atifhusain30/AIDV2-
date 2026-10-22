@@ -94,7 +94,7 @@ describe('driver job screen', () => {
     const { onBack } = show(tow({ status: 'in_progress' }))
     fireEvent.click(screen.getByRole('button', { name: 'Complete job' }))
     expect(updateJobStatus).not.toHaveBeenCalled()
-    const dialog = screen.getByRole('dialog', { name: 'Complete this job?' })
+    const dialog = screen.getByRole('alertdialog', { name: 'Complete this job?' })
     expect(within(dialog).getByText(/vehicle is at the drop-off/)).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Not yet' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -152,7 +152,7 @@ describe('driver job screen', () => {
   it('cancelling needs a reason and a confirmation, and is allowed until service starts', async () => {
     show(tow({ status: 'arrived' }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel job' }))
-    const dialog = screen.getByRole('dialog', { name: 'Cancel this job?' })
+    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this job?' })
     const confirm = within(dialog).getByRole('button', { name: 'Yes, cancel job' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     fireEvent.click(within(dialog).getByLabelText("Can't reach the customer"))
@@ -189,7 +189,7 @@ describe('driver job screen', () => {
     show(tow())
     expect(screen.queryByRole('link', { name: /911/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
-    const confirm = screen.getByRole('dialog', { name: 'Call 911?' })
+    const confirm = screen.getByRole('alertdialog', { name: 'Call 911?' })
     expect(within(confirm).getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
 

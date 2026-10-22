@@ -28,6 +28,9 @@ import { ServiceType, BookingStatus } from '../../types'
 import { formatPrice } from '../../lib/money'
 import { jobCountLabel, ratingSummary } from '../../lib/ratings'
 import { useState } from 'react'
+import Dialog from '../ui/Dialog'
+
+const MODAL_BACKDROP = 'fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm'
 import { MessageCircle } from 'lucide-react'
 import { endedChatReadable } from '../../lib/chat'
 import JobChat from '../chat/JobChat'
@@ -126,7 +129,7 @@ function BookingStepper({ status }: { status: BookingStatus }) {
                       ? isCurrent 
                         ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/50' 
                         : 'bg-emerald-500/30 text-emerald-400' 
-                      : 'bg-white/10 text-gray-500'
+                      : 'bg-white/10 text-gray-400'
                   }`}
                 >
                   {isActive && !isCurrent ? (
@@ -135,7 +138,7 @@ function BookingStepper({ status }: { status: BookingStatus }) {
                     index + 1
                   )}
                 </motion.div>
-                <span className={`text-[10px] mt-1 ${isActive ? 'text-gray-300' : 'text-gray-500'}`}>
+                <span className={`text-xs mt-1 ${isActive ? 'text-gray-300' : 'text-gray-400'}`}>
                   {stage.label}
                 </span>
               </div>
@@ -199,34 +202,19 @@ export default function BookingDetailModal() {
   // Show error state if booking not found
   if (!booking) {
     return (
-      <AnimatePresence>
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
-          onClick={handleClose}
-        >
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-[#12122a] rounded-t-3xl p-6 text-center"
-          >
-            <AlertTriangle size={48} className="mx-auto text-amber-400 mb-4" />
-            <h3 className="text-lg font-semibold text-white mb-2">Booking Not Found</h3>
-            <p className="text-gray-400 mb-6">This booking may have been removed.</p>
+      <Dialog labelledBy="booking-missing-title" describedBy="booking-missing-text" onClose={handleClose} handle={false}
+        backdropClassName={MODAL_BACKDROP} className="w-full max-w-md bg-[#12122a] rounded-t-3xl p-6 text-center aid-sheet-in">
+            <AlertTriangle size={48} className="mx-auto text-amber-400 mb-4" aria-hidden="true" />
+            <h2 id="booking-missing-title" className="text-lg font-semibold text-white mb-2">Booking Not Found</h2>
+            <p id="booking-missing-text" className="text-gray-400 mb-6">This booking may have been removed.</p>
             <button
+              type="button"
               onClick={handleClose}
               className="w-full py-3 bg-white/10 rounded-xl text-white font-medium"
             >
               Close
             </button>
-          </motion.div>
-        </motion.div>
-      </AnimatePresence>
+      </Dialog>
     )
   }
 
@@ -240,33 +228,19 @@ export default function BookingDetailModal() {
   const chatReadable = endedChatReadable(booking)
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
-        onClick={handleClose}
-      >
-        <motion.div
-          initial={{ y: '100%' }}
-          animate={{ y: 0 }}
-          exit={{ y: '100%' }}
-          transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-          onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-md bg-[#12122a] rounded-t-3xl max-h-[90vh] overflow-hidden flex flex-col"
-        >
+    <Dialog labelledBy="booking-detail-title" onClose={handleClose} handle={false} backdropClassName={MODAL_BACKDROP}
+      className="w-full max-w-md bg-[#12122a] rounded-t-3xl max-h-[90vh] overflow-hidden flex flex-col aid-sheet-in">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-white/10">
-            <h2 className="text-lg font-semibold text-white">Booking Details</h2>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
+            <h2 id="booking-detail-title" className="text-lg font-semibold text-white">Booking Details</h2>
+            <button
+              type="button"
               onClick={handleClose}
-              className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+              aria-label="Close booking details"
+              className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
             >
-              <X size={18} />
-            </motion.button>
+              <X size={18} aria-hidden="true" />
+            </button>
           </div>
 
           {/* Scrollable Content */}
@@ -332,9 +306,9 @@ export default function BookingDetailModal() {
               
               {/* Location */}
               <div className="flex items-start gap-3">
-                <MapPin size={16} className="text-gray-500 mt-0.5 flex-shrink-0" />
+                <MapPin size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
                 <div className="flex-1">
-                  <p className="text-xs text-gray-500">Location</p>
+                  <p className="text-xs text-gray-400">Location</p>
                   <p className="text-sm text-white">{booking.location.address}</p>
                   {/* Show "Open in Maps" if coordinates exist */}
                   {booking.location.lat && booking.location.lng && (
@@ -354,9 +328,9 @@ export default function BookingDetailModal() {
               {/* Vehicle */}
               {booking.vehicle && (
                 <div className="flex items-start gap-3">
-                  <Truck size={16} className="text-gray-500 mt-0.5 flex-shrink-0" />
+                  <Truck size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-xs text-gray-500">Vehicle</p>
+                    <p className="text-xs text-gray-400">Vehicle</p>
                     <p className="text-sm text-white">{booking.vehicle.label}</p>
                     {booking.vehicle.plate && (
                       <p className="text-xs text-gray-400">{booking.vehicle.plate}</p>
@@ -367,9 +341,9 @@ export default function BookingDetailModal() {
 
               {/* Date & Time */}
               <div className="flex items-start gap-3">
-                <Calendar size={16} className="text-gray-500 mt-0.5 flex-shrink-0" />
+                <Calendar size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="text-xs text-gray-500">Requested</p>
+                  <p className="text-xs text-gray-400">Requested</p>
                   <p className="text-sm text-white">
                     {formatDate(booking.createdAt)} at {formatTime(booking.createdAt)}
                   </p>
@@ -379,9 +353,9 @@ export default function BookingDetailModal() {
               {/* Notes */}
               {booking.notes && (
                 <div className="flex items-start gap-3">
-                  <FileText size={16} className="text-gray-500 mt-0.5 flex-shrink-0" />
+                  <FileText size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-xs text-gray-500">Notes</p>
+                    <p className="text-xs text-gray-400">Notes</p>
                     <p className="text-sm text-white">{booking.notes}</p>
                   </div>
                 </div>
@@ -392,7 +366,7 @@ export default function BookingDetailModal() {
                 <div className="flex items-start gap-3">
                   <CheckCircle2 size={16} className="text-emerald-500 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-xs text-gray-500">Completed</p>
+                    <p className="text-xs text-gray-400">Completed</p>
                     <p className="text-sm text-white">
                       {formatDate(booking.completedAt)} at {formatTime(booking.completedAt)}
                     </p>
@@ -459,8 +433,6 @@ export default function BookingDetailModal() {
               initialChat={{ state: 'read_only', unread: 0, blockedByMe: false, readOnlyUntil: null }} onClose={() => setChatOpen(false)}
             />
           )}
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+    </Dialog>
   )
 }

@@ -101,7 +101,7 @@ describe('customer live tracking', () => {
     useAppStore.setState({ activeBooking: job({ status: 'en_route' }) })
     render(<CustomerTrackingScreen booking={job({ status: 'en_route' })} />)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
-    const dialog = screen.getByRole('dialog', { name: 'Cancel this request?' })
+    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this request?' })
     expect(within(dialog).getByText(/Marcus is already on the way/)).toBeTruthy()
     fireEvent.click(within(dialog).getByLabelText('Wait is too long'))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, cancel request' }))
@@ -194,7 +194,7 @@ describe('customer live tracking', () => {
     render(<CustomerTrackingScreen booking={job()} />)
     expect(screen.queryByRole('link', { name: /911/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
-    const confirm = screen.getByRole('dialog', { name: 'Call 911?' })
+    const confirm = screen.getByRole('alertdialog', { name: 'Call 911?' })
     expect(within(confirm).getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
 

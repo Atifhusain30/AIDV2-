@@ -4,6 +4,7 @@ import AdminApp from './AdminApp'
 import { adminApi } from './api'
 import type { DriverDetail, DriverSummary, ReportDetail, ReportSummary } from './types'
 import { REPORT_ACTIONS } from './Reports'
+import { seriousA11yViolations } from '../../src/test/axe'
 
 vi.mock('./api', () => ({
   adminApi: {
@@ -299,6 +300,47 @@ describe('AID admin reports inbox (B18)', () => {
     const view = await screen.findByRole('region', { name: 'Safety concern' })
     fireEvent.click(within(view).getByRole('button', { name: 'Resolve' }))
     expect((await within(view).findByRole('alert')).textContent).toMatch(/cannot be moved/)
+  })
+
+  it('F4: sign-in, queue, driver review, a decision dialog and the reports inbox have no serious axe violations', async () => {
+    document.documentElement.lang = 'en'
+    document.title = 'AID Admin'
+    api.currentAdmin.mockResolvedValueOnce(null)
+    const first = render(<AdminApp />)
+    await screen.findByLabelText(/email/i)
+    expect(await seriousA11yViolations()).toEqual([])
+    first.unmount()
+
+    render(<AdminApp />)
+    await screen.findByRole('button', { name: /dana driver/i })
+    expect(screen.getByRole('table', { name: /drivers — needs review/i })).toBeTruthy()
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(screen.getByRole('tab', { name: /needs review/i }).id)
+    expect(await seriousA11yViolations()).toEqual([])
+
+    // Tabs: arrow keys move and select.
+    const needsReview = screen.getByRole('tab', { name: /needs review/i })
+    fireEvent.keyDown(needsReview, { key: 'ArrowRight' })
+    expect(screen.getByRole('tab', { name: /expiring/i }).getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /expiring/i }))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
+
+    fireEvent.click(await screen.findByRole('button', { name: /dana driver/i }))
+    const panel = await screen.findByRole('region', { name: /dana driver/i })
+    expect(await seriousA11yViolations()).toEqual([])
+    const enlarge = within(panel).getAllByRole('button', { name: /^enlarge/i })[0]
+    enlarge.focus()
+    fireEvent.click(enlarge)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    expect(await seriousA11yViolations()).toEqual([])
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(document.activeElement).toBe(enlarge)
+
+    fireEvent.click(screen.getByRole('button', { name: /reports/i }))
+    await screen.findByRole('table', { name: /reports/i })
+    expect(await seriousA11yViolations()).toEqual([])
   })
 
   it('offers only the status moves the server allows', () => {

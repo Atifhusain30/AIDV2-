@@ -153,18 +153,18 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
           <label>
             <span>Email</span>
             <div className="auth-field">
-              <Mail size={18} />
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" placeholder={isDriver ? 'driver@email.com' : 'you@email.com'} />
+              <Mail size={18} aria-hidden="true" />
+              <input type="email" aria-invalid={error ? true : undefined} aria-describedby={error ? 'auth-form-message' : undefined} value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" placeholder={isDriver ? 'driver@email.com' : 'you@email.com'} />
             </div>
           </label>
 
           <label>
             <span>Password</span>
             <div className="auth-field">
-              <LockKeyhole size={18} />
-              <input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete={isLogin ? 'current-password' : 'new-password'} placeholder="••••••••" />
+              <LockKeyhole size={18} aria-hidden="true" />
+              <input type={showPassword ? 'text' : 'password'} aria-invalid={error ? true : undefined} aria-describedby={error ? 'auth-form-message' : undefined} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete={isLogin ? 'current-password' : 'new-password'} placeholder="••••••••" />
               <button type="button" className="auth-field__reveal" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
               </button>
             </div>
           </label>
@@ -181,21 +181,21 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
 
           <AnimatePresence>
             {(error || notice || recoveryMessage) && (
-              <motion.p className="auth-form__error" role={error || recoveryMessage ? 'alert' : 'status'} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+              <motion.p id="auth-form-message" className="auth-form__error" role={error || recoveryMessage ? 'alert' : 'status'} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 {error || notice || recoveryMessage}
               </motion.p>
             )}
           </AnimatePresence>
 
           <motion.button className="aid-primary-button" type="submit" disabled={isLoading} whileTap={{ scale: 0.985 }}>
-            {isLoading ? <Loader2 size={20} className="animate-spin" /> : <>{isLogin ? 'Sign in' : 'Create account'}<ArrowRight size={20} /></>}
+            {isLoading ? <><Loader2 size={20} className="animate-spin" aria-hidden="true" /><span className="sr-only">{isLogin ? 'Signing in…' : 'Creating account…'}</span></> : <>{isLogin ? 'Sign in' : 'Create account'}<ArrowRight size={20} aria-hidden="true" /></>}
           </motion.button>
         </form>
 
         <div className="auth-portal__actions">
           <p>{isLogin ? 'New to AID?' : 'Already have an account?'} <button type="button" onClick={toggleMode}>{isLogin ? 'Create account' : 'Sign in'}</button></p>
           <button type="button" className="role-switch" onClick={onSwitchRole}>
-            <ArrowLeftRight size={17} />
+            <ArrowLeftRight size={17} aria-hidden="true" />
             {isDriver ? 'I need roadside help' : 'Switch to driver mode'}
           </button>
 

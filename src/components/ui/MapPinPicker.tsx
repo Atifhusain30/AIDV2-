@@ -91,7 +91,7 @@ export default function MapPinPicker({ lat, lng, onChange }: MapPinPickerProps) 
       </MapContainer>
       
       {/* Attribution overlay (styled) */}
-      <div className="px-2 py-1 bg-gray-800/80 text-[10px] text-gray-500 text-right">
+      <div className="px-2 py-1 bg-gray-800/80 text-xs text-gray-400 text-right">
         © OpenStreetMap contributors
       </div>
     </div>

@@ -73,7 +73,7 @@ export default function HomeScreen() {
         <AidBrand compact label="ROADSIDE" />
         <div className="consumer-topbar__actions">
           <button type="button" className="consumer-icon-button" aria-label="Activity" onClick={() => setCurrentScreen('history')}>
-            <Bell size={20} />
+            <Bell size={20} aria-hidden="true" />
           </button>
           <button type="button" className="consumer-avatar" aria-label="Open account" onClick={() => setCurrentScreen('profile')}>
             {user?.name ? user.name.charAt(0).toUpperCase() : <UserRound size={20} />}
@@ -81,10 +81,10 @@ export default function HomeScreen() {
         </div>
       </header>
 
-      <button type="button" className="consumer-location" onClick={() => setActiveModal('locationConfirm')} aria-label={userLocationLabel || 'Confirm your location'}>
-        <span className="consumer-location__pin"><MapPin size={20} /></span>
+      <button type="button" className="consumer-location" onClick={() => setActiveModal('locationConfirm')}>
+        <span className="consumer-location__pin" aria-hidden="true"><MapPin size={20} /></span>
         <span><small>YOUR LOCATION</small><strong>{userLocationLabel || 'Confirm your location'}</strong></span>
-        <ChevronRight size={19} />
+        <ChevronRight size={19} aria-hidden="true" />
       </button>
 
       {activeBooking && (
@@ -99,7 +99,8 @@ export default function HomeScreen() {
         </button>
       )}
 
-      <main>
+      {/* The app shell provides the page's one <main>. */}
+      <div>
         <section className="consumer-intro" aria-labelledby="consumer-help-title">
           <p>{user?.name ? 'Hi, ' + user.name.split(' ')[0] : 'Roadside assistance'}</p>
           <h1 id="consumer-help-title">How can we help?</h1>
@@ -110,7 +111,7 @@ export default function HomeScreen() {
           <div className="service-shortcuts">
             {services.map(({ label, icon: Icon, service }) => (
               <button key={service} type="button" aria-label={label === 'Tow' ? 'Need a tow' : label} onClick={() => startService(service)}>
-                <span><Icon size={23} strokeWidth={1.8} /></span>
+                <span aria-hidden="true"><Icon size={23} strokeWidth={1.8} /></span>
                 <strong>{label}</strong>
               </button>
             ))}
@@ -155,14 +156,14 @@ export default function HomeScreen() {
           <div className="consumer-section__heading"><h2 id="care-title">Vehicle care</h2></div>
           <div className="care-row">
             <button type="button" onClick={() => startService('oil_change')}><span><Car size={20} /></span><strong>Oil change</strong><small>At your location</small></button>
-            <button type="button" className="is-soon" disabled aria-label="Detailing, coming soon"><span><Sparkles size={20} /></span><strong>Detailing</strong><small>Coming soon</small></button>
-            <button type="button" className="is-soon" disabled aria-label="Window tint, coming soon"><span><Sun size={20} /></span><strong>Window tint</strong><small>Coming soon</small></button>
+            <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sparkles size={20} /></span><strong>Detailing</strong> <small>Coming soon</small></button>
+            <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sun size={20} /></span><strong>Window tint</strong> <small>Coming soon</small></button>
           </div>
         </section>
 
         <button type="button" className="consumer-safety" aria-haspopup="dialog" onClick={() => setShowSafety(true)}><ShieldCheck size={18} aria-hidden="true" /><span><strong>Safety</strong><small>AID is not an emergency service. If you’re in danger, call 911.</small></span></button>
         {showSafety && <SafetySheet audience="customer" onClose={() => setShowSafety(false)} />}
-      </main>
+      </div>
 
       <RequestSheet />
     </div>

@@ -44,7 +44,7 @@ describe('customer account', () => {
     render(<ProfileScreen />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
-    expect(screen.getByRole('dialog', { name: 'Permanently delete account?' })).toBeTruthy()
+    expect(screen.getByRole('alertdialog', { name: 'Permanently delete account?' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Delete my account permanently' }))
 
     await waitFor(() => expect(apiService.deleteAccount).toHaveBeenCalled())

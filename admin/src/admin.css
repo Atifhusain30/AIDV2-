@@ -2,7 +2,7 @@
 :root {
   color-scheme: light;
   --bg: #f5f4f8; --surface: #ffffff; --line: #e7e4ee; --line-strong: #d6d1e0;
-  --text: #16121d; --muted: #6a6377; --faint: #9a93a6;
+  --text: #16121d; --muted: #6a6377; --faint: #6f6879; /* F4: was #9a93a6 (2.9:1); now 5.3:1 on white */
   --accent: #6d28d9; --accent-hover: #5b21b6; --accent-soft: #f1ebfd;
   --ok: #0f7b53; --ok-soft: #e5f5ee; --warn: #9a5b00; --warn-soft: #fdf3e1; --danger: #c0352b; --danger-soft: #fdeceb;
   --ink: #0b0910; --ink-2: #17141e; --ink-text: #ece9f2; --ink-muted: #9b94a8;

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { MapPin, Navigation, X, ExternalLink, Loader2, AlertCircle, Check, Info, Search, Move } from 'lucide-react'
 import { useAppStore, GeoCoords } from '../../store/useAppStore'
 import locationService, { AddressSuggestion } from '../../services/locationService'
+import Dialog from '../ui/Dialog'
 
 // Lazy load MapPinPicker to avoid SSR issues with Leaflet
 const MapPinPicker = lazy(() => import('../ui/MapPinPicker'))
@@ -257,29 +258,14 @@ export default function LocationConfirmModal() {
   }
 
   return (
-    <AnimatePresence>
+    <>
       {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={handleClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-          />
-
-          {/* Modal */}
-          <motion.div
-            initial={{ opacity: 0, y: 100 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 100 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[90vh] overflow-auto"
-          >
+        <Dialog labelledBy="location-confirm-title" describedBy="location-confirm-text" onClose={handleClose} handle={false}
+          backdropClassName="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+          className="w-full max-h-[90vh] overflow-auto aid-sheet-in">
             <div className="bg-gray-900 rounded-t-3xl shadow-2xl border-t border-gray-800">
               {/* Handle bar */}
-              <div className="flex justify-center pt-3 pb-2">
+              <div className="flex justify-center pt-3 pb-2" aria-hidden="true">
                 <div className="w-12 h-1.5 bg-gray-700 rounded-full" />
               </div>
 
@@ -287,18 +273,20 @@ export default function LocationConfirmModal() {
               <div className="flex items-center justify-between px-6 pb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center">
-                    <MapPin className="w-5 h-5 text-blue-400" />
+                    <MapPin className="w-5 h-5 text-blue-400" aria-hidden="true" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-white">Confirm Location</h2>
-                    <p className="text-sm text-gray-400">Where should we send help?</p>
+                    <h2 id="location-confirm-title" className="text-xl font-bold text-white">Confirm Location</h2>
+                    <p id="location-confirm-text" className="text-sm text-gray-400">Where should we send help?</p>
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={handleClose}
-                  className="p-2 rounded-full hover:bg-gray-800 transition-colors"
+                  aria-label="Close"
+                  className="w-11 h-11 grid place-items-center rounded-full hover:bg-gray-800 transition-colors"
                 >
-                  <X className="w-5 h-5 text-gray-400" />
+                  <X className="w-5 h-5 text-gray-400" aria-hidden="true" />
                 </button>
               </div>
 
@@ -308,6 +296,7 @@ export default function LocationConfirmModal() {
                   <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
+                    role="alert"
                     className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl"
                   >
                     <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -368,23 +357,26 @@ export default function LocationConfirmModal() {
                 {/* Divider */}
                 <div className="flex items-center gap-4">
                   <div className="flex-1 h-px bg-gray-700" />
-                  <span className="text-sm text-gray-500">or search address</span>
+                  <span className="text-sm text-gray-400">or search address</span>
                   <div className="flex-1 h-px bg-gray-700" />
                 </div>
 
                 {/* Address Search Input with Autocomplete */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-300">
+                  <label htmlFor="location-search" className="text-sm font-medium text-gray-300">
                     Search address
                   </label>
                   <div className="relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
                     <input
+                      id="location-search"
                       type="text"
+                      autoComplete="off"
+                      aria-describedby={searchError && !isSearching ? 'location-search-error' : undefined}
                       value={manualQuery}
                       onChange={(e) => handleManualQueryChange(e.target.value)}
                       placeholder="Type to search..."
-                      className="w-full pl-12 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                      className="w-full pl-12 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
                     />
                     {isSearching && (
                       <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-400 animate-spin" />
@@ -392,13 +384,13 @@ export default function LocationConfirmModal() {
                   </div>
 
                   {/* Search Status */}
-                  {isSearching && (
-                    <p className="text-xs text-gray-400 pl-1">Searching...</p>
-                  )}
-                  
+                  <p className="text-xs text-gray-400 pl-1" role="status">
+                    {isSearching ? 'Searching...' : suggestions.length > 0 ? `${suggestions.length} ${suggestions.length === 1 ? 'address' : 'addresses'} found` : ''}
+                  </p>
+
                   {/* Search Error */}
                   {searchError && !isSearching && (
-                    <p className="text-xs text-amber-400 pl-1">{searchError}</p>
+                    <p id="location-search-error" className="text-xs text-amber-400 pl-1" role="alert">{searchError}</p>
                   )}
 
                   {/* Suggestions Dropdown */}
@@ -417,7 +409,7 @@ export default function LocationConfirmModal() {
                             className="w-full px-4 py-3 text-left hover:bg-gray-700/50 active:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-b-0"
                           >
                             <div className="flex items-start gap-3">
-                              <MapPin className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                              <MapPin className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
                               <p className="text-sm text-white line-clamp-2">{suggestion.label}</p>
                             </div>
                           </button>
@@ -428,7 +420,7 @@ export default function LocationConfirmModal() {
 
                   {/* Hint for manual entry */}
                   {manualQuery.trim().length > 0 && manualQuery.trim().length < 3 && (
-                    <p className="text-xs text-gray-500 pl-1">Type at least 3 characters to search</p>
+                    <p className="text-xs text-gray-400 pl-1">Type at least 3 characters to search</p>
                   )}
                 </div>
 
@@ -445,7 +437,7 @@ export default function LocationConfirmModal() {
                     </div>
                     <Suspense fallback={
                       <div className="h-[220px] rounded-xl bg-gray-800 border border-gray-700 flex items-center justify-center">
-                        <Loader2 className="w-6 h-6 text-gray-500 animate-spin" />
+                        <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
                       </div>
                     }>
                       <MapPinPicker
@@ -500,8 +492,8 @@ export default function LocationConfirmModal() {
                     disabled={!canConfirm}
                     className={`flex-1 py-3 px-4 font-semibold rounded-xl transition-colors ${
                       canConfirm
-                        ? 'bg-blue-500 text-white hover:bg-blue-600'
-                        : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        ? 'bg-violet-600 text-white hover:bg-violet-700'
+                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
                     }`}
                   >
                     {isResolvingAddress || isUpdatingPin ? 'Updating...' : 'Confirm Location'}
@@ -509,9 +501,8 @@ export default function LocationConfirmModal() {
                 </div>
               </div>
             </div>
-          </motion.div>
-        </>
+        </Dialog>
       )}
-    </AnimatePresence>
+    </>
   )
 }

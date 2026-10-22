@@ -47,7 +47,7 @@ function StripePaymentForm({ amount, serviceName, onSuccess, onCancel, onError }
   return (
     <main className="min-h-screen bg-[#0a0a0f] px-6 py-8 safe-top">
       <header className="flex items-center justify-between mb-8">
-        <button type="button" onClick={onCancel} className="text-gray-400" aria-label="Close checkout"><X size={24} /></button>
+        <button type="button" onClick={onCancel} className="w-11 h-11 -ml-2 grid place-items-center text-gray-400" aria-label="Close checkout"><X size={24} aria-hidden="true" /></button>
         <h1 className="text-lg font-bold text-white">Secure checkout</h1>
         <div className="w-6" />
       </header>
@@ -62,7 +62,7 @@ function StripePaymentForm({ amount, serviceName, onSuccess, onCancel, onError }
       </section>
 
       {message && <div className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2"><AlertCircle size={16} className="text-red-400" /><span className="text-red-400 text-sm">{message}</span></div>}
-      <div className="flex items-center gap-2 justify-center mb-6"><Lock size={14} className="text-gray-500" /><span className="text-gray-500 text-xs">Payment details are handled directly by Stripe</span></div>
+      <div className="flex items-center gap-2 justify-center mb-6"><Lock size={14} className="text-gray-400" /><span className="text-gray-400 text-xs">Payment details are handled directly by Stripe</span></div>
       <motion.button type="button" onClick={() => void submit()} disabled={!stripe || !elements || processing} className="w-full bg-gradient-to-r from-violet-500 to-purple-500 disabled:opacity-50 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-2" whileTap={{ scale: 0.98 }}>
         {processing ? <><Loader2 size={18} className="animate-spin" /> Processing</> : `Pay ${formatAmount(dollarsToCents(amount))}`}
       </motion.button>

@@ -16,6 +16,8 @@ import { showChatEntry, type BookingChat } from '../../lib/chat'
 import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
+import LiveRegion from '../../components/ui/LiveRegion'
+import { useAnnounceOnChange, useAnnouncer } from '../../lib/announce'
 
 interface DriverJobScreenProps {
   onBack: () => void
@@ -46,6 +48,11 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
     const current = useDriverStore.getState().activeBooking
     if (current?.chat) useDriverStore.setState({ activeBooking: { ...current, chat: { ...current.chat, ...change } } })
   }
+
+  // F4: a screen reader hears each status change (from the driver's own tap or the server).
+  const [liveText, announce] = useAnnouncer()
+  const stepLabel = job ? STEPS.find((step) => step.status === job.status)?.label : undefined
+  useAnnounceOnChange(job?.status, `Job status: ${stepLabel ?? (job?.status === 'cancelled' ? 'Cancelled' : job?.status === 'completed' ? 'Completed' : 'Updated')}.`, announce)
 
   if (!job) {
     return (
@@ -93,9 +100,10 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
 
   return (
     <div className="job-screen safe-top">
+      <LiveRegion message={liveText} />
       <RealtimeNotice />
       <header className="job-header">
-        <button type="button" className="job-header__back" aria-label="Back to dashboard" onClick={onBack}><ChevronLeft size={22} /></button>
+        <button type="button" className="job-header__back" aria-label="Back to dashboard" onClick={onBack}><ChevronLeft size={22} aria-hidden="true" /></button>
         <div><small>ACTIVE JOB</small><h1>{job.service.name}</h1></div>
         <strong className="job-header__price">{formatPrice(job.estimatedPrice)}</strong>
       </header>
@@ -128,7 +136,7 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
               <MessageButton name={customerFirst} unread={chatOpen ? 0 : job.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
             )}
             {job.customer?.phone && (
-              <a className="job-call" href={`tel:${job.customer.phone}`} aria-label={`Call ${customerName}`}><Phone size={19} /></a>
+              <a className="job-call" href={`tel:${job.customer.phone}`} aria-label={`Call ${customerName}`}><Phone size={19} aria-hidden="true" /></a>
             )}
           </div>
         </div>

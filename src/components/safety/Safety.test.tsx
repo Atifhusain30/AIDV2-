@@ -39,7 +39,7 @@ describe('Call 911', () => {
     expect(screen.queryByRole('link', { name: /911/ })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
-    const dialog = screen.getByRole('dialog', { name: 'Call 911?' })
+    const dialog = screen.getByRole('alertdialog', { name: 'Call 911?' })
     const link = within(dialog).getByRole('link', { name: 'Call 911 now' })
     expect(link.getAttribute('href')).toBe('tel:911')
     // The number is shown for devices (web/desktop) that can't place calls.

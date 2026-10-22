@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import Dialog from '../components/ui/Dialog'
 import { ArrowLeft, ChevronDown, ChevronRight, Mail, MessageSquareWarning, Phone, RefreshCw } from 'lucide-react'
 import { apiService } from '../services/api'
 import ReportProblemForm, { type ReportableJob } from '../components/support/ReportProblemForm'
@@ -15,14 +15,10 @@ import { FAQ, REPORT_STATUS_LABELS, type SupportAudience, type SupportConfig, ty
 const shortDate = (value: string | Date) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
 function ReportSheet({ audience, jobs, onSent, onClose }: { audience: SupportAudience; jobs: ReportableJob[]; onSent: () => void; onClose: () => void }) {
-  return createPortal(
-    <div className="account-sheet-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby="report-problem-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="account-sheet__handle" />
-        <ReportProblemForm audience={audience} jobs={jobs} titleId="report-problem-title" onSent={onSent} onClose={onClose} closeLabel="Cancel" />
-      </section>
-    </div>,
-    document.body,
+  return (
+    <Dialog labelledBy="report-problem-title" onClose={onClose}>
+      <ReportProblemForm audience={audience} jobs={jobs} titleId="report-problem-title" onSent={onSent} onClose={onClose} closeLabel="Cancel" />
+    </Dialog>
   )
 }
 

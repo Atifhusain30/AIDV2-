@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useId, useState } from 'react'
 import { AlertTriangle, ArrowLeft, ArrowRight, Ban, Check, Flag, MessageSquareText, RefreshCw } from 'lucide-react'
 import { adminApi } from './api'
+import FilterTabs, { tabId } from './FilterTabs'
 import type { ReportCategory, ReportChat, ReportCounts, ReportDetail, ReportFilter, ReportStatus, ReportSummary } from './types'
 
 const STATUS_LABELS: Record<ReportStatus, string> = { open: 'Open', in_review: 'In review', resolved: 'Resolved' }
@@ -260,6 +261,7 @@ export default function ReportsInbox({ notify, onCounts }: { notify: (text: stri
   const [refreshing, setRefreshing] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const categoryId = useId()
+  const panelId = useId()
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -295,13 +297,8 @@ export default function ReportsInbox({ notify, onCounts }: { notify: (text: stri
 
       <div className="card card--flush">
         <div className="toolbar">
-          <div role="tablist" aria-label="Report status" className="tabs">
-            {FILTERS.map((item) => (
-              <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} className="tab" onClick={() => setFilter(item.id)}>
-                {item.label}{countFor(counts, item.id) != null && <span className="tab__count">{countFor(counts, item.id)}</span>}
-              </button>
-            ))}
-          </div>
+          <FilterTabs label="Report status" tabs={FILTERS} value={filter} onChange={setFilter} panelId={panelId}
+            count={(id) => countFor(counts, id) != null && <span className="tab__count">{countFor(counts, id)}</span>} />
           <label className="select-field" htmlFor={categoryId}>
             <span className="sr-only">Category</span>
             <select id={categoryId} value={category} onChange={(event) => setCategory(event.target.value as ReportCategory | '')}>
@@ -311,8 +308,9 @@ export default function ReportsInbox({ notify, onCounts }: { notify: (text: stri
           </label>
         </div>
 
+        <div role="tabpanel" id={panelId} aria-labelledby={tabId(panelId, filter)}>
         {error && <p role="alert" className="alert alert--inset">{error}</p>}
-        {reports === null && !error && <div className="skeleton" aria-busy="true">Loading reports…</div>}
+        {reports === null && !error && <div className="skeleton" role="status" aria-busy="true">Loading reports…</div>}
         {reports?.length === 0 && (
           <div className="empty-state">
             <Flag size={28} aria-hidden="true" />
@@ -322,8 +320,9 @@ export default function ReportsInbox({ notify, onCounts }: { notify: (text: stri
         )}
         {reports && reports.length > 0 && (
           <table className="table">
+            <caption className="sr-only">Reports — {FILTERS.find((item) => item.id === filter)?.label}</caption>
             <thead>
-              <tr><th>Category</th><th>From</th><th>Message</th><th>Job</th><th>Status</th><th>Received</th><th aria-label="Open" /></tr>
+              <tr><th scope="col">Category</th><th scope="col">From</th><th scope="col">Message</th><th scope="col">Job</th><th scope="col">Status</th><th scope="col">Received</th><th scope="col"><span className="sr-only">Open</span></th></tr>
             </thead>
             <tbody>
               {reports.map((report) => (
@@ -344,6 +343,7 @@ export default function ReportsInbox({ notify, onCounts }: { notify: (text: stri
             </tbody>
           </table>
         )}
+        </div>
       </div>
     </div>
   )

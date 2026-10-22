@@ -6,17 +6,15 @@
 import { useState, type ReactNode } from 'react'
 import { AlertCircle, Check } from 'lucide-react'
 import ReportProblemForm from '../support/ReportProblemForm'
+import Dialog from '../ui/Dialog'
 import type { SupportAudience } from '../../lib/support'
 import type { Choice } from '../../lib/jobLifecycle'
 
-function Sheet({ labelledBy, onClose, children }: { labelledBy: string; onClose: () => void; children: ReactNode }) {
+function Sheet({ labelledBy, describedBy, role, dismissible = true, onClose, children }: { labelledBy: string; describedBy?: string; role?: 'dialog' | 'alertdialog'; dismissible?: boolean; onClose: () => void; children: ReactNode }) {
   return (
-    <div className="account-sheet-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby={labelledBy} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="account-sheet__handle" />
-        {children}
-      </section>
-    </div>
+    <Dialog labelledBy={labelledBy} describedBy={describedBy} role={role} dismissible={dismissible} onClose={onClose}>
+      {children}
+    </Dialog>
   )
 }
 
@@ -56,9 +54,9 @@ export function ConfirmSheet({ id, title, text, confirmLabel, busyLabel, keepLab
   const [reason, setReason] = useState<string | null>(null)
   const blocked = busy || Boolean(reasonRequired && !reason)
   return (
-    <Sheet labelledBy={`${id}-title`} onClose={busy ? () => undefined : onClose}>
+    <Sheet labelledBy={`${id}-title`} describedBy={`${id}-text`} role="alertdialog" dismissible={!busy} onClose={onClose}>
       <h2 id={`${id}-title`} className="job-confirm__title">{title}</h2>
-      <p className="job-confirm__text">{text}</p>
+      <p id={`${id}-text`} className="job-confirm__text">{text}</p>
       {reasons && (
         <>
           <p className="job-choices__label">{reasonRequired ? 'Why are you cancelling?' : 'Why are you cancelling? (optional)'}</p>

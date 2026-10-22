@@ -4,9 +4,9 @@
  * themselves (tel:911, behind a confirm step so a stray tap can't dial) and show plain safety tips.
  */
 
-import { useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, Phone, ShieldCheck } from 'lucide-react'
+import Dialog from '../ui/Dialog'
 
 export type SafetyAudience = 'customer' | 'driver'
 
@@ -27,15 +27,12 @@ const GUIDANCE: Record<SafetyAudience, string[]> = {
   ],
 }
 
-function SafetyDialog({ labelledBy, onClose, children }: { labelledBy: string; onClose: () => void; children: ReactNode }) {
-  return createPortal(
-    <div className="account-sheet-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="account-sheet safety-sheet" role="dialog" aria-modal="true" aria-labelledby={labelledBy} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="account-sheet__handle" />
-        {children}
-      </section>
-    </div>,
-    document.body,
+/** Shared accessible sheet (F4): focus trap, Escape/backdrop close, focus returns to the trigger. */
+function SafetyDialog({ labelledBy, describedBy, role, onClose, children }: { labelledBy: string; describedBy?: string; role?: 'dialog' | 'alertdialog'; onClose: () => void; children: ReactNode }) {
+  return (
+    <Dialog labelledBy={labelledBy} describedBy={describedBy} role={role} className="account-sheet safety-sheet" onClose={onClose}>
+      {children}
+    </Dialog>
   )
 }
 
@@ -43,8 +40,8 @@ function SafetyDialog({ labelledBy, onClose, children }: { labelledBy: string; o
 function Call911Confirm({ onBack, backLabel }: { onBack: () => void; backLabel: string }) {
   return (
     <>
-      <h2 id="call-911-title" className="job-confirm__title">Call 911?</h2>
-      <p className="job-confirm__text">This opens your phone to call 911. {NOT_EMERGENCY_SERVICE}</p>
+      <h2 id="call-911-title" className="job-confirm__title" tabIndex={-1}>Call 911?</h2>
+      <p id="call-911-text" className="job-confirm__text">This opens your phone to call 911. {NOT_EMERGENCY_SERVICE}</p>
       <div className="job-confirm__actions">
         <a className="safety-call safety-call--solid" href="tel:911" aria-label="Call 911 now">
           <Phone size={18} aria-hidden="true" /> Call 911 now
@@ -65,7 +62,7 @@ export function Call911Button({ className = 'safety-call' }: { className?: strin
         <Phone size={17} aria-hidden="true" /> Call 911
       </button>
       {open && (
-        <SafetyDialog labelledBy="call-911-title" onClose={() => setOpen(false)}>
+        <SafetyDialog labelledBy="call-911-title" describedBy="call-911-text" role="alertdialog" onClose={() => setOpen(false)}>
           <Call911Confirm onBack={() => setOpen(false)} backLabel="Cancel" />
         </SafetyDialog>
       )}
@@ -76,14 +73,21 @@ export function Call911Button({ className = 'safety-call' }: { className?: strin
 /** Safety information sheet with its own Call 911 (still behind the confirm step). */
 export function SafetySheet({ audience, onClose }: { audience: SafetyAudience; onClose: () => void }) {
   const [confirming, setConfirming] = useState(false)
+  // Switching step replaces the focused button: move focus to the new step's title so a
+  // screen reader announces it and keyboard focus stays in the sheet.
+  const switched = useRef(false)
+  useEffect(() => {
+    if (!switched.current) { switched.current = true; return }
+    document.getElementById(confirming ? 'call-911-title' : 'safety-title')?.focus()
+  }, [confirming])
   return (
-    <SafetyDialog labelledBy={confirming ? 'call-911-title' : 'safety-title'} onClose={onClose}>
+    <SafetyDialog labelledBy={confirming ? 'call-911-title' : 'safety-title'} describedBy={confirming ? 'call-911-text' : 'safety-text'} onClose={onClose}>
       {confirming ? (
         <Call911Confirm onBack={() => setConfirming(false)} backLabel="Back" />
       ) : (
         <>
-          <h2 id="safety-title" className="job-confirm__title">Safety</h2>
-          <p className="safety-statement">{NOT_EMERGENCY_SERVICE}</p>
+          <h2 id="safety-title" className="job-confirm__title" tabIndex={-1}>Safety</h2>
+          <p id="safety-text" className="safety-statement">{NOT_EMERGENCY_SERVICE}</p>
           <ul className="safety-tips">
             {GUIDANCE[audience].map((tip) => <li key={tip}>{tip}</li>)}
           </ul>

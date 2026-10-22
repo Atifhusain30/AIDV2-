@@ -7,8 +7,9 @@
  * star has a spoken label ("4 stars, Good") and a 48px target.
  */
 
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, Check, Star } from 'lucide-react'
+import Dialog from '../ui/Dialog'
 import { apiService } from '../../services/api'
 import { STAR_WORDS, type PendingRating } from '../../lib/ratings'
 
@@ -71,6 +72,10 @@ export default function RatingSheet({ pending, context, onRated, onSkip }: Ratin
   const sending = state === 'sending'
   const max = pending.commentMaxLength || 500
 
+  // The submit button disappears once saved: keep focus in the sheet on "Done".
+  const doneRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => { if (state === 'sent') doneRef.current?.focus() }, [state])
+
   const toggleTag = (id: string) => setTags((current) => (current.includes(id) ? current.filter((tag) => tag !== id) : [...current, id]))
 
   const submit = async () => {
@@ -92,9 +97,8 @@ export default function RatingSheet({ pending, context, onRated, onSkip }: Ratin
     : ratingDriver ? `Rate your ${pending.serviceName.toLowerCase()} driver.` : `Rate ${name} for this ${pending.serviceName.toLowerCase()} job.`
 
   return (
-    <div className="account-sheet-backdrop rating-backdrop" role="presentation" onMouseDown={sending ? undefined : state === 'sent' ? onRated : onSkip}>
-      <section className="account-sheet rating-sheet" role="dialog" aria-modal="true" aria-labelledby="rating-title" aria-describedby="rating-intro" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="account-sheet__handle" />
+    <Dialog labelledBy="rating-title" describedBy="rating-intro" className="account-sheet rating-sheet" backdropClassName="account-sheet-backdrop rating-backdrop"
+      dismissible={!sending} onClose={state === 'sent' ? onRated : onSkip}>
         <h2 id="rating-title" className="job-confirm__title">{title}</h2>
         {state === 'sent' ? (
           <>
@@ -102,7 +106,7 @@ export default function RatingSheet({ pending, context, onRated, onSkip }: Ratin
               {ratingDriver ? `Your rating helps other customers and helps ${name} improve.` : 'Your rating helps keep AID respectful for drivers.'}
               {comment.trim() ? ' Your note goes to the AID team only.' : ''}
             </p>
-            <div className="job-confirm__actions"><button type="button" className="aid-primary-button" onClick={onRated}><Check size={18} aria-hidden="true" /> Done</button></div>
+            <div className="job-confirm__actions"><button ref={doneRef} type="button" className="aid-primary-button" onClick={onRated}><Check size={18} aria-hidden="true" /> Done</button></div>
           </>
         ) : (
           <>
@@ -139,7 +143,6 @@ export default function RatingSheet({ pending, context, onRated, onSkip }: Ratin
             </div>
           </>
         )}
-      </section>
-    </div>
+    </Dialog>
   )
 }
