@@ -1,8 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
+const {
+  REQUIRED_DOCUMENT_TYPES, EXPIRING_DOCUMENT_TYPES, DRIVER_DECISIONS, DRIVER_STATUS_FILTERS,
+  todayIso, parseIsoDate, cleanNotes, verificationReadiness, credentialsCurrent,
+} = require('./verification');
 
-const DOCUMENT_TYPES = new Set(['drivers_license', 'identification', 'insurance', 'vehicle_registration']);
+const DOCUMENT_TYPES = new Set(REQUIRED_DOCUMENT_TYPES);
+const publicDocument = ({ storagePath: _storagePath, ...document }) => document;
 const DOCUMENT_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/heic', 'application/pdf']);
 function validDocumentFile(file) {
   if (!file || !DOCUMENT_MIME_TYPES.has(file.mimetype)) return false;
@@ -103,6 +108,9 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   function requireVerifiedDriver(req, res, next) {
     if (req.auth.profile.role !== 'driver' || req.auth.profile.verificationStatus !== 'verified') {
       return res.status(403).json({ error: 'Verified driver account required' });
+    }
+    if (!credentialsCurrent(req.auth.profile)) {
+      return res.status(403).json({ error: 'Your license, insurance, or registration has expired. Upload a current document to keep driving.' });
     }
     next();
   }
@@ -253,6 +261,11 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (!documentStorage) return res.status(503).json({ error: 'Document storage is not configured' });
       if (!DOCUMENT_TYPES.has(req.body.type)) return res.status(400).json({ error: 'Unsupported document type' });
       if (!validDocumentFile(req.file)) return res.status(400).json({ error: 'The uploaded file content is not a valid JPG, PNG, HEIC, or PDF' });
+      let expiresOn = null;
+      if (req.body.expiresOn || EXPIRING_DOCUMENT_TYPES.has(req.body.type)) {
+        expiresOn = parseIsoDate(req.body.expiresOn);
+        if (!expiresOn || expiresOn <= todayIso()) return res.status(400).json({ error: 'A future expiration date (YYYY-MM-DD) is required for this document' });
+      }
       const storagePath = await documentStorage.upload(req.auth.identity.id, req.file, req.body.type);
       try {
         const fileUrl = await documentStorage.signedUrl(storagePath);
@@ -262,6 +275,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
           fileName: req.file.originalname.slice(0, 255),
           mimeType: req.file.mimetype,
           fileSize: req.file.size,
+          expiresOn,
         });
         return res.status(201).json({ ...document, fileUrl });
       } catch (error) {
@@ -276,9 +290,104 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (!documentStorage) return res.status(503).json({ error: 'Document storage is not configured' });
       const document = await repository.getDriverDocument(req.auth.identity.id, req.params.documentId);
       if (!document) return res.status(404).json({ error: 'Document not found' });
+      if (document.status === 'approved') return res.status(409).json({ error: 'Approved documents cannot be deleted. Upload a replacement instead.' });
       await documentStorage.remove(document.storagePath);
       await repository.deleteDriverDocument(req.auth.identity.id, req.params.documentId);
       res.status(204).end();
+    } catch (error) { next(error); }
+  });
+
+  // ---- Driver verification (individual providers) ----
+  app.get('/api/drivers/me/verification', authenticate, requireRole('driver'), async (req, res, next) => {
+    try {
+      const [verification, documents] = await Promise.all([
+        repository.getDriverVerification(req.auth.identity.id),
+        repository.listDriverDocuments(req.auth.identity.id),
+      ]);
+      res.json({
+        ...verification,
+        requiredDocuments: REQUIRED_DOCUMENT_TYPES,
+        readiness: verificationReadiness(documents),
+        documents: documents.map(publicDocument),
+      });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/drivers/me/verification/submit', authenticate, requireRole('driver'), async (req, res, next) => {
+    try {
+      const readiness = verificationReadiness(await repository.listDriverDocuments(req.auth.identity.id));
+      if (!readiness.canSubmit) return res.status(409).json({ error: 'Upload every required, unexpired document before submitting', ...readiness });
+      const verification = await repository.submitDriverVerification(req.auth.identity.id);
+      if (!verification) return res.status(409).json({ error: 'Your application is already under review or decided' });
+      res.json(verification);
+    } catch (error) { next(error); }
+  });
+
+  // ---- Admin review ----
+  const requireAdmin = requireRole('admin');
+  app.get('/api/admin/drivers', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const filter = req.query.status ? String(req.query.status) : 'needs_review';
+      if (filter !== 'all' && !DRIVER_STATUS_FILTERS.has(filter)) return res.status(400).json({ error: 'Unsupported status filter' });
+      res.json(await repository.listDriversForReview(filter));
+    } catch (error) { next(error); }
+  });
+  app.get('/api/admin/drivers/:driverId', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const detail = await repository.getDriverForReview(req.params.driverId);
+      if (!detail) return res.status(404).json({ error: 'Driver not found' });
+      const documents = await Promise.all(detail.documents.map(async (document) => ({
+        ...publicDocument(document),
+        fileUrl: documentStorage ? await documentStorage.signedUrl(document.storagePath) : null,
+      })));
+      res.json({ ...detail, documents, readiness: verificationReadiness(detail.documents) });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/admin/documents/:documentId/review', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const decision = req.body.decision;
+      if (!['approve', 'reject'].includes(decision)) return res.status(400).json({ error: 'decision must be approve or reject' });
+      const notes = cleanNotes(req.body.notes);
+      if (decision === 'reject' && !notes) return res.status(400).json({ error: 'A reason is required when rejecting a document' });
+      let expiresOn;
+      if (req.body.expiresOn !== undefined) {
+        expiresOn = parseIsoDate(req.body.expiresOn);
+        if (!expiresOn) return res.status(400).json({ error: 'expiresOn must be a valid YYYY-MM-DD date' });
+      }
+      const document = await repository.getDocumentForReview(req.params.documentId);
+      if (!document) return res.status(404).json({ error: 'Document not found' });
+      const reviewed = await repository.reviewDriverDocument(document.id, req.auth.identity.id, {
+        status: decision === 'approve' ? 'approved' : 'rejected', notes, expiresOn,
+      });
+      // An approved replacement (e.g. renewed insurance) extends an already-verified driver's eligibility.
+      if (decision === 'approve') {
+        const detail = await repository.getDriverForReview(document.driverId);
+        const readiness = verificationReadiness(detail.documents);
+        if (detail.driver.verificationStatus === 'verified' && readiness.canVerify) {
+          await repository.setCredentialsValidUntil(document.driverId, readiness.credentialsValidUntil);
+        }
+      }
+      res.json(publicDocument(reviewed));
+    } catch (error) { next(error); }
+  });
+  app.post('/api/admin/drivers/:driverId/decision', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const rule = DRIVER_DECISIONS[req.body.decision];
+      if (!rule) return res.status(400).json({ error: 'decision must be verify, reject, suspend, or reinstate' });
+      const notes = cleanNotes(req.body.notes);
+      if (rule.requiresNotes && !notes) return res.status(400).json({ error: 'A reason is required for this decision' });
+      const detail = await repository.getDriverForReview(req.params.driverId);
+      if (!detail) return res.status(404).json({ error: 'Driver not found' });
+      let credentialsValidUntil;
+      if (rule.requiresApprovedDocuments) {
+        const readiness = verificationReadiness(detail.documents);
+        if (!readiness.canVerify) return res.status(409).json({ error: 'Every required document must be approved and unexpired', ...readiness });
+        credentialsValidUntil = readiness.credentialsValidUntil;
+      }
+      const verification = await repository.applyDriverDecision(req.params.driverId, req.auth.identity.id, {
+        fromStatuses: rule.from, toStatus: rule.to, event: rule.event, notes, credentialsValidUntil,
+      });
+      if (!verification) return res.status(409).json({ error: `A driver who is ${detail.driver.verificationStatus.replace('_', ' ')} cannot be moved to ${rule.to}` });
+      res.json(verification);
     } catch (error) { next(error); }
   });
 

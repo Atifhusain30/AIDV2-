@@ -37,6 +37,21 @@ test('remote database has the AID marketplace schema', { timeout: 30000 }, async
       from pg_policies
       where schemaname='public' and tablename=any($1::text[])
     `, [['profiles', 'driver_profiles', 'driver_documents', 'vehicles', 'bookings', 'booking_events']]);
+    const review = await pool.query(`
+      select
+        (select count(*)::int from information_schema.columns where table_schema='public' and table_name='driver_profiles'
+           and column_name = any(array['credentials_valid_until','review_notes','submitted_at','reviewed_at','reviewed_by'])) as profile_columns,
+        (select count(*)::int from information_schema.columns where table_schema='public' and table_name='driver_documents'
+           and column_name = any(array['expires_on','reviewed_by','reviewed_at'])) as document_columns,
+        (select relrowsecurity from pg_class where oid = 'public.driver_verification_events'::regclass) as events_rls,
+        has_table_privilege('authenticated', 'public.driver_verification_events', 'select') as events_readable,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'driver_profiles_verification_status_check')) as status_check
+    `);
+    assert.equal(review.rows[0].profile_columns, 5, 'driver review columns must exist');
+    assert.equal(review.rows[0].document_columns, 3, 'document expiration/review columns must exist');
+    assert.equal(review.rows[0].events_rls, true, 'verification audit log must have RLS enabled');
+    assert.equal(review.rows[0].events_readable, false, 'clients must not read the verification audit log directly');
+    assert.match(review.rows[0].status_check, /suspended/);
     assert.ok(hardenedPolicies.rowCount > 0);
     for (const policy of hardenedPolicies.rows) {
       assert.match(policy.expression, /is_active_account/i, `${policy.tablename}.${policy.policyname} must reject inactive accounts`);

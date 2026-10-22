@@ -1,3 +1,8 @@
+const { types } = require('pg');
+
+// Keep SQL `date` values as YYYY-MM-DD strings; JS Date conversion shifts them by timezone.
+types.setTypeParser(1082, (value) => value);
+
 const ACTIVE_STATUSES = ['pending', 'searching', 'accepted', 'en_route', 'arrived', 'in_progress'];
 const ESTIMATED_TIMES = { battery_jump: 30, flat_tire: 35, towing: 60, lockout: 30, fuel_delivery: 35, ev_charging: 45, oil_change: 45, detailing: 120, window_tinting: 180 };
 
@@ -18,6 +23,7 @@ function mapProfile(row) {
     ...(row.role === 'driver' ? {
       verificationStatus: row.verification_status,
       isVerified: row.verification_status === 'verified',
+      credentialsValidUntil: row.credentials_valid_until || null,
       isOnline: row.is_online,
       rating: Number(row.rating || 0),
       totalJobs: row.total_jobs || 0,
@@ -37,9 +43,34 @@ function mapDriverDocument(row) {
     mimeType: row.mime_type,
     fileSize: row.file_size,
     status: row.status,
+    expiresOn: row.expires_on || null,
+    reviewNotes: row.review_notes || null,
+    reviewedAt: row.reviewed_at || null,
     uploadedAt: row.created_at,
   };
 }
+
+function mapVerification(row) {
+  if (!row) return null;
+  return {
+    status: row.verification_status,
+    reviewNotes: row.review_notes || null,
+    submittedAt: row.submitted_at || null,
+    reviewedAt: row.reviewed_at || null,
+    credentialsValidUntil: row.credentials_valid_until || null,
+  };
+}
+
+const REVIEW_LIST_FILTERS = Object.freeze({
+  all: 'true',
+  needs_review: "(dp.verification_status = 'under_review' or exists (select 1 from public.driver_documents d where d.driver_id = p.id and d.status = 'pending'))",
+  expiring: "dp.verification_status = 'verified' and dp.credentials_valid_until < current_date + 30",
+  pending: "dp.verification_status = 'pending'",
+  under_review: "dp.verification_status = 'under_review'",
+  verified: "dp.verification_status = 'verified'",
+  rejected: "dp.verification_status = 'rejected'",
+  suspended: "dp.verification_status = 'suspended'",
+});
 
 function mapVehicle(row) {
   if (!row) return null;
@@ -101,7 +132,7 @@ class PostgresRepository {
 
   async getProfile(userId) {
     const result = await this.pool.query(`
-      select p.*, dp.verification_status, dp.is_online, dp.rating, dp.total_jobs, dp.specializations
+      select p.*, dp.verification_status, dp.credentials_valid_until, dp.is_online, dp.rating, dp.total_jobs, dp.specializations
       from public.profiles p left join public.driver_profiles dp on dp.profile_id = p.id
       where p.id = $1
     `, [userId]);
@@ -123,9 +154,9 @@ class PostgresRepository {
 
   async createDriverDocument(driverId, input) {
     const result = await this.pool.query(`
-      insert into public.driver_documents (driver_id, document_type, storage_path, file_name, mime_type, file_size)
-      values ($1,$2,$3,$4,$5,$6) returning *
-    `, [driverId, input.type, input.storagePath, input.fileName, input.mimeType, input.fileSize]);
+      insert into public.driver_documents (driver_id, document_type, storage_path, file_name, mime_type, file_size, expires_on)
+      values ($1,$2,$3,$4,$5,$6,$7) returning *
+    `, [driverId, input.type, input.storagePath, input.fileName, input.mimeType, input.fileSize, input.expiresOn || null]);
     return mapDriverDocument(result.rows[0]);
   }
 
@@ -137,6 +168,163 @@ class PostgresRepository {
   async deleteDriverDocument(driverId, documentId) {
     const result = await this.pool.query('delete from public.driver_documents where id=$2 and driver_id=$1 returning storage_path', [driverId, documentId]);
     return result.rows[0]?.storage_path || null;
+  }
+
+  async transaction(work) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const result = await work(client);
+      await client.query('commit');
+      return result;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getDriverVerification(driverId) {
+    const result = await this.pool.query('select * from public.driver_profiles where profile_id=$1', [driverId]);
+    return mapVerification(result.rows[0]);
+  }
+
+  async submitDriverVerification(driverId) {
+    return this.transaction(async (client) => {
+      const result = await client.query(`
+        update public.driver_profiles
+        set verification_status='under_review', submitted_at=now(), review_notes=null, updated_at=now()
+        where profile_id=$1 and verification_status in ('pending','rejected')
+        returning *
+      `, [driverId]);
+      if (!result.rows[0]) return null;
+      await client.query("insert into public.driver_verification_events (driver_id, actor_id, action) values ($1,$1,'submitted')", [driverId]);
+      return mapVerification(result.rows[0]);
+    });
+  }
+
+  async listDriversForReview(filter) {
+    const condition = REVIEW_LIST_FILTERS[filter];
+    if (!condition) throw new Error(`Unsupported review filter: ${filter}`);
+    const result = await this.pool.query(`
+      select p.id, p.first_name, p.last_name, p.phone, p.status as account_status, p.created_at, u.email,
+             dp.verification_status, dp.submitted_at, dp.reviewed_at, dp.credentials_valid_until, dp.is_online,
+             (select count(*)::int from public.driver_documents d where d.driver_id = p.id and d.status = 'pending') as pending_documents
+      from public.profiles p
+      join public.driver_profiles dp on dp.profile_id = p.id
+      left join auth.users u on u.id = p.id
+      where p.role = 'driver' and p.status <> 'deleted' and ${condition}
+      order by dp.submitted_at asc nulls last, p.created_at asc
+      limit 200
+    `);
+    return result.rows.map((row) => ({
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      phone: row.phone,
+      email: row.email || '',
+      accountStatus: row.account_status,
+      verificationStatus: row.verification_status,
+      submittedAt: row.submitted_at || null,
+      reviewedAt: row.reviewed_at || null,
+      credentialsValidUntil: row.credentials_valid_until || null,
+      isOnline: row.is_online,
+      pendingDocuments: row.pending_documents,
+      createdAt: row.created_at,
+    }));
+  }
+
+  async getDriverForReview(driverId) {
+    const driver = await this.pool.query(`
+      select p.*, u.email, dp.verification_status, dp.review_notes, dp.submitted_at, dp.reviewed_at,
+             dp.credentials_valid_until, dp.is_online, dp.rating, dp.total_jobs
+      from public.profiles p
+      join public.driver_profiles dp on dp.profile_id = p.id
+      left join auth.users u on u.id = p.id
+      where p.id = $1 and p.role = 'driver'
+    `, [driverId]);
+    const row = driver.rows[0];
+    if (!row) return null;
+    const [documents, events] = await Promise.all([
+      this.listDriverDocuments(driverId),
+      this.pool.query(`
+        select e.*, a.first_name as actor_first_name, a.last_name as actor_last_name, a.role as actor_role
+        from public.driver_verification_events e left join public.profiles a on a.id = e.actor_id
+        where e.driver_id = $1 order by e.created_at desc limit 100
+      `, [driverId]),
+    ]);
+    return {
+      driver: {
+        id: row.id,
+        firstName: row.first_name,
+        lastName: row.last_name,
+        phone: row.phone,
+        email: row.email || '',
+        accountStatus: row.status,
+        createdAt: row.created_at,
+        isOnline: row.is_online,
+        rating: Number(row.rating || 0),
+        totalJobs: row.total_jobs || 0,
+        ...mapVerification(row),
+        verificationStatus: row.verification_status,
+      },
+      documents,
+      events: events.rows.map((event) => ({
+        id: event.id,
+        action: event.action,
+        notes: event.notes || null,
+        documentId: event.document_id || null,
+        actor: event.actor_id ? { id: event.actor_id, name: `${event.actor_first_name || ''} ${event.actor_last_name || ''}`.trim(), role: event.actor_role } : null,
+        createdAt: event.created_at,
+      })),
+    };
+  }
+
+  async getDocumentForReview(documentId) {
+    const result = await this.pool.query('select * from public.driver_documents where id=$1', [documentId]);
+    return mapDriverDocument(result.rows[0]);
+  }
+
+  async reviewDriverDocument(documentId, adminId, { status, notes, expiresOn }) {
+    return this.transaction(async (client) => {
+      const result = await client.query(`
+        update public.driver_documents
+        set status=$2, review_notes=$3, reviewed_by=$4, reviewed_at=now(), expires_on=coalesce($5::date, expires_on)
+        where id=$1 returning *
+      `, [documentId, status, notes || null, adminId, expiresOn || null]);
+      const document = result.rows[0];
+      if (!document) return null;
+      await client.query(
+        'insert into public.driver_verification_events (driver_id, actor_id, document_id, action, notes) values ($1,$2,$3,$4,$5)',
+        [document.driver_id, adminId, documentId, status === 'approved' ? 'document_approved' : 'document_rejected', notes || null],
+      );
+      return mapDriverDocument(document);
+    });
+  }
+
+  async applyDriverDecision(driverId, adminId, { fromStatuses, toStatus, event, notes, credentialsValidUntil }) {
+    return this.transaction(async (client) => {
+      const result = await client.query(`
+        update public.driver_profiles
+        set verification_status=$3, review_notes=$4, reviewed_at=now(), reviewed_by=$5,
+            credentials_valid_until = case when $6::boolean then $7::date else credentials_valid_until end,
+            is_online = case when $3 = 'verified' then is_online else false end,
+            updated_at=now()
+        where profile_id=$1 and verification_status = any($2::text[])
+        returning *
+      `, [driverId, fromStatuses, toStatus, notes || null, adminId, credentialsValidUntil !== undefined, credentialsValidUntil || null]);
+      if (!result.rows[0]) return null;
+      await client.query(
+        'insert into public.driver_verification_events (driver_id, actor_id, action, notes) values ($1,$2,$3,$4)',
+        [driverId, adminId, event, notes || null],
+      );
+      return mapVerification(result.rows[0]);
+    });
+  }
+
+  async setCredentialsValidUntil(driverId, date) {
+    await this.pool.query('update public.driver_profiles set credentials_valid_until=$2, updated_at=now() where profile_id=$1', [driverId, date]);
   }
 
   async prepareAccountDeletion(userId) {

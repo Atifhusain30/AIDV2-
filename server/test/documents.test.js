@@ -56,6 +56,7 @@ test('authenticated driver uploads a validated document without trusting a suppl
     .post('/api/drivers/me/documents')
     .set('Authorization', 'Bearer driver')
     .field('type', 'drivers_license')
+    .field('expiresOn', '2099-01-01')
     .field('driverId', 'attacker-selected-id')
     .attach('file', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]), { filename: 'license.png', contentType: 'image/png' });
   assert.equal(response.status, 201);
@@ -91,6 +92,7 @@ test('driver document upload removes storage without persisting metadata when si
     .post('/api/drivers/me/documents')
     .set('Authorization', 'Bearer driver')
     .field('type', 'drivers_license')
+    .field('expiresOn', '2099-01-01')
     .attach('file', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]), { filename: 'license.png', contentType: 'image/png' });
   assert.equal(response.status, 500);
   assert.equal(removed.length, 1);
@@ -103,6 +105,7 @@ test('driver can delete only an owned document and its storage object', async ()
     .post('/api/drivers/me/documents')
     .set('Authorization', 'Bearer driver')
     .field('type', 'drivers_license')
+    .field('expiresOn', '2099-01-01')
     .attach('file', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]), { filename: 'license.png', contentType: 'image/png' });
   const response = await request(app)
     .delete(`/api/drivers/me/documents/${upload.body.id}`)

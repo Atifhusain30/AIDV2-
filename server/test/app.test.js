@@ -6,8 +6,8 @@ const { createApp } = require('../app');
 function buildHarness(stripe = null, accountAdmin = null) {
   const users = {
     customerToken: { id: 'customer-1', role: 'customer', status: 'active', firstName: 'Casey', lastName: 'Customer' },
-    driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', isOnline: true },
-    offlineDriverToken: { id: 'driver-3', role: 'driver', status: 'active', verificationStatus: 'verified', isOnline: false },
+    driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true },
+    offlineDriverToken: { id: 'driver-3', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: false },
     pendingDriverToken: { id: 'driver-2', role: 'driver', status: 'active', verificationStatus: 'pending' },
   };
 

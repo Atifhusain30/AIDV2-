@@ -40,7 +40,35 @@ test('live Supabase customer → verified driver → document → completed book
   try {
     const customer = await createUser(customerEmail, 'customer');
     const driver = await createUser(driverEmail, 'driver');
-    await pool.query("update public.driver_profiles set verification_status='verified' where profile_id=$1", [driver.id]);
+    const reviewer = await createUser(`e2e-admin-${suffix}@example.com`, 'customer');
+    await pool.query("update public.profiles set role='admin' where id=$1", [reviewer.id]);
+
+    // Individual-provider onboarding: upload every required document, submit, admin reviews.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    for (const [type, expiresOn] of [['drivers_license', '2099-01-31'], ['identification', null], ['insurance', '2098-06-30'], ['vehicle_registration', '2099-01-31']]) {
+      const form = new FormData();
+      form.append('type', type);
+      if (expiresOn) form.append('expiresOn', expiresOn);
+      form.append('file', new Blob([png], { type: 'image/png' }), `${type}.png`);
+      assert.equal((await api('/drivers/me/documents', driver.token, { method: 'POST', body: form })).status, 201, `upload ${type}`);
+    }
+    assert.equal((await api('/drivers/requests', driver.token)).status, 403, 'unverified drivers cannot see jobs');
+    assert.equal((await api('/drivers/me/verification/submit', driver.token, { method: 'POST' })).status, 200);
+    assert.equal((await api('/admin/drivers', driver.token)).status, 403, 'drivers cannot use admin endpoints');
+    const queue = await (await api('/admin/drivers?status=under_review', reviewer.token)).json();
+    assert.ok(queue.some((item) => item.id === driver.id && item.email === driverEmail));
+    const detail = await (await api(`/admin/drivers/${driver.id}`, reviewer.token)).json();
+    assert.equal(detail.documents.length, 4);
+    assert.match(detail.documents[0].fileUrl, /^https:/);
+    for (const doc of detail.documents) {
+      const review = await api(`/admin/documents/${doc.id}/review`, reviewer.token, { method: 'POST', body: JSON.stringify({ decision: 'approve' }) });
+      assert.equal(review.status, 200);
+    }
+    const verified = await api(`/admin/drivers/${driver.id}/decision`, reviewer.token, { method: 'POST', body: JSON.stringify({ decision: 'verify' }) });
+    assert.equal(verified.status, 200);
+    assert.equal((await verified.json()).credentialsValidUntil, '2098-06-30');
+    const audit = await (await api(`/admin/drivers/${driver.id}`, reviewer.token)).json();
+    assert.deepEqual(audit.events.map((event) => event.action).slice(0, 2), ['verified', 'document_approved']);
 
     const vehicleResponse = await api('/vehicles', customer.token, {
       method: 'POST', body: JSON.stringify({ make: 'Honda', model: 'Civic', year: 2022, color: 'Black', plate: 'E2E' }),
@@ -84,7 +112,7 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal((await customerBooking.json()).status, 'completed');
 
     const form = new FormData();
-    form.append('type', 'drivers_license');
+    form.append('type', 'identification');
     form.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00])], { type: 'image/png' }), 'license.png');
     const documentResponse = await api('/drivers/me/documents', driver.token, { method: 'POST', body: form });
     assert.equal(documentResponse.status, 201);
@@ -94,6 +122,13 @@ test('live Supabase customer → verified driver → document → completed book
     assert.ok((await documentsResponse.json()).some((item) => item.id === document.id));
     assert.equal((await api(`/drivers/me/documents/${document.id}`, driver.token, { method: 'DELETE' })).status, 204);
   } finally {
+    const stored = await pool.query('select storage_path from public.driver_documents where driver_id = any($1::uuid[])', [createdIds]).catch(() => ({ rows: [] }));
+    // A fresh service client: `supabase` above now carries the last test user's session.
+    const storageAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    if (stored.rows.length) {
+      const { data: removed } = await storageAdmin.storage.from('driver-documents').remove(stored.rows.map((row) => row.storage_path));
+      assert.equal(removed?.length, stored.rows.length, 'every uploaded test document must be removed from storage');
+    }
     if (bookingId) await pool.query('delete from public.bookings where id=$1', [bookingId]).catch(() => {});
     for (const id of createdIds.reverse()) await supabase.auth.admin.deleteUser(id).catch(() => {});
     await pool.end();
