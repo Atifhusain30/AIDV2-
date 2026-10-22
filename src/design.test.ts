@@ -83,6 +83,33 @@ describe('no glow (owner correction)', () => {
   it('app stylesheets have no coloured glows, halos or gradient fills', () => {
     for (const [name, text] of Object.entries(css)) expect(glowViolations(text), name).toEqual([])
   })
+
+  // Design standards checklist (A4/A5/K76): dark mode layers with tone + 8% hairlines, zero drop
+  // shadows; skeletons are flat blocks with no shimmer.
+  it('no drop shadows (depth comes from surface tone and hairline borders) and no shimmer skeletons', () => {
+    for (const [name, text] of Object.entries(css)) {
+      const drops = [...text.matchAll(/box-shadow:\s*([^;}]+)/g)].map((m) => m[1].trim())
+        .filter((value) => value !== 'none' && !/^var\(--aid-shadow/.test(value) && value.split(/,(?![^(]*\))/).some((layer) => {
+          const lengths = layer.replace(COLOR, '').match(/-?[\d.]+px|\b0\b/g) ?? []
+          return !/inset/.test(layer) && parseFloat(lengths[2] ?? '0') > 0
+        }))
+      expect(drops, name).toEqual([])
+      expect(text, name).not.toMatch(/--aid-shadow-[a-z]+:(?!\s*none)/)
+    }
+    expect(css['src/rebrand.css']).not.toMatch(/\.ui-skeleton\s*\{[^}]*(gradient|animation)/)
+  })
+
+  it('design-standards tokens: #000 base, #1C1C1F cards/sheets, #6E56CF button fill, #9D8CFF violet text, tabular digits', () => {
+    const root = css['src/rebrand.css']
+    expect(root).toMatch(/--aid-ink:\s*#000000/i)
+    expect(root).toMatch(/--aid-surface-1:\s*#1c1c1f/i)
+    expect(root).toMatch(/--aid-signal:\s*#6e56cf/i)
+    expect(root).toMatch(/--aid-signal-strong:\s*#9d8cff/i)
+    expect(root).toMatch(/font-variant-numeric:\s*tabular-nums/)
+    // Three weights: 400 / 500 / 600–700.
+    const weights = new Set([...root.matchAll(/font-weight:\s*(\d+)/g)].map((m) => m[1]))
+    expect([...weights].filter((w) => !['400', '500', '600', '700'].includes(w))).toEqual([])
+  })
 })
 
 describe('one icon set, one stroke weight', () => {
