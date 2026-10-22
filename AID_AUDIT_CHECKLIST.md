@@ -45,7 +45,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 2.8 | Account deletion: keep (anonymize) paid bookings for records; handle auth-delete failure; let suspended users delete; sweep storage prefix | ⚠️ |
 | 2.9 | Auth settings for production: email confirmation, secure password change, stronger password rules + leaked-password check | 🔒 Supabase dashboard |
 | 2.10 | Input validation gaps (UUID params, drop-off address length, lat/lng ranges); status route ignores credential expiry | ⚠️ |
-| 2.11 | Security headers, structured logging with redaction, booking status audit trail (`booking_events` unused) | ❌ |
+| 2.11 | Security headers, structured logging with redaction, booking status audit trail (`booking_events` unused) | ⚠️ audit trail done `26ceb6e` (every accept/status change/cancel reason/issue report written atomically to `booking_events`); security headers + structured logging open |
 | 2.12 | Clear persisted data on logout (previous user's vehicles/history visible); mark driver offline on logout | ❌ |
 | 2.13 | Client routes by editable `user_metadata.role`; should use `/api/me` (admin sign-in shows blank screen) | ⚠️ |
 
@@ -54,9 +54,9 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 |---|---|---|
 | 3.1 | Real customer↔driver chat with report/block (currently simulated auto-replies) | ❌ |
 | 3.2 | Call buttons (masked numbers or `tel:`) | ❌ console.log only |
-| 3.3 | Status updates everywhere (not only while Chat screen is open); driver job refresh when customer cancels | ❌ |
+| 3.3 | Status updates everywhere (not only while Chat screen is open); driver job refresh when customer cancels | ✅ by polling — customer every 4 s on every screen (`4cfd340`), driver's active job every 5 s with a "customer cancelled" notice (`26ceb6e`); realtime channel/push still 3.4 |
 | 3.4 | Push notifications (APNs/FCM) for request accepted, arriving, completed, new job for drivers | ❌ |
-| 3.5 | Lifecycle buttons only in allowed states (customer cancel after en route; driver cancel after arrival) | ⚠️ |
+| 3.5 | Lifecycle buttons only in allowed states (customer cancel after en route; driver cancel after arrival) | ✅ `26ceb6e` — server state machine `server/lifecycle.js` + client mirror `src/lib/jobLifecycle.ts`; customer cancels until arrival, driver (with reason) until service starts, then report-an-issue only |
 | 3.6 | Payment status re-read after paying; receipt shows real price (no invented distance/surge split) | ⚠️ |
 | 3.7 | Prices shown come from the server catalog (`GET /api/services`), not local/random estimates | ✅ `bbf9c8c` request flow; receipts still pending (3.6) |
 

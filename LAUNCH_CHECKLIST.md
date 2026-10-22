@@ -35,8 +35,8 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | B7 | "Request again" creates a real booking | 🛠 | ✅ |
 | B8 | Driver sees nearby requests, accepts (no double-booking) | 🛠 | 🟡 backend ✅, UI polish |
 | B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | 🟡 nearly done — server ✅ (3a), driver GPS sharing + job screen ✅ (3b), customer live map + driver name/rating/vehicle/plate + approximate ETA ✅ (3c, `4cfd340`). Left: driver screen to enter their vehicle (API exists; until then customers see "Vehicle details not added yet"), profile photos (initials shown — no photo upload exists yet). ETA is distance-based (road-mile estimate at 30 mph), not live traffic, until G6. Updates by polling every 4 s; sharing works only while the driver app is open — background tracking comes with G2 |
-| B10 | Job lifecycle: en route → arrived → in progress → completed; cancel rules | 🛠 | 🟡 |
-| B11 | Real-time status updates on every screen | 🛠 | 🟡 customer's active request (status, driver location, ETA, cancel/complete) refreshes every 4 s on every customer screen (polling); push (B14) and realtime channel not yet |
+| B10 | Job lifecycle: en route → arrived → in progress → completed; cancel rules | 🛠 | ✅ `26ceb6e` — one server state machine (`server/lifecycle.js`): driver accepted → en route → arrived → in progress (tow: loaded, heading to drop-off) → completed, one step at a time; wrong party / skipped step / repeat is refused. Customer can cancel until the driver arrives; driver can cancel with a reason until service starts; after that only Complete or Report an issue (both sides). Every change is timestamped and written to `booking_events` with who did it and why. Cancelling or completing frees the driver (one job at a time) and stops location sharing. Driver app: one main button per step with confirm on Complete/Cancel; customer screens show each status and stop tracking at the end; receipt on completion. Proven on the live database (`live-e2e`). No cancellation fee is charged or shown — there is no fee policy yet (A9/C3). Issue reports are saved on the job but there is no admin screen to read them yet |
+| B11 | Real-time status updates on every screen | 🛠 | 🟡 customer's active request (status, driver location, ETA, cancel/complete) refreshes every 4 s on every customer screen (polling); driver's active job refreshes every 5 s so a customer cancel ends it on the driver's phone (`26ceb6e`); push (B14) and realtime channel not yet |
 | B12 | Real chat customer↔driver + report/block | 🛠 | ⬜ |
 | B13 | Calling (masked numbers e.g. Twilio, or direct tel:) | 🤝 | ⬜ real numbers shared during a job for now; Twilio private numbers later |
 | B14 | Push notifications (accepted, arriving, completed, new job) | 🛠 | ⬜ needs A2 |
@@ -71,7 +71,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | E1 | Database least-privilege + attack test | 🛠 | ✅ |
 | E2 | Private document storage, short-lived links | 🛠 | ✅ |
 | E3 | Rate limiting, CAPTCHA on sign-up/reset, upload caps | 🛠 | ⬜ |
-| E4 | One active request per customer / one job per driver; stale requests expire | 🛠 | ⬜ |
+| E4 | One active request per customer / one job per driver; stale requests expire | 🛠 | 🟡 one job per driver enforced on accept (`26ceb6e`); one active request per customer and expiring stale requests still open |
 | E5 | Admin two-factor sign-in (MFA) | 🛠 | ⬜ |
 | E6 | Sign-out clears phone data; role from server | 🛠 | 🟡 |
 | E7 | Supabase: email confirmation, strong passwords, leaked-password check | 👤 (I'll guide) | ⬜ |
