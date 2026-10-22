@@ -917,6 +917,11 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 .activity-item__main { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 14px; color: var(--aid-ivory); text-align: left; }
 .activity-item__icon { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: var(--aid-radius-sm); background: var(--aid-surface-3); color: var(--aid-ivory); }
 .activity-item__text { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.activity-item__text > strong { overflow: hidden; font-size: var(--aid-fs-base); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.activity-item__side { display: grid; flex: none; justify-items: end; gap: 8px; }
+.activity-filters { display: flex; gap: 8px; margin-top: 16px; }
+.activity-filters button { min-height: 44px; padding: 0 18px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-pill); background: var(--aid-surface-1); color: var(--aid-text-2); font-size: var(--aid-fs-sm); font-weight: 600; }
+.activity-filters button[aria-pressed="true"] { border-color: var(--aid-signal); background: var(--aid-signal); color: #fff; }
 .activity-item__title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .activity-item__title strong { overflow: hidden; font-size: var(--aid-fs-base); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .activity-item__price { flex: none; font-size: var(--aid-fs-base); font-weight: 600; font-variant-numeric: tabular-nums; }

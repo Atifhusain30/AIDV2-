@@ -13,6 +13,7 @@ import { loadBookingHistory, useHistoryLoad } from '../lib/bookingHistory'
 import { chargeLabel, dayLabel, monthLabel, serviceIcon, statusLabels, statusTone, timeLabel } from '../lib/serviceDisplay'
 import { SkeletonRows } from '../components/ui/Skeleton'
 import { EmptyState, ErrorState } from '../components/ui/States'
+import StatusPill from '../components/ui/StatusPill'
 
 type Filter = 'all' | 'completed' | 'cancelled'
 const FILTERS: { id: Filter; label: string }[] = [
@@ -25,21 +26,21 @@ function ActivityItem({ booking }: { booking: Booking }) {
   const { openBookingDetail, openReceipt, rebookFromHistory } = useAppStore()
   const Icon = serviceIcon(booking.service.id)
   const completed = booking.status === 'completed'
-  // Completed is the normal case: no chip. Cancelled / no driver / live get one.
-  const tone = completed ? null : statusTone(booking.status)
   const charge = chargeLabel(booking)
 
+  // Owner reference: icon, title, date · time, address; price (or "No charge") and a status pill on the right.
   return (
     <li className="activity-item">
       <button type="button" className="activity-item__main" onClick={() => openBookingDetail(booking.id)}>
         <span className="activity-item__icon" aria-hidden="true"><Icon size={20} /></span>
         <span className="activity-item__text">
-          <span className="activity-item__title">
-            <strong>{booking.service.name}</strong>
-            <span className={`activity-item__price${charge.muted ? ' is-muted' : ''}`}>{charge.text}</span>
-          </span>
-          <small>{dayLabel(booking.createdAt)} · {timeLabel(booking.createdAt)}{tone ? <> · <span className={`activity-item__status is-${tone}`}>{statusLabels[booking.status]}</span></> : null}</small>
+          <strong>{booking.service.name}</strong>
+          <small>{dayLabel(booking.createdAt)} · {timeLabel(booking.createdAt)}</small>
           <small className="activity-item__where">{booking.location.address}</small>
+        </span>
+        <span className="activity-item__side">
+          <span className={`activity-item__price${charge.muted ? ' is-muted' : ''}`}>{charge.text}</span>
+          <StatusPill tone={statusTone(booking.status)}>{statusLabels[booking.status]}</StatusPill>
         </span>
       </button>
       {/* Quiet text actions (Uber-style), not two boxed buttons. */}
@@ -131,7 +132,7 @@ export default function HistoryScreen() {
       )}
 
       {hasPast && (
-        <div className="ui-segmented" role="group" aria-label="Filter activity">
+        <div className="activity-filters" role="group" aria-label="Filter activity">
           {FILTERS.map((item) => (
             <button type="button" key={item.id} aria-pressed={filter === item.id} className={filter === item.id ? 'is-active' : ''} onClick={() => setFilter(item.id)}>
               {item.label}

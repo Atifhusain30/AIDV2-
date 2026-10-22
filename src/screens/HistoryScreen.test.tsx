@@ -67,6 +67,22 @@ describe('customer activity', () => {
     expect(within(sheet).getByText('No charge')).toBeTruthy()
   })
 
+  it('design (owner reference): filter pills, and every card has a green or red status pill', () => {
+    useAppStore.setState({ bookingHistory: [
+      booking('done'),
+      booking('cx', { status: 'cancelled', createdAt: new Date('2026-10-18T15:00:00Z') }),
+      booking('ex', { status: 'expired', createdAt: new Date('2026-10-17T15:00:00Z') }),
+    ] })
+    const { container } = render(<HistoryScreen />)
+    expect(screen.getByRole('group', { name: 'Filter activity' }).className).toContain('activity-filters')
+    const pills = [...container.querySelectorAll('.activity-item .ui-pill')].map((pill) => [pill.textContent, pill.className])
+    expect(pills).toEqual([
+      ['Completed', 'ui-pill ui-pill--success'],
+      ['Cancelled', 'ui-pill ui-pill--danger'],
+      ['No driver found', 'ui-pill ui-pill--danger'],
+    ])
+  })
+
   it('still shows the amount when a cancelled request has a recorded successful payment', () => {
     useAppStore.setState({ bookingHistory: [booking('p', { status: 'cancelled', finalPrice: 25, payment: { intentId: 'pi', status: 'succeeded', amount: 2500 } })] })
     render(<HistoryScreen />)

@@ -17,6 +17,7 @@ import Button from '../ui/Button'
 import { InfoRow, List } from '../ui/ListRow'
 import PersonAvatar from '../ui/PersonAvatar'
 import StepProgress from '../ui/StepProgress'
+import StatusPill from '../ui/StatusPill'
 import { EmptyState } from '../ui/States'
 import { TripStops } from '../tracking/TrackLayout'
 import { chargeLabel, dayLabel, serviceIcon, statusLabels, statusTone, timeLabel } from '../../lib/serviceDisplay'
@@ -86,9 +87,9 @@ export default function BookingDetailModal() {
       <div className="detail-summary">
         <span className="detail-summary__icon" aria-hidden="true"><Icon size={22} /></span>
         <div className="detail-summary__text">
-          <span className={`ui-chip ui-chip--${tone}`}>
+          <StatusPill tone={tone}>
             {booking.status === 'completed' && <CheckCircle2 size={13} aria-hidden="true" />}{statusLabels[booking.status]}
-          </span>
+          </StatusPill>
         </div>
         <strong className={`detail-summary__price${charge.muted ? ' is-muted' : ''}${charge.text === 'No charge' ? ' is-text' : ''}`}>{charge.text}</strong>
       </div>
