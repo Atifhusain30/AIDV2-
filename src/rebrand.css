@@ -217,21 +217,6 @@ select:focus-visible {
 .aid-bottom-nav__label { max-width: 100%; overflow: hidden; font-size: .75rem; font-weight: 760; letter-spacing: 0.01em; text-overflow: ellipsis; white-space: nowrap; }
 .aid-bottom-nav__item.is-active { color: #b89cff; }
 
-.aid-icon-button,
-.aid-avatar-button {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border: 1px solid var(--aid-line);
-  border-radius: 14px;
-  background: var(--aid-panel);
-  color: var(--aid-text-2);
-}
-
-.aid-avatar-button { background: var(--aid-signal); color: var(--aid-signal-ink); }
-
 /* Customer Home: location → problem → request; a live request takes over the top. */
 .consumer-home { width: 100%; max-width: 430px; margin: 0 auto; padding: 8px 20px 28px; color: var(--aid-ivory); }
 .consumer-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; }
@@ -280,7 +265,6 @@ select:focus-visible {
 .consumer-safety small { font-size: var(--aid-fs-xs); line-height: 1.4; }
 @media (max-width: 350px) { .consumer-home { padding-inline: 16px; } .service-shortcuts, .care-grid { gap: 6px; } .service-shortcuts button, .care-grid button { padding: 10px; } }
 
-
 /* Purpose-built driver work layout */
 /* Driver Work: availability first, then requests, today, readiness. */
 .driver-work { display: grid; gap: 18px; align-content: start; padding-bottom: 40px; }
@@ -319,7 +303,6 @@ select:focus-visible {
 .driver-stats small { color: var(--aid-text-3); font-size: var(--aid-fs-xs); }
 .driver-stats__note { color: var(--aid-text-3); font-size: var(--aid-fs-xs); line-height: 1.45; }
 .request-list { display: grid; gap: 10px; }
-
 
 /* Request sheet (all on-demand services) */
 .request-sheet .ui-sheet__body { display: grid; gap: 14px; }
@@ -386,30 +369,13 @@ select:focus-visible {
 .job-note-quote figcaption { color: var(--aid-text-3); font-size: var(--aid-fs-xs); font-weight: 600; }
 .job-note-quote blockquote { margin: 2px 0 0; color: var(--aid-ivory); font-size: var(--aid-fs-base); line-height: 1.45; }
 .job-screen .ui-actionbar { margin-top: 6px; }
-.job-error { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: #ff9a91; font-size: .875rem; }
-.job-cancel { min-height: 50px; border-radius: 14px; border: 1px solid rgba(255,107,95,.35); color: #ff9a91; font-weight: 650; }
-.job-cancel--solid { background: #c8383d; border-color: transparent; color: #fff; }
-.job-keep { min-height: 50px; border-radius: 14px; border: 1px solid var(--aid-line); color: var(--aid-ivory); font-weight: 650; }
-.job-confirm__title { margin-top: 6px; font-size: 1.25rem; font-weight: 750; }
-.job-confirm__text { margin-top: 8px; color: var(--aid-muted); font-size: .9375rem; line-height: 1.45; }
-.job-confirm__actions { display: grid; gap: 10px; margin-top: 18px; }
 /* Safety + Call 911 (B19): restrained red, never alarmist; 50px targets. */
-.safety-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-.safety-actions .job-report,
-.safety-call { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 50px; }
-.safety-call { width: 100%; border-radius: 14px; border: 1px solid rgba(255,107,95,.28); background: rgba(255,107,95,.07); color: #ff9a91; font-weight: 650; }
-.safety-call--solid { border-color: transparent; background: #c8383d; color: #fff; text-decoration: none; }
-.job-report { min-height: 50px; border-radius: 14px; border: 1px solid var(--aid-line); color: #cfc7da; font-weight: 650; }
-.job-choices__label { margin-top: 16px; color: #9a92a6; font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.job-choices { display: grid; gap: 8px; margin-top: 10px; }
 .job-choice { position: relative; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; border: 1px solid var(--aid-line); border-radius: 14px; color: var(--aid-ivory); font-size: .9375rem; cursor: pointer; }
 .job-choice input { position: absolute; opacity: 0; pointer-events: none; }
 .job-choice span { flex: 1; }
 .job-choice.is-selected { border-color: rgba(167,139,250,.6); background: rgba(139,92,246,.14); }
 .job-choice.is-selected svg { color: var(--aid-signal-strong); }
 .job-choice:focus-within { outline: 2px solid var(--aid-signal-strong); outline-offset: 2px; }
-.job-issue-details { display: grid; gap: 6px; margin-top: 14px; color: #9a92a6; font-size: .8125rem; }
-.job-issue-details textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--aid-line); border-radius: 14px; background: #0d0a11; color: var(--aid-ivory); font-size: 1rem; resize: vertical; }
 .account-sheet { max-height: calc(100dvh - env(safe-area-inset-top) - 16px); overflow-y: auto; }
 
 /* Customer live tracking (after a driver accepts) */
@@ -493,7 +459,6 @@ select:focus-visible {
 .rating-tag { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 1px solid var(--aid-line); border-radius: 999px; color: var(--aid-ivory); font-size: .875rem; touch-action: manipulation; }
 .rating-tag.is-selected { border-color: rgba(167,139,250,.6); background: rgba(139,92,246,.16); }
 .rating-tag.is-selected svg { color: var(--aid-signal-strong); }
-.rating-comment__hint { color: #8d8496; font-size: .75rem; line-height: 1.4; }
 .rating-prompt { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 12px 14px; border: 1px solid rgba(167,139,250,.28); border-radius: 16px; background: rgba(139,92,246,.08); color: var(--aid-ivory); text-align: left; }
 .rating-prompt svg { flex: none; color: #f2c46d; }
 .rating-prompt span { flex: 1; font-size: .9375rem; font-weight: 650; }
@@ -501,10 +466,8 @@ select:focus-visible {
 .rating-done { display: flex; align-items: center; gap: 8px; color: var(--aid-muted); font-size: .875rem; }
 .rating-done svg { color: #f2c46d; fill: #f2c46d; }
 
-
 /* B12: job chat (customer ↔ driver). Full-screen over the job screen; keyboard-safe (100dvh + safe areas;
    Capacitor Keyboard resizes the body). Black surface, restrained purple for your own messages, 44px+ targets. */
-.job-person__actions { display: flex; align-items: center; gap: 8px; }
 .job-call__badge { position: absolute; top: -4px; right: -4px; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: #e5484d; color: #fff; font-size: .75rem; font-weight: 800; box-shadow: 0 0 0 2px var(--aid-panel); }
 .chat-screen { position: fixed; z-index: 90; inset: 0; display: flex; flex-direction: column; height: 100dvh; max-width: 430px; margin: 0 auto; background: var(--aid-ink); color: var(--aid-ivory); }
 .chat-header { position: relative; display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 10px 10px; border-bottom: 1px solid var(--aid-line); background: var(--aid-ink-soft); }
@@ -558,16 +521,11 @@ select:focus-visible {
 [role="dialog"]:focus, [role="alertdialog"]:focus, h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus { outline: none; }
 /* Sheet / modal entrance (the shared Dialog). Off when the phone asks for reduced motion. */
 @keyframes aid-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes aid-pop-in { from { transform: scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
-.account-sheet, .aid-sheet-in { animation: aid-sheet-in 220ms var(--aid-ease-out); }
-.aid-pop-in { animation: aid-pop-in 200ms var(--aid-ease-out); }
+.account-sheet { animation: aid-sheet-in 220ms var(--aid-ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .account-sheet, .aid-sheet-in, .aid-pop-in { animation: none !important; }
+  .account-sheet { animation: none !important; }
 }
 /* Touch targets: every control at least 44 × 44 px. */
-.consumer-section__heading button { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 8px; margin-right: -8px; }
-.account-section__heading button { min-height: 44px; }
-.account-sheet__header button { width: 44px; height: 44px; }
 .request-error button { min-height: 44px; }
 /* Larger text sizes: headers wrap instead of pushing the price off-screen. */
 
@@ -580,20 +538,20 @@ html, body, #root { scrollbar-width: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar, #root::-webkit-scrollbar { display: none; }
 
 /* Buttons: primary / secondary / ghost / destructive / danger (quiet). */
-.ui-btn, .aid-primary-button, .account-sheet__submit, .job-keep, .job-report, .job-cancel, .safety-call, .verify-sheet__secondary {
+.ui-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: auto; min-height: 52px; margin: 0; padding: 0 20px;
   border: 1px solid transparent; border-radius: var(--aid-radius-btn); font-size: var(--aid-fs-base); font-weight: 700; letter-spacing: -.01em;
   line-height: 1.2; text-align: center; text-decoration: none; cursor: pointer; transition: background 150ms ease, opacity 150ms ease, transform 100ms ease;
 }
-.ui-btn:active:not(:disabled), .aid-primary-button:active:not(:disabled), .job-keep:active:not(:disabled), .job-report:active:not(:disabled), .job-cancel:active:not(:disabled) { transform: scale(.985); }
-.ui-btn:disabled, .aid-primary-button:disabled, .account-sheet__submit:disabled, .job-keep:disabled, .job-report:disabled, .job-cancel:disabled, .verify-sheet__secondary:disabled { opacity: .5; cursor: not-allowed; }
-.ui-btn--block, .aid-primary-button, .account-sheet__submit { width: 100%; }
-.ui-btn--primary, .aid-primary-button, .account-sheet__submit { background: var(--aid-signal); color: var(--aid-signal-ink); }
-.ui-btn--primary:hover:not(:disabled), .aid-primary-button:hover:not(:disabled), .account-sheet__submit:hover:not(:disabled) { background: var(--aid-signal-hover); }
-.ui-btn--secondary, .job-keep, .job-report, .verify-sheet__secondary { border-color: var(--aid-line); background: var(--aid-surface-3); color: var(--aid-ivory); }
+.ui-btn:active:not(:disabled) { transform: scale(.985); }
+.ui-btn:disabled { opacity: .5; cursor: not-allowed; }
+.ui-btn--block { width: 100%; }
+.ui-btn--primary { background: var(--aid-signal); color: var(--aid-signal-ink); }
+.ui-btn--primary:hover:not(:disabled) { background: var(--aid-signal-hover); }
+.ui-btn--secondary { border-color: var(--aid-line); background: var(--aid-surface-3); color: var(--aid-ivory); }
 .ui-btn--ghost { background: transparent; color: var(--aid-text-2); }
-.ui-btn--destructive, .job-cancel.job-cancel--solid, .safety-call.safety-call--solid { border-color: transparent; background: var(--aid-danger-fill); color: #fff; }
-.ui-btn--danger, .job-cancel, .safety-call { border-color: rgba(255, 107, 95, .3); background: transparent; color: var(--aid-danger-text); }
+.ui-btn--destructive { border-color: transparent; background: var(--aid-danger-fill); color: #fff; }
+.ui-btn--danger { border-color: rgba(255, 107, 95, .3); background: transparent; color: var(--aid-danger-text); }
 .ui-btn--lg { min-height: 56px; font-size: var(--aid-fs-md); }
 .ui-btn--sm { min-height: 44px; padding: 0 16px; border-radius: var(--aid-radius-sm); font-size: var(--aid-fs-sm); }
 .ui-icon-btn { position: relative; display: grid; flex: none; place-items: center; width: 48px; height: 48px; border: 1px solid var(--aid-line); border-radius: 50%; background: var(--aid-surface-3); color: var(--aid-ivory); text-decoration: none; }
@@ -660,27 +618,22 @@ button.ui-row:active:not(:disabled) { background: var(--aid-surface-2); }
 .account-sheet-backdrop { position: fixed; z-index: 100; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding-top: env(safe-area-inset-top); background: rgba(0, 0, 0, .66); }
 .account-sheet { width: min(100%, 430px); max-height: calc(100dvh - env(safe-area-inset-top) - 12px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 20px max(20px, env(safe-area-inset-bottom)); border: 1px solid var(--aid-line); border-bottom: 0; border-radius: var(--aid-radius-lg) var(--aid-radius-lg) 0 0; background: var(--aid-surface-2); box-shadow: var(--aid-shadow-sheet); color: var(--aid-ivory); }
 .account-sheet__handle { width: 36px; height: 5px; margin: 0 auto 14px; border-radius: 999px; background: rgba(255, 255, 255, .22); }
-.account-sheet__header, .ui-sheet__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-.account-sheet__header small { color: var(--aid-text-3); font-size: var(--aid-fs-sm); font-weight: 600; letter-spacing: 0; text-transform: none; }
-.account-sheet__header h2, .ui-sheet__header h2 { margin-top: 2px; font-size: var(--aid-fs-lg); font-weight: 750; letter-spacing: -.02em; line-height: 1.2; }
+.ui-sheet__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.ui-sheet__header h2 { margin-top: 2px; font-size: var(--aid-fs-lg); font-weight: 750; letter-spacing: -.02em; line-height: 1.2; }
 .ui-sheet__header p { margin-top: 4px; color: var(--aid-text-3); font-size: var(--aid-fs-sm); line-height: 1.4; }
-.account-sheet__header button, .ui-sheet__close { display: grid; flex: none; place-items: center; width: 44px; height: 44px; margin: -6px -10px 0 0; border-radius: 50%; background: transparent; color: var(--aid-text-2); }
-.account-sheet__header button:active, .ui-sheet__close:active { background: var(--aid-surface-3); }
+.ui-sheet__close { display: grid; flex: none; place-items: center; width: 44px; height: 44px; margin: -6px -10px 0 0; border-radius: 50%; background: transparent; color: var(--aid-text-2); }
+.ui-sheet__close:active { background: var(--aid-surface-3); }
 .ui-sheet__body { margin-top: 12px; }
 .ui-sheet__footer { position: sticky; z-index: 2; bottom: calc(-1 * max(20px, env(safe-area-inset-bottom))); display: grid; gap: 8px; margin: 16px -20px 0; padding: 12px 20px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--aid-line); background: var(--aid-surface-2); }
 .ui-sheet__footer p { color: var(--aid-text-3); font-size: var(--aid-fs-sm); line-height: 1.4; text-align: center; }
-.job-confirm__title { font-size: var(--aid-fs-lg); font-weight: 750; letter-spacing: -.02em; }
-.job-confirm__text { color: var(--aid-text-2); }
-.job-confirm__actions, .verify-sheet__actions { display: grid; gap: 10px; margin-top: 20px; }
-.job-confirm__actions > *, .verify-sheet__actions > * { width: 100%; }
 
 /* Form fields inside sheets and screens. */
 .ui-field { display: grid; gap: 6px; }
 .ui-field > span, .ui-field > label { color: var(--aid-text-2); font-size: var(--aid-fs-sm); font-weight: 600; }
-.ui-input, .account-sheet :not(.request-search__field) > input:not([type="radio"]):not([type="checkbox"]), .verify-sheet__field input, .vehicle-form select, .support-select, .request-notes textarea, .job-issue-details textarea {
+.ui-input, .account-sheet :not(.request-search__field) > input:not([type="radio"]):not([type="checkbox"]), .request-notes textarea {
   width: 100%; min-height: 50px; padding: 0 14px; border: 1px solid var(--aid-line-strong); border-radius: var(--aid-radius-sm); background: var(--aid-ink-soft); color: var(--aid-ivory); color-scheme: dark;
 }
-.request-notes textarea, .job-issue-details textarea { padding: 12px 14px; }
+.request-notes textarea { padding: 12px 14px; }
 .ui-input:focus, .account-sheet input:focus { border-color: var(--aid-signal-strong); outline: none; }
 .account-sheet input::placeholder, .ui-input::placeholder { color: #8b8494; }
 
