@@ -18,6 +18,7 @@ test('signed-in users cannot escalate privileges or tamper with server-owned dat
   const password = `Aid-${randomUUID()}-aA1!`;
   let userId;
   const reportIds = [];
+  const probeBookingIds = [];
   try {
     const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { role: 'driver', first_name: 'Rls', last_name: 'Probe' } });
     if (error) throw error;
@@ -63,12 +64,30 @@ test('signed-in users cannot escalate privileges or tamper with server-owned dat
     const readTrail = await client.from('support_report_events').select('note');
     assert.ok(readTrail.error || readTrail.data.length === 0, 'internal notes must not be readable');
     assert.equal((await pool.query('select status from public.support_reports where id=$1', [ownReport.rows[0].id])).rows[0].status, 'open');
+    // B12: chat messages and blocks go through the API only — a signed-in person can't read anyone's
+    // chat (not even a job they're on), post as someone else, or add/remove blocks directly.
+    const strangerJob = await pool.query(`insert into public.bookings (customer_id, service_type, service_name, location_address, location_lat, location_lng, estimated_price_cents, status)
+      values ($1, 'battery_jump', 'RLS probe', 'RLS probe', 32.7, -96.8, 6900, 'cancelled') returning id`, [userId]);
+    probeBookingIds.push(strangerJob.rows[0].id);
+    await pool.query("insert into public.job_messages (booking_id, sender_id, sender_role, body) values ($1, null, 'driver', 'RLS probe: private message')", [strangerJob.rows[0].id]);
+    const readChat = await client.from('job_messages').select('body');
+    assert.ok(readChat.error || readChat.data.length === 0, 'chat messages must not be readable directly');
+    const fakeMessage = await client.from('job_messages').insert({ booking_id: strangerJob.rows[0].id, sender_id: userId, sender_role: 'customer', body: 'direct' });
+    assert.ok(fakeMessage.error, 'clients must not insert chat messages directly');
+    const markRead = await client.from('job_messages').update({ read_at: new Date().toISOString() }).eq('booking_id', strangerJob.rows[0].id).select();
+    assert.ok(markRead.error || markRead.data.length === 0, 'clients must not change chat messages');
+    const fakeBlock = await client.from('user_blocks').insert({ blocker_id: userId, blocked_id: randomUUID(), blocker_role: 'driver' });
+    assert.ok(fakeBlock.error, 'clients must not insert blocks directly');
+    const readBlocks = await client.from('user_blocks').select('*');
+    assert.ok(readBlocks.error || readBlocks.data.length === 0, 'blocks must not be readable directly');
+    assert.equal((await pool.query('select read_at from public.job_messages where booking_id=$1', [strangerJob.rows[0].id])).rows[0].read_at, null);
     const audit = await client.from('driver_verification_events').select('*');
     assert.ok(audit.error || audit.data.length === 0, 'audit log must not be readable');
 
     const row = await pool.query('select p.role, p.status, p.session_version, dp.verification_status from public.profiles p join public.driver_profiles dp on dp.profile_id=p.id where p.id=$1', [userId]);
     assert.deepEqual(row.rows[0], { role: 'driver', status: 'active', session_version: 1, verification_status: 'pending' });
   } finally {
+    if (probeBookingIds.length) await pool.query('delete from public.bookings where id = any($1::uuid[])', [probeBookingIds]).catch(() => {});
     if (reportIds.length) await pool.query('delete from public.support_reports where id = any($1::uuid[])', [reportIds]).catch(() => {});
     if (userId) await admin.auth.admin.deleteUser(userId).catch(() => {});
     await pool.end();

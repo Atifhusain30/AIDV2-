@@ -102,6 +102,13 @@ export interface ReportCounts { open: number; in_review: number; resolved: numbe
 
 export interface ReportParty { id: string; name: string; email: string; phone: string }
 
+/** B12: the chat of the job a report is about, with who sent what, and blocks between the two people. */
+export interface ReportChat {
+  bookingId: string | null
+  messages: { id: string; senderRole: 'customer' | 'driver'; senderName: string; body: string; createdAt: string; readAt: string | null }[]
+  blocks: { blockerRole: 'customer' | 'driver'; blockerName: string; sameJob: boolean; createdAt: string }[]
+}
+
 export interface ReportDetail extends Omit<ReportSummary, 'booking'> {
   reporter: (ReportParty & { role: 'customer' | 'driver'; otherReports: number }) | null
   resolvedBy: { id: string; name: string } | null

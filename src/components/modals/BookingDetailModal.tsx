@@ -27,6 +27,10 @@ import { useAppStore } from '../../store/useAppStore'
 import { ServiceType, BookingStatus } from '../../types'
 import { formatPrice } from '../../lib/money'
 import { jobCountLabel, ratingSummary } from '../../lib/ratings'
+import { useState } from 'react'
+import { MessageCircle } from 'lucide-react'
+import { endedChatReadable } from '../../lib/chat'
+import JobChat from '../chat/JobChat'
 
 // Generate Google Maps URL
 const getMapsUrl = (lat: number, lng: number): string => {
@@ -161,12 +165,14 @@ export default function BookingDetailModal() {
 
   // Find the booking
   const booking = bookingHistory.find(b => b.id === selectedBookingId)
+  const [chatOpen, setChatOpen] = useState(false)
 
   // Don't render if no booking selected
   if (!selectedBookingId) return null
 
   // Handle close
   const handleClose = () => {
+    setChatOpen(false)
     closeBookingDetail()
   }
 
@@ -231,6 +237,7 @@ export default function BookingDetailModal() {
   const driver = booking.driver
   const driverVehicle = driver?.vehicle ? [driver.vehicle.color, driver.vehicle.make, driver.vehicle.model].filter(Boolean).join(' ') : ''
   const driverRating = ratingSummary(driver)
+  const chatReadable = endedChatReadable(booking)
 
   return (
     <AnimatePresence>
@@ -433,8 +440,25 @@ export default function BookingDetailModal() {
                 Rebook
               </motion.button>
 
+              {/* B12: the job's chat stays readable for 24 hours after it ends */}
+              {chatReadable && (
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(true)}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-white/5 border border-white/10 text-gray-300 font-medium rounded-xl hover:bg-white/10 transition-colors"
+                >
+                  <MessageCircle size={16} strokeWidth={2} aria-hidden="true" />
+                  Messages
+                </button>
+              )}
             </div>
           </div>
+          {chatOpen && (
+            <JobChat
+              bookingId={booking.id} audience="customer" otherName={driver?.firstName || 'Your driver'} serviceName={booking.service.name}
+              initialChat={{ state: 'read_only', unread: 0, blockedByMe: false, readOnlyUntil: null }} onClose={() => setChatOpen(false)}
+            />
+          )}
         </motion.div>
       </motion.div>
     </AnimatePresence>

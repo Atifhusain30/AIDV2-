@@ -87,8 +87,11 @@ function buildHarness(stripe = null, accountAdmin = null) {
     async getAvailableBooking(bookingId) {
       const booking = bookings.get(bookingId);
       if (!booking || booking.status !== 'searching' || booking.driverId || this.isOverdue(booking)) return null;
-      return { id: booking.id, serviceType: serviceOf(booking), vehicleIsElectric: Boolean(booking.vehicleIsElectric), pickup: pickupOf(booking) };
+      return { id: booking.id, customerId: booking.customerId, serviceType: serviceOf(booking), vehicleIsElectric: Boolean(booking.vehicleIsElectric), pickup: pickupOf(booking) };
     },
+    // B12: no blocks and no chat in these tests (see chat.test.js).
+    async getBlockBetween() { return { byMe: false, byThem: false }; },
+    async getChatSummary() { return { unread: 0, block: { byMe: false, byThem: false } }; },
     // Online drivers start with a fresh position in downtown Dallas (tests move or clear it).
     positions: new Map(Object.values(users).filter((user) => user.isOnline).map((user) => [user.id, { ...DALLAS, at: new Date() }])),
     async getDriverPosition(driverId, maxAgeMinutes) {

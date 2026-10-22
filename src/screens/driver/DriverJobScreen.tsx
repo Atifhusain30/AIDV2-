@@ -12,6 +12,9 @@ import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
 import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
 import { ratingSummary } from '../../lib/ratings'
+import { showChatEntry, type BookingChat } from '../../lib/chat'
+import JobChat from '../../components/chat/JobChat'
+import { MessageButton } from '../../components/chat/MessageButton'
 
 interface DriverJobScreenProps {
   onBack: () => void
@@ -35,6 +38,13 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
   const { activeBooking: job, updateJobStatus, locationSharing, error, jobEndedNotice, dismissJobEndedNotice } = useDriverStore()
   const [busy, setBusy] = useState(false)
   const [sheet, setSheet] = useState<Sheet>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+
+  // B12: what the chat changed (read, blocked) shows on the badge now rather than at the next poll.
+  const updateChat = (change: Partial<BookingChat>) => {
+    const current = useDriverStore.getState().activeBooking
+    if (current?.chat) useDriverStore.setState({ activeBooking: { ...current, chat: { ...current.chat, ...change } } })
+  }
 
   if (!job) {
     return (
@@ -54,6 +64,7 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
 
   const stepIndex = STEPS.findIndex((step) => step.status === job.status)
   const customerName = job.customer?.firstName || 'the customer'
+  const customerFirst = job.customer?.firstName || 'Customer'
   const action = driverNextAction(job, customerName)
   const isTow = Boolean(job.dropoffLocation)
   const headingToDropoff = isTow && job.status === 'in_progress'
@@ -110,9 +121,14 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
             {job.vehicle && <small><Car size={13} aria-hidden="true" /> {job.vehicle.label}</small>}
             {job.vehicle && (job.vehicle.color || job.vehicle.plate) && <small className="job-person__plate">{[job.vehicle.color, job.vehicle.plate].filter(Boolean).join(' · ')}</small>}
           </div>
-          {job.customer?.phone && (
-            <a className="job-call" href={`tel:${job.customer.phone}`} aria-label={`Call ${customerName}`}><Phone size={19} /></a>
-          )}
+          <div className="job-person__actions">
+            {showChatEntry(job.chat) && (
+              <MessageButton name={customerFirst} unread={chatOpen ? 0 : job.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
+            )}
+            {job.customer?.phone && (
+              <a className="job-call" href={`tel:${job.customer.phone}`} aria-label={`Call ${customerName}`}><Phone size={19} /></a>
+            )}
+          </div>
         </div>
         {job.notes && (
           <div className="job-notes"><StickyNote size={15} aria-hidden="true" /><p>{job.notes}</p></div>
@@ -191,6 +207,12 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
         />
       )}
       {sheet === 'report' && <ReportIssueSheet bookingId={job.id} audience="driver" onClose={() => setSheet(null)} />}
+      {chatOpen && (
+        <JobChat
+          bookingId={job.id} audience="driver" otherName={customerFirst} serviceName={job.service.name}
+          initialChat={job.chat} onClose={() => setChatOpen(false)} onChatChange={updateChat}
+        />
+      )}
     </div>
   )
 }

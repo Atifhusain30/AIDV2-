@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type {
-  AdminProfile, DriverDecision, DriverDetail, DriverSummary, QueueFilter, ReportCategory, ReportCounts, ReportDetail, ReportFilter, ReportStatus, ReportSummary, ReviewDocument,
+  AdminProfile, DriverDecision, DriverDetail, DriverSummary, QueueFilter, ReportCategory, ReportChat, ReportCounts, ReportDetail, ReportFilter, ReportStatus, ReportSummary, ReviewDocument,
 } from './types'
 
 let client: SupabaseClient | null = null
@@ -76,6 +76,7 @@ export const adminApi = {
   listReports: (filter: ReportFilter, category: ReportCategory | '' = '') =>
     call<{ reports: ReportSummary[]; counts: ReportCounts }>(`/admin/reports?status=${encodeURIComponent(filter)}${category ? `&category=${encodeURIComponent(category)}` : ''}`),
   getReport: (reportId: string) => call<ReportDetail>(`/admin/reports/${encodeURIComponent(reportId)}`),
+  getReportChat: (reportId: string) => call<ReportChat>(`/admin/reports/${encodeURIComponent(reportId)}/messages`),
   updateReport: (reportId: string, change: { status?: ReportStatus; note?: string }) =>
     call<ReportDetail>(`/admin/reports/${encodeURIComponent(reportId)}`, { method: 'PATCH', body: JSON.stringify(change) }),
 }

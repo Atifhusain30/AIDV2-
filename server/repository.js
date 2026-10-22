@@ -5,6 +5,7 @@ const {
 } = require('./lifecycle');
 const { publicRating, RATING_WINDOW_DAYS, LOW_RATING_MAX_STARS } = require('./ratings');
 const { categoryLabel, ADMIN_CATEGORY_LABELS } = require('./support');
+const { OPEN_STATUSES: CHAT_OPEN_STATUSES, PAGE_SIZE: CHAT_PAGE_SIZE } = require('./chat');
 
 // Keep SQL `date` values as YYYY-MM-DD strings; JS Date conversion shifts them by timezone.
 types.setTypeParser(1082, (value) => value);
@@ -238,6 +239,23 @@ const PROFILE_RATING_COLUMNS = `
   (select avg(r.stars) from public.ratings r where r.ratee_id = p.id) as rating_avg,
   (select count(*)::int from public.ratings r where r.ratee_id = p.id) as rating_count,
   (select count(*)::int from public.bookings x where x.driver_id = p.id and x.status = 'completed') as completed_jobs`;
+
+// B12: true when either of two people has blocked the other (both directions use an index).
+const BLOCKED_BETWEEN = (a, b) => `exists (select 1 from public.user_blocks ub where (ub.blocker_id = ${a} and ub.blocked_id = ${b}) or (ub.blocker_id = ${b} and ub.blocked_id = ${a}))`;
+
+// B12: a chat message as a participant sees it — whose it is (mine or theirs) and the sender's role,
+// never an account id, name, phone or email.
+function mapJobMessage(row, viewerId) {
+  return {
+    id: row.id,
+    seq: String(row.seq),
+    mine: row.sender_id === viewerId,
+    senderRole: row.sender_role,
+    body: row.body,
+    createdAt: new Date(row.created_at).toISOString(),
+    readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
+  };
+}
 
 const shortName = (first, last) => [first, last && last.trim() ? `${last.trim()[0].toUpperCase()}.` : ''].filter(Boolean).join(' ');
 
@@ -671,7 +689,7 @@ class PostgresRepository {
    * roughly nearest first with their exact `pickup` so the API can compute the real distance,
    * filter to the radius and cap the list. Without an area nothing is returned (fail closed).
    */
-  async listAvailableBookings({ serviceTypes = [], electricTowing = false } = {}, area = null) {
+  async listAvailableBookings({ serviceTypes = [], electricTowing = false } = {}, area = null, driverId = null) {
     if (!area) return [];
     const center = { lat: (area.minLat + area.maxLat) / 2, lng: (area.minLng + area.maxLng) / 2 };
     const result = await this.pool.query(`
@@ -682,9 +700,10 @@ class PostgresRepository {
         and b.service_type = any($1::text[])
         and ($2::boolean or b.service_type <> 'towing' or not coalesce(v.is_electric, false))
         and b.location_lat between $3 and $4 and b.location_lng between $5 and $6
+        and ($10::uuid is null or not ${BLOCKED_BETWEEN('b.customer_id', '$10::uuid')})
       order by power(b.location_lat - $7, 2) + power((b.location_lng - $8) * cos(radians($7)), 2), b.created_at asc
       limit 500
-    `, [serviceTypes, electricTowing, area.minLat, area.maxLat, area.minLng, area.maxLng, center.lat, center.lng, this.requestExpiryMinutes]);
+    `, [serviceTypes, electricTowing, area.minLat, area.maxLat, area.minLng, area.maxLng, center.lat, center.lng, this.requestExpiryMinutes, driverId]);
     return result.rows.map((row) => {
       const booking = mapBooking(row);
       booking.pickup = { lat: row.location_lat, lng: row.location_lng };
@@ -709,14 +728,14 @@ class PostgresRepository {
   // car is electric. Only for requests still open to any driver.
   async getAvailableBooking(bookingId) {
     const result = await this.pool.query(`
-      select b.id, b.service_type, b.location_lat, b.location_lng, coalesce(v.is_electric, false) as vehicle_is_electric
+      select b.id, b.customer_id, b.service_type, b.location_lat, b.location_lng, coalesce(v.is_electric, false) as vehicle_is_electric
       from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
       where b.id=$1 and b.status='searching' and b.driver_id is null
         and b.created_at > now() - make_interval(mins => $2::int)
     `, [bookingId, this.requestExpiryMinutes]);
     const row = result.rows[0];
     return row ? {
-      id: row.id, serviceType: row.service_type, vehicleIsElectric: Boolean(row.vehicle_is_electric),
+      id: row.id, customerId: row.customer_id, serviceType: row.service_type, vehicleIsElectric: Boolean(row.vehicle_is_electric),
       pickup: { lat: row.location_lat, lng: row.location_lng },
     } : null;
   }
@@ -763,6 +782,7 @@ class PostgresRepository {
           and b.service_type = any($4::text[])
           and ($5::boolean or b.service_type <> 'towing'
             or not exists (select 1 from public.vehicles v where v.id = b.vehicle_id and v.is_electric))
+          and not ${BLOCKED_BETWEEN('b.customer_id', '$2::uuid')}
         returning b.id
       ), ev as (
         insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
@@ -1040,6 +1060,152 @@ class PostgresRepository {
     return result.rows[0] ? this.getSupportReportForAdmin(result.rows[0].id) : null;
   }
 
+  // ---- B12: job chat and blocks (rules in chat.js) ----
+
+  /** Has either person blocked the other? { byMe, byThem } from `userId`'s side. */
+  async getBlockBetween(userId, otherId) {
+    if (!userId || !otherId) return { byMe: false, byThem: false };
+    const result = await this.pool.query(`
+      select coalesce(bool_or(blocker_id = $1::uuid), false) as by_me, coalesce(bool_or(blocker_id = $2::uuid), false) as by_them
+      from public.user_blocks
+      where (blocker_id = $1::uuid and blocked_id = $2::uuid) or (blocker_id = $2::uuid and blocked_id = $1::uuid)
+    `, [userId, otherId]);
+    const row = result.rows[0] || {};
+    return { byMe: Boolean(row.by_me), byThem: Boolean(row.by_them) };
+  }
+
+  /**
+   * What the apps need about a job's chat with every booking poll, in one query: messages from the
+   * other person not yet read by `userId`, and whether either has blocked the other.
+   */
+  async getChatSummary(bookingId, userId, otherId) {
+    const result = await this.pool.query(`
+      select (select count(*)::int from public.job_messages m
+               where m.booking_id = $1::uuid and m.read_at is null and m.sender_id is distinct from $2::uuid) as unread,
+        exists (select 1 from public.user_blocks where blocker_id = $2::uuid and blocked_id = $3::uuid) as by_me,
+        exists (select 1 from public.user_blocks where blocker_id = $3::uuid and blocked_id = $2::uuid) as by_them
+    `, [bookingId, userId, otherId]);
+    const row = result.rows[0] || {};
+    return { unread: row.unread || 0, block: { byMe: Boolean(row.by_me), byThem: Boolean(row.by_them) } };
+  }
+
+  /** Messages of a job in order: the newest page first time (`after` null), then everything after the cursor. */
+  async listJobMessages(bookingId, viewerId, after = null, limit = CHAT_PAGE_SIZE) {
+    const result = after === null
+      ? await this.pool.query(`
+          select * from (select * from public.job_messages where booking_id = $1 order by seq desc limit $2) newest order by seq asc
+        `, [bookingId, limit])
+      : await this.pool.query(`
+          select * from public.job_messages where booking_id = $1 and seq > $2::bigint order by seq asc limit $3
+        `, [bookingId, after, limit]);
+    return result.rows.map((row) => mapJobMessage(row, viewerId));
+  }
+
+  /** Messages this person sent in the last `seconds` (rate limit). */
+  async countRecentJobMessages(senderId, seconds = 60) {
+    const result = await this.pool.query(
+      'select count(*)::int as n from public.job_messages where sender_id = $1 and created_at > now() - make_interval(secs => $2::int)',
+      [senderId, seconds],
+    );
+    return result.rows[0].n;
+  }
+
+  /**
+   * Store a message. The insert re-checks what the API already decided — the sender is this job's
+   * customer or driver, a driver is assigned, the job is open for chat, nobody blocked anybody — and
+   * locks the booking row so one job's messages get their seq in commit order (the polling cursor
+   * never skips one). A retry with the same clientId returns the first message (`duplicate: true`).
+   * Returns null when the rules no longer hold (e.g. the job ended a moment ago).
+   */
+  async createJobMessage({ bookingId, senderId, senderRole, body, clientId = null }) {
+    const ownership = senderRole === 'driver' ? 'b.driver_id = $2::uuid' : 'b.customer_id = $2::uuid';
+    const other = senderRole === 'driver' ? 'b.customer_id' : 'b.driver_id';
+    const result = await this.pool.query(`
+      with b as (
+        select b.id from public.bookings b
+        where b.id = $1::uuid and ${ownership} and ${other} is not null and b.status = any($6::text[])
+          and not ${BLOCKED_BETWEEN(other, '$2::uuid')}
+        for update of b
+      ), ins as (
+        insert into public.job_messages (booking_id, sender_id, sender_role, body, client_id)
+        select b.id, $2::uuid, $3::text, $4::text, $5::text from b
+        on conflict (sender_id, client_id) where client_id is not null do nothing
+        returning *
+      )
+      select ins.*, false as duplicate from ins
+      union all
+      select m.*, true as duplicate from public.job_messages m
+        where $5::text is not null and m.sender_id = $2::uuid and m.client_id = $5::text and m.booking_id = $1::uuid
+          and not exists (select 1 from ins)
+    `, [bookingId, senderId, senderRole, body, clientId, [...CHAT_OPEN_STATUSES]]);
+    const row = result.rows[0];
+    return row ? { message: mapJobMessage(row, senderId), duplicate: Boolean(row.duplicate) } : null;
+  }
+
+  /** Mark the other person's messages up to `upTo` (or all) as read by `readerId`. Returns how many changed. */
+  async markJobMessagesRead(bookingId, readerId, upTo = null) {
+    const result = await this.pool.query(`
+      update public.job_messages set read_at = now()
+      where booking_id = $1::uuid and read_at is null and sender_id is distinct from $2::uuid and ($3::bigint is null or seq <= $3::bigint)
+    `, [bookingId, readerId, upTo]);
+    return result.rowCount;
+  }
+
+  /**
+   * `blockerId` blocks `blockedId` from this job. Idempotent (one row per pair); the first block is
+   * recorded on the job's audit trail ('user_blocked'). Returns { created }.
+   */
+  async blockUser({ blockerId, blockerRole, blockedId, bookingId, bookingStatus }) {
+    const result = await this.pool.query(`
+      with ins as (
+        insert into public.user_blocks (blocker_id, blocked_id, blocker_role, booking_id)
+        values ($1::uuid, $2::uuid, $3::text, $4::uuid)
+        on conflict (blocker_id, blocked_id) do nothing
+        returning booking_id
+      ), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select booking_id, $1::uuid, 'user_blocked', $5::text, $5::text, jsonb_build_object('role', $3::text) from ins
+      )
+      select count(*)::int as n from ins
+    `, [blockerId, blockedId, blockerRole, bookingId, bookingStatus]);
+    return { created: result.rows[0].n > 0 };
+  }
+
+  /**
+   * Admin: the whole chat of the job a report is about (also after the apps stop showing it), with who
+   * sent each message, and any blocks between the two people. Null when the report has no job.
+   */
+  async getReportChatForAdmin(reportId) {
+    const job = await this.pool.query(`
+      select b.id, b.customer_id, b.driver_id from public.support_reports r join public.bookings b on b.id = r.booking_id where r.id = $1
+    `, [reportId]);
+    const booking = job.rows[0];
+    if (!booking) return null;
+    const [messages, blocks] = await Promise.all([
+      this.pool.query(`
+        select m.*, p.first_name, p.last_name from public.job_messages m left join public.profiles p on p.id = m.sender_id
+        where m.booking_id = $1 order by m.seq asc limit 2000
+      `, [booking.id]),
+      booking.driver_id ? this.pool.query(`
+        select ub.*, p.first_name, p.last_name from public.user_blocks ub left join public.profiles p on p.id = ub.blocker_id
+        where (ub.blocker_id = $1 and ub.blocked_id = $2) or (ub.blocker_id = $2 and ub.blocked_id = $1)
+        order by ub.created_at
+      `, [booking.customer_id, booking.driver_id]) : Promise.resolve({ rows: [] }),
+    ]);
+    const name = (row) => `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unnamed';
+    return {
+      bookingId: booking.id,
+      messages: messages.rows.map((row) => ({
+        id: row.id, senderRole: row.sender_role, senderName: row.sender_id ? name(row) : 'Deleted account', body: row.body,
+        createdAt: new Date(row.created_at).toISOString(), readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
+      })),
+      blocks: blocks.rows.map((row) => ({
+        blockerRole: row.blocker_role, blockerName: name(row), sameJob: row.booking_id === booking.id,
+        createdAt: new Date(row.created_at).toISOString(),
+      })),
+    };
+  }
+
   async updateDriverOnlineStatus(driverId, isOnline) {
     // Going offline forgets the driver's position: it's only kept while they're available for work.
     const result = await this.pool.query(`
@@ -1092,5 +1258,5 @@ class PostgresRepository {
 
 module.exports = {
   PostgresRepository, ActiveBookingExistsError, RatingExistsError, RATING_UNIQUE, ONE_ACTIVE_INDEX, ONE_JOB_PER_DRIVER_INDEX,
-  mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, mapSupportReport, mapAdminSupportReport, ACTIVE_STATUSES, CONTACT_STATUSES,
+  mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, mapSupportReport, mapAdminSupportReport, mapJobMessage, ACTIVE_STATUSES, CONTACT_STATUSES,
 };

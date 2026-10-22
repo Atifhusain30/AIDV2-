@@ -6,9 +6,9 @@
  */
 
 import { useCallback, useEffect, useId, useState } from 'react'
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, Flag, MessageSquareText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Ban, Check, Flag, MessageSquareText, RefreshCw } from 'lucide-react'
 import { adminApi } from './api'
-import type { ReportCategory, ReportCounts, ReportDetail, ReportFilter, ReportStatus, ReportSummary } from './types'
+import type { ReportCategory, ReportChat, ReportCounts, ReportDetail, ReportFilter, ReportStatus, ReportSummary } from './types'
 
 const STATUS_LABELS: Record<ReportStatus, string> = { open: 'Open', in_review: 'In review', resolved: 'Resolved' }
 const FILTERS: { id: ReportFilter; label: string }[] = [
@@ -67,6 +67,44 @@ function Party({ title, party }: { title: string; party: { name: string; email: 
     <div className="report-party">
       <dt>{title}</dt>
       <dd>{party ? <><strong>{party.name}</strong><span className="muted">{[party.email, party.phone].filter(Boolean).join(' · ') || 'No contact on file'}</span></> : <span className="muted">None</span>}</dd>
+    </div>
+  )
+}
+
+/** B12: the chat between the job's customer and driver (admins see it here even after the apps stop showing it). */
+function ReportChatCard({ reportId }: { reportId: string }) {
+  const [chat, setChat] = useState<ReportChat | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    adminApi.getReportChat(reportId).then((result) => { if (live) setChat(result) }, (chatError) => { if (live) setError(errorText(chatError)) })
+    return () => { live = false }
+  }, [reportId])
+  return (
+    <div className="card">
+      <h2>Chat on this job{chat ? ` (${chat.messages.length})` : ''}</h2>
+      {error && <p className="muted">Couldn't load the chat: {error}</p>}
+      {!chat && !error && <p className="muted" aria-busy="true">Loading chat…</p>}
+      {chat && chat.blocks.length > 0 && (
+        <ul className="report-chat__blocks">
+          {chat.blocks.map((block) => (
+            <li key={`${block.blockerRole}-${block.createdAt}`}>
+              <Ban size={14} aria-hidden="true" /> {block.blockerName} ({block.blockerRole}) blocked the other person{block.sameJob ? ' on this job' : ' on another job'} · {dateTime(block.createdAt)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {chat && chat.messages.length === 0 && <p className="muted">No messages were sent on this job.</p>}
+      {chat && chat.messages.length > 0 && (
+        <ol className="report-chat" aria-label="Chat messages">
+          {chat.messages.map((message) => (
+            <li key={message.id} className={`report-chat__message report-chat__message--${message.senderRole}`}>
+              <div className="report-chat__meta"><strong>{message.senderName}</strong> <span className="muted">({message.senderRole}) · {dateTime(message.createdAt)}{message.readAt ? ' · read' : ''}</span></div>
+              <p>{message.body}</p>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   )
 }
@@ -153,6 +191,7 @@ function ReportView({ reportId, onBack, onChanged, notify }: { reportId: string;
               </dl>
             ) : <p className="muted">Not about a specific job.</p>}
           </div>
+          {job && <ReportChatCard reportId={report.id} />}
         </div>
 
         <aside className="review__side">

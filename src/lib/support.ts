@@ -72,7 +72,12 @@ const SHARED_SAFETY: FaqItem = {
 
 const SHARED_REPORTS: FaqItem = {
   q: 'What happens after I report a problem?',
-  a: 'The AID team reviews reports and updates the status you see under My reports: Received, In review, then Resolved. There is no chat or reply inside the app yet, so include anything we need to know in your message.',
+  a: 'The AID team reviews reports and updates the status you see under My reports: Received, In review, then Resolved. The AID team can\'t reply inside the app yet, so include anything we need to know in your message.',
+}
+
+const SHARED_CHAT: FaqItem = {
+  q: 'How does messaging work?',
+  a: "Once a driver accepts, the customer and driver can message each other from the job screen (text only). Your phone number and email aren't shown in messages. After the job ends the chat can be read for 24 hours, then it disappears from the app (AID keeps it in case of a report). From the chat you can report the other person or block them: blocking closes the chat and AID won't match you again, but it doesn't cancel the job. Blocking can't be undone in the app yet — contact AID support.",
 }
 
 export const FAQ: Record<SupportAudience, FaqItem[]> = {
@@ -93,6 +98,7 @@ export const FAQ: Record<SupportAudience, FaqItem[]> = {
       q: 'How do ratings work?',
       a: "After a completed job you can rate your driver once, within 7 days: 1–5 stars, optional tags and an optional private note that only the AID team sees. A driver's average is shown once they have at least 3 ratings; until then they show as \"New on AID\". Drivers rate customers the same way.",
     },
+    SHARED_CHAT,
     SHARED_REPORTS,
     SHARED_SAFETY,
   ],
@@ -117,6 +123,7 @@ export const FAQ: Record<SupportAudience, FaqItem[]> = {
       q: 'How do ratings work?',
       a: "After a completed job you can rate the customer once, within 7 days. Customers rate you the same way. Your average is shown to customers once you have at least 3 ratings; until then you show as \"New on AID\". Private notes are only seen by the AID team.",
     },
+    SHARED_CHAT,
     SHARED_REPORTS,
     SHARED_SAFETY,
   ],

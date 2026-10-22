@@ -204,6 +204,39 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(tracking.driverLocation.lat, 32.79);
     assert.ok(Date.now() - new Date(tracking.driverLocation.updatedAt).getTime() < 120000, 'location timestamp is fresh');
 
+    // ---- B12: chat both ways during the job; outsiders refused; nothing private in the messages ----
+    const chatSend = (token, id, body) => api(`/bookings/${id}/messages`, token, { method: 'POST', body: JSON.stringify(typeof body === 'string' ? { body } : body) });
+    const chatList = (token, id, after) => api(`/bookings/${id}/messages${after ? `?after=${after}` : ''}`, token);
+    assert.equal(tracking.chat.state, 'open');
+    assert.equal(tracking.chat.unread, 0);
+    const hello = await chatSend(customer.token, bookingId, { body: '  E2E: gate code 4411  ', clientId: `e2e-${suffix}` });
+    assert.equal(hello.status, 201);
+    const helloBody = await hello.json();
+    assert.equal(helloBody.body, 'E2E: gate code 4411', 'trimmed');
+    const retried = await chatSend(customer.token, bookingId, { body: 'E2E: gate code 4411', clientId: `e2e-${suffix}` });
+    assert.equal(retried.status, 200, 'a retried send is stored once');
+    assert.equal((await retried.json()).id, helloBody.id);
+    const driverJob = await (await api('/bookings/active', driver.token)).json();
+    assert.equal(driverJob.chat.unread, 1, 'the driver job poll carries the unread count');
+    const driverChat = await (await chatList(driver.token, bookingId)).json();
+    assert.deepEqual(driverChat.messages.map((m) => [m.body, m.mine, m.senderRole]), [['E2E: gate code 4411', false, 'customer']]);
+    assert.equal((await chatSend(driver.token, bookingId, 'E2E: 10 minutes away')).status, 201);
+    const newer = await (await chatList(customer.token, bookingId, helloBody.seq)).json();
+    assert.deepEqual(newer.messages.map((m) => [m.body, m.mine, m.senderRole]), [['E2E: 10 minutes away', false, 'driver']], 'only messages after the cursor');
+    assert.equal((await (await api('/bookings/active', customer.token)).json()).chat.unread, 1);
+    for (const token of [otherCustomer.token]) {
+      assert.equal((await chatList(token, bookingId)).status, 404, 'an outsider cannot read the chat');
+      assert.equal((await chatSend(token, bookingId, 'let me in')).status, 404, 'an outsider cannot send');
+    }
+    assert.equal((await chatList(reviewer.token, bookingId)).status, 403, 'admins read chats only from a report');
+    const markedRead = await api(`/bookings/${bookingId}/messages/read`, driver.token, { method: 'POST', body: JSON.stringify({}) });
+    assert.deepEqual(await markedRead.json(), { marked: 1 });
+    assert.ok((await (await chatList(customer.token, bookingId)).json()).messages[0].readAt, 'the sender sees it was read');
+    const chatJson = JSON.stringify([await (await chatList(customer.token, bookingId)).json(), await (await chatList(driver.token, bookingId)).json()]);
+    for (const secret of [customer.id, driver.id, customerEmail, driverEmail]) assert.equal(chatJson.includes(secret), false, 'chat leaks no id or email');
+    const storedChat = await pool.query('select sender_id, sender_role from public.job_messages where booking_id=$1 order by seq', [bookingId]);
+    assert.deepEqual(storedChat.rows, [{ sender_id: customer.id, sender_role: 'customer' }, { sender_id: driver.id, sender_role: 'driver' }]);
+
     for (const status of ['arrived', 'in_progress', 'completed']) {
       const response = await api(`/bookings/${bookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status }) });
       assert.equal(response.status, 200, `transition to ${status}`);
@@ -219,6 +252,21 @@ test('live Supabase customer → verified driver → document → completed book
     assert.ok(trail.rows.every((row) => row.actor_id === driver.id));
     const stored = await pool.query('select driver_lat from public.bookings where id=$1', [bookingId]);
     assert.equal(stored.rows[0].driver_lat, null, 'last shared position is cleared when the job ends');
+
+    // B12: after the job the chat is read-only for 24 h, then hidden from the apps.
+    const endedChat = await chatList(customer.token, bookingId);
+    assert.equal(endedChat.status, 200);
+    const endedBody = await endedChat.json();
+    assert.equal(endedBody.state, 'read_only');
+    assert.equal(endedBody.messages.length, 2);
+    const lateSend = await chatSend(driver.token, bookingId, 'E2E: too late');
+    assert.equal(lateSend.status, 409);
+    assert.equal((await lateSend.json()).code, 'chat_read_only');
+    await pool.query("update public.bookings set completed_at = now() - interval '25 hours' where id=$1", [bookingId]);
+    assert.equal((await chatList(customer.token, bookingId)).status, 410, 'hidden after 24 hours');
+    assert.equal((await (await api(`/bookings/${bookingId}`, driver.token)).json()).chat.state, 'closed');
+    assert.equal((await pool.query('select count(*)::int as n from public.job_messages where booking_id=$1', [bookingId])).rows[0].n, 2, 'but kept for admins');
+    await pool.query('update public.bookings set completed_at = now() where id=$1', [bookingId]);
 
     // ---- B15: ratings both directions against the real database ----
     const rateJob = (token, id, body) => api(`/bookings/${id}/rating`, token, { method: 'POST', body: JSON.stringify(body) });
@@ -294,6 +342,7 @@ test('live Supabase customer → verified driver → document → completed book
     }
     assert.equal((await api(`/bookings/${secondBookingId}/status`, customer.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) })).status, 409, 'customer cannot cancel after arrival');
     assert.equal((await api(`/bookings/${secondBookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) })).status, 400, 'driver needs a reason');
+    assert.equal((await chatSend(driver.token, secondBookingId, 'E2E: I am at the car, where are you?')).status, 201);
     // B18: Report an issue on the job goes to support_reports (job participants only).
     const issue = await api('/support/reports', customer.token, { method: 'POST', body: JSON.stringify({ category: 'other', bookingId: secondBookingId, message: 'E2E issue report' }) });
     assert.equal(issue.status, 201);
@@ -336,6 +385,11 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(reportDetail.booking.customer.id, customer.id);
     assert.equal(reportDetail.booking.driver.id, driver.id);
     assert.equal(reportDetail.booking.statusWhenReported, 'arrived');
+    // B12: the admin sees the job's chat from the report (with who sent what); the apps can't use this.
+    const reportChat = await (await api(`/admin/reports/${issueReport.id}/messages`, reviewer.token)).json();
+    assert.equal(reportChat.bookingId, secondBookingId);
+    assert.deepEqual(reportChat.messages.map((m) => [m.senderRole, m.senderName, m.body]), [['driver', 'E2E driver', 'E2E: I am at the car, where are you?']]);
+    for (const token of [customer.token, driver.token]) assert.equal((await api(`/admin/reports/${issueReport.id}/messages`, token)).status, 403);
     const review = await api(`/admin/reports/${issueReport.id}`, reviewer.token, { method: 'PATCH', body: JSON.stringify({ status: 'in_review', note: 'E2E internal note' }) });
     assert.equal(review.status, 200);
     const resolved = await api(`/admin/reports/${issueReport.id}`, reviewer.token, { method: 'PATCH', body: JSON.stringify({ status: 'resolved' }) });
@@ -439,6 +493,38 @@ test('live Supabase customer → verified driver → document → completed book
     const documentsResponse = await api('/drivers/me/documents', driver.token);
     assert.ok((await documentsResponse.json()).some((item) => item.id === document.id));
     assert.equal((await api(`/drivers/me/documents/${document.id}`, driver.token, { method: 'DELETE' })).status, 204);
+
+    // ---- B12: blocking during an active job, and what it does to dispatch afterwards ----
+    // The driver is on otherCustomer's job (holdId); otherCustomer blocks the driver from it.
+    const block = await api(`/bookings/${holdId}/block`, otherCustomer.token, { method: 'POST', body: JSON.stringify({ blockedId: customer.id }) });
+    assert.equal(block.status, 201);
+    const blockBody = await block.json();
+    assert.equal(blockBody.chat.state, 'blocked');
+    assert.match(blockBody.guidance, /doesn't cancel this job/);
+    assert.equal((await pool.query('select status from public.bookings where id=$1', [holdId])).rows[0].status, 'accepted', 'blocking does not cancel the job');
+    assert.deepEqual((await pool.query('select blocker_id, blocked_id, blocker_role, booking_id from public.user_blocks where blocker_id=$1', [otherCustomer.id])).rows,
+      [{ blocker_id: otherCustomer.id, blocked_id: driver.id, blocker_role: 'customer', booking_id: holdId }], 'the other person comes from the job, not the request');
+    for (const token of [driver.token, otherCustomer.token]) {
+      const closed = await chatSend(token, holdId, 'E2E: hello?');
+      assert.equal(closed.status, 409, 'chat is closed for both');
+      assert.equal((await closed.json()).code, 'chat_blocked');
+    }
+    assert.equal((await api(`/bookings/${holdId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled', reason: 'customer_asked' }) })).status, 200);
+    // otherCustomer's next request is never shown to (or accepted by) this driver; customer's open request still is.
+    const blockedRequest = await api('/bookings', otherCustomer.token, { method: 'POST', body: jump('B12 blocked customer') });
+    assert.equal(blockedRequest.status, 201);
+    const blockedRequestId = (await blockedRequest.json()).id;
+    e4BookingIds.push(blockedRequestId);
+    const listed = await (await api('/drivers/requests?lat=32.7767&lng=-96.797', driver.token)).json();
+    assert.equal(listed.requests.some((item) => item.id === blockedRequestId), false, "the blocked customer's request is hidden from this driver");
+    assert.ok(listed.requests.some((item) => item.id === spareId), 'other customers still show');
+    const blockedAccept = await api(`/bookings/${blockedRequestId}/accept`, driver.token, { method: 'POST' });
+    assert.equal(blockedAccept.status, 409, 'and accepting it is refused');
+    assert.deepEqual((await pool.query('select status, driver_id from public.bookings where id=$1', [blockedRequestId])).rows[0], { status: 'searching', driver_id: null });
+    // The database-level accept refuses too, even without the API pre-check.
+    const { PostgresRepository: Repo } = require('../repository');
+    assert.equal(await new Repo(pool).acceptBooking(blockedRequestId, driver.id, { serviceTypes: ['battery_jump'], electricTowing: false }), null);
+    assert.equal((await pool.query('select status from public.bookings where id=$1', [blockedRequestId])).rows[0].status, 'searching');
   } finally {
     const stored = await pool.query('select storage_path from public.driver_documents where driver_id = any($1::uuid[])', [createdIds]).catch(() => ({ rows: [] }));
     // A fresh service client: `supabase` above now carries the last test user's session.

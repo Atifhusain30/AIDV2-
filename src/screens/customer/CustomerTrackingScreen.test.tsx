@@ -10,7 +10,7 @@ vi.mock('../../components/tracking/LiveDriverMap', () => ({
     <div data-testid="map" data-driver={props.driver ? `${props.driver.lat},${props.driver.lng}` : 'none'} data-stale={String(Boolean(props.stale))} />
   ),
 }))
-vi.mock('../../services/api', () => ({ apiService: { updateBookingStatus: vi.fn(), createSupportReport: vi.fn() } }))
+vi.mock('../../services/api', () => ({ apiService: { updateBookingStatus: vi.fn(), createSupportReport: vi.fn(), listJobMessages: vi.fn(), markJobMessagesRead: vi.fn(), sendJobMessage: vi.fn(), blockJobParty: vi.fn() } }))
 
 const NOW = Date.parse('2026-10-22T19:00:00Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -160,6 +160,34 @@ describe('customer live tracking', () => {
     fireEvent.click(send)
     expect(await screen.findByRole('heading', { name: 'Report sent' })).toBeTruthy()
     expect(apiService.createSupportReport).toHaveBeenCalledWith({ category: 'vehicle_damage', message: undefined, bookingId: 'booking-9' })
+  })
+
+  it('B12: Message with the unread count from the booking poll; opening the chat clears the badge', async () => {
+    vi.mocked(apiService.listJobMessages).mockResolvedValue({ success: true, data: {
+      state: 'open', unread: 2, blockedByMe: false, readOnlyUntil: null, bookingStatus: 'en_route', cursor: '2', maxLength: 1000,
+      messages: [1, 2].map((seq) => ({ id: `m${seq}`, seq: String(seq), mine: false, senderRole: 'driver' as const, body: `Driver says ${seq}`, createdAt: ago(1000), readAt: null })),
+    } })
+    vi.mocked(apiService.markJobMessagesRead).mockResolvedValue({ success: true, data: { marked: 2 } })
+    const booking = job({ chat: { state: 'open', unread: 2, blockedByMe: false, readOnlyUntil: null } })
+    useAppStore.setState({ activeBooking: booking })
+    // As in the app: the screen shows the store's active booking (kept fresh by the poll).
+    const Live = () => { const active = useAppStore((state) => state.activeBooking); return active ? <CustomerTrackingScreen booking={active} /> : null }
+    render(<Live />)
+    const button = screen.getByRole('button', { name: 'Message Marcus, 2 unread' })
+    expect(button.textContent).toBe('2')
+    fireEvent.click(button)
+    expect(await screen.findByText('Driver says 2')).toBeTruthy()
+    await waitFor(() => expect(useAppStore.getState().activeBooking?.chat?.unread).toBe(0))
+    fireEvent.click(screen.getByRole('button', { name: 'Close chat' }))
+    expect(screen.getByRole('button', { name: 'Message Marcus' })).toBeTruthy()
+  })
+
+  it('B12: no Message button once the chat is gone; a blocked chat still opens read-only', () => {
+    render(<CustomerTrackingScreen booking={job({ chat: { state: 'closed', unread: 0, blockedByMe: false, readOnlyUntil: null } })} />)
+    expect(screen.queryByRole('button', { name: /^Message/ })).toBeNull()
+    cleanup()
+    render(<CustomerTrackingScreen booking={job({ chat: { state: 'blocked', unread: 0, blockedByMe: true, readOnlyUntil: null } })} />)
+    expect(screen.getByRole('button', { name: 'Message Marcus' })).toBeTruthy()
   })
 
   it('offers Safety and Call 911 (confirm first) on the tracking screen', () => {

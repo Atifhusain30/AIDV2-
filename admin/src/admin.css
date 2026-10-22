@@ -260,3 +260,12 @@ textarea { resize: vertical; }
 .timeline__item--report-in_review .timeline__dot { background: var(--warn); }
 .timeline__item--report-note .timeline__dot { background: var(--accent); }
 @media (max-width: 820px) { .report-preview { display: none; } }
+/* B12: chat thread on a report */
+.report-chat { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; max-height: 420px; overflow-y: auto; }
+.report-chat__message { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.report-chat__message--driver { border-left: 3px solid #7c3aed; }
+.report-chat__message--customer { border-left: 3px solid #64748b; }
+.report-chat__message p { margin-top: 4px; white-space: pre-wrap; line-height: 1.5; overflow-wrap: anywhere; }
+.report-chat__meta { font-size: 13px; }
+.report-chat__blocks { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; color: #b91c1c; font-size: 13px; }
+.report-chat__blocks li { display: flex; align-items: center; gap: 6px; }

@@ -3,6 +3,7 @@ import type { UserVehicle } from '../store/useAppStore'
 import { supabase, managedAuth } from '../auth/supabase'
 import type { PendingRating, RatingInput } from '../lib/ratings'
 import type { SupportConfig, SupportReport } from '../lib/support'
+import type { BlockResult, ChatMessage, ChatPage } from '../lib/chat'
 
 function normalizeApiBaseUrl(value?: string): string {
   const base = (value || 'http://127.0.0.1:3001').replace(/\/$/, '')
@@ -219,6 +220,26 @@ export async function listSupportReports(): Promise<ApiResponse<SupportReport[]>
   return apiFetch('/support/reports')
 }
 
+/** B12: chat messages of one of your jobs — the newest page, or only those after `after` (polling cursor). */
+export async function listJobMessages(bookingId: string, after?: string | null): Promise<ApiResponse<ChatPage>> {
+  return apiFetch(`/bookings/${encodeURIComponent(bookingId)}/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`)
+}
+
+/** B12: send a message (text only). `clientId` makes a retry safe: the server stores it once. */
+export async function sendJobMessage(bookingId: string, body: string, clientId: string): Promise<ApiResponse<ChatMessage>> {
+  return apiFetch(`/bookings/${encodeURIComponent(bookingId)}/messages`, { method: 'POST', body: JSON.stringify({ body, clientId }) })
+}
+
+/** B12: mark the other person's messages up to `upTo` as read. */
+export async function markJobMessagesRead(bookingId: string, upTo: string | null): Promise<ApiResponse<{ marked: number }>> {
+  return apiFetch(`/bookings/${encodeURIComponent(bookingId)}/messages/read`, { method: 'POST', body: JSON.stringify(upTo ? { upTo } : {}) })
+}
+
+/** B12: block the other person on this job (closes the chat; never matched again; doesn't cancel the job). */
+export async function blockJobParty(bookingId: string): Promise<ApiResponse<BlockResult>> {
+  return apiFetch(`/bookings/${encodeURIComponent(bookingId)}/block`, { method: 'POST', body: JSON.stringify({}) })
+}
+
 /** B15: completed jobs the signed-in person can still rate, newest first. */
 export async function listPendingRatings(): Promise<ApiResponse<PendingRating[]>> {
   return apiFetch('/ratings/pending')
@@ -264,6 +285,7 @@ export const apiService = {
   getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
   listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
   listPendingRatings, submitRating, getSupportConfig, createSupportReport, listSupportReports,
+  listJobMessages, sendJobMessage, markJobMessagesRead, blockJobParty,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, updateDriverVehicle, createPaymentIntent,
 }
 

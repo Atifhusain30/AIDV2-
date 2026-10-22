@@ -112,6 +112,26 @@ test('remote database has the AID marketplace schema', { timeout: 30000 }, async
     for (const category of [...Object.keys(CATEGORIES.customer), ...Object.keys(CATEGORIES.driver)]) assert.match(b18.rows[0].categories, new RegExp(`'${category}'`));
     assert.match(b18.rows[0].message, /2000/);
     assert.match(b18.rows[0].status, /'open'.*'in_review'.*'resolved'/);
+    // B12: job chat and blocks are API-only too; body 1–1000 characters; no self-blocks.
+    const b12 = await pool.query(`
+      select (select relrowsecurity from pg_class where oid = 'public.job_messages'::regclass) as messages_rls,
+        (select relrowsecurity from pg_class where oid = 'public.user_blocks'::regclass) as blocks_rls,
+        has_table_privilege('authenticated', 'public.job_messages', 'select') or has_table_privilege('authenticated', 'public.job_messages', 'insert')
+          or has_table_privilege('authenticated', 'public.job_messages', 'update') or has_table_privilege('anon', 'public.job_messages', 'select')
+          or has_table_privilege('authenticated', 'public.user_blocks', 'select') or has_table_privilege('authenticated', 'public.user_blocks', 'insert')
+          or has_table_privilege('authenticated', 'public.user_blocks', 'delete') as client_access,
+        (select count(*)::int from pg_policies where schemaname = 'public' and tablename in ('job_messages', 'user_blocks')) as policies,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'job_messages_body_check')) as body,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'user_blocks_not_self')) as not_self,
+        (select indexdef from pg_indexes where schemaname = 'public' and indexname = 'job_messages_booking_seq_idx') as cursor_index
+    `);
+    assert.equal(b12.rows[0].messages_rls, true, 'job_messages RLS must be enabled');
+    assert.equal(b12.rows[0].blocks_rls, true, 'user_blocks RLS must be enabled');
+    assert.equal(b12.rows[0].client_access, false, 'clients must not read or write chat messages or blocks directly');
+    assert.equal(b12.rows[0].policies, 0);
+    assert.match(b12.rows[0].body, /1000/);
+    assert.match(b12.rows[0].not_self, /blocker_id <> blocked_id/);
+    assert.match(b12.rows[0].cursor_index || '', /\(booking_id, seq\)/);
     assert.ok(hardenedPolicies.rowCount > 0);
     for (const policy of hardenedPolicies.rows) {
       assert.match(policy.expression, /is_active_account/i, `${policy.tablename}.${policy.policyname} must reject inactive accounts`);

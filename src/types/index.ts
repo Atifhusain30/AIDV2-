@@ -1,3 +1,5 @@
+import type { BookingChat } from '../lib/chat'
+
 // Service Types
 export type ServiceType = 
   | 'oil_change'
@@ -291,6 +293,8 @@ export interface Booking {
   cancelledBy?: 'customer' | 'driver' | 'support' | 'system'
   /** Why the server ended it on its own: no driver accepted in time, or the driver went silent. */
   endReason?: 'no_driver_found' | 'driver_unresponsive'
+  /** B12: chat state and unread count for the signed-in participant (on single-booking answers). */
+  chat?: BookingChat
 }
 
 // Service Request (incoming to driver)

@@ -17,6 +17,7 @@ vi.mock('./api', () => ({
     listReports: vi.fn(),
     getReport: vi.fn(),
     updateReport: vi.fn(),
+    getReportChat: vi.fn(),
   },
 }))
 
@@ -74,6 +75,7 @@ beforeEach(() => {
   api.getDriver.mockResolvedValue(detail())
   api.listReports.mockImplementation(async (filter) => ({ reports: filter === 'resolved' ? [] : [safetyReport, appReport], counts: { open: 1, in_review: 1, resolved: 0, safetyActive: 1 } }))
   api.getReport.mockResolvedValue(reportDetail())
+  api.getReportChat.mockResolvedValue({ bookingId: 'booking-9', messages: [], blocks: [] })
   api.updateReport.mockImplementation(async (_id, change) => reportDetail({ status: change.status || 'open', events: change.note ? [{ id: 'e2', action: 'note_added', fromStatus: null, toStatus: null, note: change.note, actor: { id: 'admin-1', name: 'Zach Admin', role: 'admin' }, createdAt: '2026-10-22T10:00:00Z' }] : [] }))
 })
 afterEach(() => cleanup())
@@ -266,6 +268,27 @@ describe('AID admin reports inbox (B18)', () => {
     await waitFor(() => expect(api.updateReport).toHaveBeenLastCalledWith('rep-1', { note: 'Called the customer' }))
     expect(await within(view).findByText('Called the customer')).toBeTruthy()
     expect((await screen.findByRole('status')).textContent).toMatch(/note added/i)
+  })
+
+  it('B12: shows the chat of the reported job, with who sent what and any block', async () => {
+    api.getReportChat.mockResolvedValueOnce({
+      bookingId: 'booking-9',
+      messages: [
+        { id: 'm1', senderRole: 'customer', senderName: 'Casey Customer', body: 'Please slow down', createdAt: '2026-10-22T09:00:00Z', readAt: '2026-10-22T09:01:00Z' },
+        { id: 'm2', senderRole: 'driver', senderName: 'Dana Driver', body: 'Relax', createdAt: '2026-10-22T09:02:00Z', readAt: null },
+      ],
+      blocks: [{ blockerRole: 'customer', blockerName: 'Casey Customer', sameJob: true, createdAt: '2026-10-22T09:05:00Z' }],
+    })
+    await openInbox()
+    fireEvent.click(await screen.findByRole('button', { name: /open safety concern report/i }))
+    const view = await screen.findByRole('region', { name: 'Safety concern' })
+    const thread = await within(view).findByRole('list', { name: 'Chat messages' })
+    expect(api.getReportChat).toHaveBeenCalledWith('rep-1')
+    expect(within(view).getByRole('heading', { name: 'Chat on this job (2)' })).toBeTruthy()
+    const items = within(thread).getAllByRole('listitem')
+    expect(items[0].textContent).toMatch(/Casey Customer.*\(customer\).*read.*Please slow down/)
+    expect(items[1].textContent).toMatch(/Dana Driver.*\(driver\).*Relax/)
+    expect(within(view).getByText(/blocked the other person on this job/)).toBeTruthy()
   })
 
   it('shows the server error when an update is refused', async () => {

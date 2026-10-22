@@ -258,7 +258,7 @@ test('open requests and accepts are limited to what the driver equipment can per
   const calls = [];
   const repository = new PostgresRepository(poolWith(async (text, values) => {
     calls.push({ text, values });
-    return { rows: /select b\.id, b\.service_type/.test(text) ? [{ id: 'booking-9', service_type: 'towing', vehicle_is_electric: true, location_lat: 32.7, location_lng: -96.8 }] : [] };
+    return { rows: /select b\.id, b\.customer_id, b\.service_type/.test(text) ? [{ id: 'booking-9', customer_id: 'customer-1', service_type: 'towing', vehicle_is_electric: true, location_lat: 32.7, location_lng: -96.8 }] : [] };
   }));
   const capability = { serviceTypes: ['battery_jump', 'towing'], electricTowing: false };
   const area = { minLat: 32, maxLat: 33, minLng: -97, maxLng: -96 };
@@ -266,7 +266,7 @@ test('open requests and accepts are limited to what the driver equipment can per
   assert.match(calls[0].text, /b\.service_type = any\(\$1::text\[\]\)/);
   assert.match(calls[0].text, /\$2::boolean or b\.service_type <> 'towing' or not coalesce\(v\.is_electric, false\)/);
   assert.match(calls[0].text, /b\.location_lat between \$3 and \$4 and b\.location_lng between \$5 and \$6/);
-  assert.deepEqual(calls[0].values, [['battery_jump', 'towing'], false, 32, 33, -97, -96, 32.5, -96.5, 15]);
+  assert.deepEqual(calls[0].values, [['battery_jump', 'towing'], false, 32, 33, -97, -96, 32.5, -96.5, 15, null]);
   assert.match(calls[0].text, /b\.created_at > now\(\) - make_interval\(mins => \$9::int\)/, 'requests past the expiry window are never listed');
 
   await repository.listAvailableBookings(undefined, area);
@@ -274,7 +274,7 @@ test('open requests and accepts are limited to what the driver equipment can per
   assert.deepEqual(await repository.listAvailableBookings(capability), [], 'no area (driver position) means no requests');
   assert.equal(calls.length, 2, 'and no query is run');
 
-  assert.deepEqual(await repository.getAvailableBooking('booking-9'), { id: 'booking-9', serviceType: 'towing', vehicleIsElectric: true, pickup: { lat: 32.7, lng: -96.8 } });
+  assert.deepEqual(await repository.getAvailableBooking('booking-9'), { id: 'booking-9', customerId: 'customer-1', serviceType: 'towing', vehicleIsElectric: true, pickup: { lat: 32.7, lng: -96.8 } });
   assert.match(calls[2].text, /b\.status='searching' and b\.driver_id is null/);
 
   assert.equal(await repository.acceptBooking('booking-9', 'driver-1', capability), null);

@@ -30,6 +30,9 @@ const FORBIDDEN: { label: string; pattern: RegExp; allow?: string[] }[] = [
   { label: 'hard-coded rating value', pattern: /\brating:\s*[0-5](\.\d+)?\b/ },
   // Averages are formatted only by ratingSummary(), which applies MIN_RATINGS_TO_SHOW.
   { label: 'rating shown without the minimum-count check', pattern: /rating\.toFixed\(/, allow: ['./lib/ratings.ts'] },
+  // B12: chat messages are only what the two people typed — no canned/automatic replies or scripted driver lines.
+  { label: 'canned or automatic chat replies', pattern: /autoRepl|auto_repl|cannedRepl|cannedMessage|quickRepl|REPLY_TEMPLATES|INTRO_TEMPLATES|simulat\w*Repl|fakeRepl|botRepl/i },
+  { label: 'scripted driver chat lines', pattern: /I'?m on my way|be there in \d+|On my way!|Driver is typing/i },
   { label: 'marketing stats', pattern: /\d[\d,]*\+ (customers|drivers|users|rescues)|4\.9 stars|rated 4\.\d/i },
 ]
 
@@ -45,6 +48,20 @@ describe('no fake data in production source (F3)', () => {
       expect(hits).toEqual([])
     })
   }
+
+  it('chat never invents messages: no timers in the chat code, and messages only come from the server', () => {
+    const chatFiles = Object.entries(sources).filter(([file]) => /\/chat\/|\/chat\.ts$/.test(file))
+    expect(chatFiles.map(([file]) => file).sort()).toEqual(['./components/chat/JobChat.tsx', './components/chat/MessageButton.tsx', './lib/chat.ts'])
+    for (const [file, text] of chatFiles) {
+      expect(/setTimeout\(/.test(text), `${file} schedules something`).toBe(false)
+    }
+    const screen = sources['./components/chat/JobChat.tsx']
+    // The only places a message enters the list: the server's poll answer and the server's answer to a send.
+    expect(screen.match(/setMessages\(\(current\) => mergeMessages\(current, [^)]+\)\)/g)).toEqual([
+      'setMessages((current) => mergeMessages(current, page.messages))',
+      'setMessages((current) => mergeMessages(current, [saved]))',
+    ])
+  })
 
   it('never randomises prices, ratings, ETAs or positions (Math.random only for UI ids)', () => {
     const hits = Object.entries(sources)

@@ -23,10 +23,14 @@ interface ReportProblemFormProps {
   onSent?: (report: SupportReport) => void
   onClose: () => void
   closeLabel?: string
+  /** Pre-selected category (e.g. the other person's behaviour when reporting from chat); can be changed. */
+  initialCategory?: string
 }
 
-export default function ReportProblemForm({ audience, bookingId, jobs = [], titleId, onSent, onClose, closeLabel = 'Close' }: ReportProblemFormProps) {
-  const [category, setCategory] = useState<string | null>(null)
+export default function ReportProblemForm({ audience, bookingId, jobs = [], titleId, onSent, onClose, closeLabel = 'Close', initialCategory }: ReportProblemFormProps) {
+  const [category, setCategory] = useState<string | null>(
+    initialCategory && REPORT_CATEGORIES[audience].some((choice) => choice.id === initialCategory) ? initialCategory : null,
+  )
   const [jobId, setJobId] = useState<string>('')
   const [message, setMessage] = useState('')
   const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')

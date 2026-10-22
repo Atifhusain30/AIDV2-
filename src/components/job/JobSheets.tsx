@@ -77,10 +77,10 @@ export function ConfirmSheet({ id, title, text, confirmLabel, busyLabel, keepLab
 }
 
 /** "Report an issue" on an active job — the same report form and table as Help & Support (B18). */
-export function ReportIssueSheet({ bookingId, audience, onClose }: { bookingId: string; audience: SupportAudience; onClose: () => void }) {
+export function ReportIssueSheet({ bookingId, audience, onClose, initialCategory }: { bookingId: string; audience: SupportAudience; onClose: () => void; initialCategory?: string }) {
   return (
     <Sheet labelledBy="report-issue-title" onClose={onClose}>
-      <ReportProblemForm audience={audience} bookingId={bookingId} titleId="report-issue-title" onClose={onClose} />
+      <ReportProblemForm audience={audience} bookingId={bookingId} titleId="report-issue-title" onClose={onClose} initialCategory={initialCategory} />
     </Sheet>
   )
 }

@@ -24,6 +24,10 @@ const {
 const {
   RATING_WINDOW_DAYS, COMMENT_MAX, RATING_TAGS, RATING_CODES, cleanRating, checkCanRate, ratingDeadline,
 } = require('./ratings');
+const {
+  MESSAGE_MAX: CHAT_MESSAGE_MAX, MESSAGES_PER_MINUTE, READ_ONLY_HOURS, CHAT_CODES,
+  chatState, sendRefusal, cleanMessage, parseCursor, otherParty, readOnlyUntil, blockGuidance,
+} = require('./chat');
 
 // E4 answer codes the apps act on.
 const ACTIVE_REQUEST_CODE = 'active_request_exists';
@@ -82,7 +86,7 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv() }) {
+function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now() }) {
   const app = express();
   const requestExpiryMinutes = repository.requestExpiryMinutes || DEFAULT_REQUEST_EXPIRY_MINUTES;
   // E4: end stale work for this caller before answering (the interval sweep in index.js does the rest).
@@ -282,7 +286,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   app.get('/api/bookings/active', authenticate, async (req, res, next) => {
     try {
       await expireStaleFor(req.auth);
-      res.json(await repository.getActiveBooking(req.auth.identity.id, req.auth.profile.role));
+      const booking = await repository.getActiveBooking(req.auth.identity.id, req.auth.profile.role);
+      res.json(booking ? await withChat(booking, req.auth) : booking);
     } catch (error) { next(error); }
   });
   app.get('/api/bookings/:bookingId', authenticate, async (req, res, next) => {
@@ -290,7 +295,104 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       await expireStaleFor(req.auth);
       const booking = await repository.getBooking(req.params.bookingId, req.auth.identity.id, req.auth.profile.role);
       if (!booking) return res.status(404).json({ error: 'Booking not found' });
-      res.json(booking);
+      res.json(await withChat(booking, req.auth));
+    } catch (error) { next(error); }
+  });
+
+  // ---- B12: chat between a job's customer and driver, and blocking (rules in chat.js) ----
+  const isParty = (role) => role === 'customer' || role === 'driver';
+  /** Chat state for this participant, from their own booking view and the block/unread summary. */
+  async function chatFor(booking, auth) {
+    const role = auth.profile.role;
+    const otherId = otherParty(booking, role);
+    if (!isParty(role) || !otherId) return { state: 'unavailable', unread: 0, blockedByMe: false, readOnlyUntil: null };
+    const summary = await repository.getChatSummary(booking.id, auth.identity.id, otherId);
+    const state = chatState(booking, summary.block, clock());
+    return {
+      state,
+      unread: state === 'closed' ? 0 : summary.unread,
+      blockedByMe: summary.block.byMe,
+      readOnlyUntil: readOnlyUntil(booking, READ_ONLY_HOURS),
+    };
+  }
+  // The booking a participant polls carries the chat state and unread count, so the badge needs no extra request.
+  const withChat = async (booking, auth) => (isParty(auth.profile.role) ? { ...booking, chat: await chatFor(booking, auth) } : booking);
+  // Load the caller's own job for a chat route; anyone else (or a bad id) gets 404 and learns nothing.
+  async function participantBooking(req, res) {
+    if (!isParty(req.auth.profile.role)) { res.status(403).json({ error: 'Only the customer or the driver of a job can use its chat' }); return null; }
+    const booking = UUID.test(req.params.bookingId) ? await repository.getBooking(req.params.bookingId, req.auth.identity.id, req.auth.profile.role) : null;
+    if (!booking) { res.status(404).json({ error: 'Booking not found' }); return null; }
+    return booking;
+  }
+  const chatClosed = (res, state) => res.status(state === 'closed' ? 410 : 409).json({ ...sendRefusal(state), state });
+
+  // Messages after ?after=<seq> (or the newest page). Polled every few seconds while the chat is open.
+  app.get('/api/bookings/:bookingId/messages', authenticate, async (req, res, next) => {
+    try {
+      const cursor = parseCursor(req.query.after);
+      if (!cursor.ok) return res.status(400).json({ error: 'Invalid cursor' });
+      const booking = await participantBooking(req, res);
+      if (!booking) return;
+      const chat = await chatFor(booking, req.auth);
+      if (chat.state === 'closed' || chat.state === 'unavailable') return chatClosed(res, chat.state);
+      const messages = await repository.listJobMessages(booking.id, req.auth.identity.id, cursor.after);
+      res.json({
+        ...chat, bookingStatus: booking.status, messages,
+        cursor: messages.length ? messages[messages.length - 1].seq : cursor.after,
+        maxLength: CHAT_MESSAGE_MAX,
+      });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/bookings/:bookingId/messages', authenticate, async (req, res, next) => {
+    try {
+      const cleaned = cleanMessage(req.body);
+      if (!isParty(req.auth.profile.role)) return res.status(403).json({ error: 'Only the customer or the driver of a job can use its chat' });
+      if (!cleaned.ok) return res.status(400).json({ error: cleaned.error, field: cleaned.field });
+      const booking = await participantBooking(req, res);
+      if (!booking) return;
+      const chat = await chatFor(booking, req.auth);
+      if (chat.state !== 'open') return chatClosed(res, chat.state);
+      if (await repository.countRecentJobMessages(req.auth.identity.id, 60) >= chatMessagesPerMinute) {
+        return res.status(429).json({ error: "You're sending messages too quickly. Wait a moment and try again.", code: CHAT_CODES.rateLimited });
+      }
+      const saved = await repository.createJobMessage({
+        bookingId: booking.id, senderId: req.auth.identity.id, senderRole: req.auth.profile.role, body: cleaned.body, clientId: cleaned.clientId,
+      });
+      if (!saved) {
+        // The job ended or someone blocked between the check and the insert: answer with the state now.
+        const latest = await repository.getBooking(booking.id, req.auth.identity.id, req.auth.profile.role);
+        const now = latest ? await chatFor(latest, req.auth) : { state: 'unavailable' };
+        return chatClosed(res, now.state === 'open' ? 'unavailable' : now.state);
+      }
+      res.status(saved.duplicate ? 200 : 201).json(saved.message);
+    } catch (error) { next(error); }
+  });
+  // Mark the other person's messages as read (up to ?upTo / body.upTo, or all).
+  app.post('/api/bookings/:bookingId/messages/read', authenticate, async (req, res, next) => {
+    try {
+      const cursor = parseCursor(req.body?.upTo);
+      if (!cursor.ok) return res.status(400).json({ error: 'Invalid cursor' });
+      const booking = await participantBooking(req, res);
+      if (!booking) return;
+      const chat = await chatFor(booking, req.auth);
+      if (chat.state === 'closed' || chat.state === 'unavailable') return chatClosed(res, chat.state);
+      const marked = await repository.markJobMessagesRead(booking.id, req.auth.identity.id, cursor.after);
+      res.json({ marked });
+    } catch (error) { next(error); }
+  });
+  // Block the other person on one of your jobs: closes the chat and keeps you apart in dispatch from
+  // now on. Does not cancel the job — the answer says what to do instead while it's still going.
+  app.post('/api/bookings/:bookingId/block', authenticate, async (req, res, next) => {
+    try {
+      const booking = await participantBooking(req, res);
+      if (!booking) return;
+      const role = req.auth.profile.role;
+      const otherId = otherParty(booking, role);
+      if (!otherId) return res.status(409).json({ error: 'There is no one to block on this job yet.', code: CHAT_CODES.noOneToBlock });
+      const result = await repository.blockUser({ blockerId: req.auth.identity.id, blockerRole: role, blockedId: otherId, bookingId: booking.id, bookingStatus: booking.status });
+      res.status(result.created ? 201 : 200).json({
+        blocked: true, alreadyBlocked: !result.created, guidance: blockGuidance(role, booking.status), chat: await chatFor(booking, req.auth),
+      });
     } catch (error) { next(error); }
   });
   app.patch('/api/bookings/:bookingId/status', authenticate, async (req, res, next) => {
@@ -420,7 +522,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       const from = await repository.getDriverPosition(driverId, LOCATION_MAX_AGE_MINUTES);
       if (!from) return res.json({ status: LOCATION_REQUIRED_CODE, radiusMiles: requestRadiusMiles, requests: [] });
       const capability = equipmentCapability(req.auth.profile.driverVehicle.equipmentType);
-      const candidates = await repository.listAvailableBookings(capability, boundingBox(from, requestRadiusMiles));
+      // B12: requests from a customer either side has blocked are never listed to this driver.
+      const candidates = await repository.listAvailableBookings(capability, boundingBox(from, requestRadiusMiles), driverId);
       res.json({ status: 'ok', radiusMiles: requestRadiusMiles, requests: nearestWithin(candidates, from, requestRadiusMiles) });
     } catch (error) { next(error); }
   });
@@ -449,6 +552,10 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         if (await repository.getBookingStatus(req.params.bookingId) === 'expired') return expiredRequest(res);
         return res.status(409).json({ error: 'Booking is no longer available' });
       }
+      // B12: a driver and a customer who blocked each other (either way) are never paired. Same answer
+      // as a taken request, so neither learns about the other's block; acceptBooking re-checks it atomically.
+      const block = await repository.getBlockBetween(req.auth.identity.id, open.customerId);
+      if (block.byMe || block.byThem) return res.status(409).json({ error: 'Booking is no longer available' });
       const fit = canPerformService(equipmentType, open);
       if (!fit.ok) return res.status(403).json({ error: fit.error, code: EQUIPMENT_MISMATCH_CODE });
       // Same radius as the request list, checked against the driver's last fresh position. Advisory
@@ -663,6 +770,14 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       const report = UUID.test(req.params.reportId) ? await repository.getSupportReportForAdmin(req.params.reportId) : null;
       if (!report) return res.status(404).json({ error: 'Report not found' });
       res.json(report);
+    } catch (error) { next(error); }
+  });
+  // B12: the chat of the job a report is about (admins only; also after the apps stop showing it).
+  app.get('/api/admin/reports/:reportId/messages', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      if (!UUID.test(req.params.reportId) || !await repository.getSupportReportStatus(req.params.reportId)) return res.status(404).json({ error: 'Report not found' });
+      const chat = await repository.getReportChatForAdmin(req.params.reportId);
+      res.json(chat || { bookingId: null, messages: [], blocks: [] });
     } catch (error) { next(error); }
   });
   app.patch('/api/admin/reports/:reportId', authenticate, requireAdmin, async (req, res, next) => {

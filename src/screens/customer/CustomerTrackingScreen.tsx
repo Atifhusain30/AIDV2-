@@ -14,6 +14,9 @@ import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
 import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
 import { jobCountLabel, ratingSummary } from '../../lib/ratings'
+import { showChatEntry, type BookingChat } from '../../lib/chat'
+import JobChat from '../../components/chat/JobChat'
+import { MessageButton } from '../../components/chat/MessageButton'
 
 const LiveDriverMap = lazy(() => import('../../components/tracking/LiveDriverMap'))
 
@@ -36,6 +39,13 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
   const [sheet, setSheet] = useState<'cancel' | 'report' | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+
+  // B12: what the chat changed (read, blocked) shows on the badge now rather than at the next poll.
+  const updateChat = (change: Partial<BookingChat>) => {
+    const current = useAppStore.getState().activeBooking
+    if (current?.id === booking.id && current.chat) setActiveBooking({ ...current, chat: { ...current.chat, ...change } })
+  }
 
   // Re-evaluate staleness between server polls.
   useEffect(() => {
@@ -142,9 +152,14 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
                 : <>New on AID{driverJobs && <> · {driverJobs}</>}</>}
             </small>
           </div>
-          {driver?.phone && (
-            <a className="job-call" href={`tel:${driver.phone}`} aria-label={`Call ${firstName}`}><Phone size={19} /></a>
-          )}
+          <div className="job-person__actions">
+            {showChatEntry(booking.chat) && (
+              <MessageButton name={firstName} unread={chatOpen ? 0 : booking.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
+            )}
+            {driver?.phone && (
+              <a className="job-call" href={`tel:${driver.phone}`} aria-label={`Call ${firstName}`}><Phone size={19} /></a>
+            )}
+          </div>
         </div>
 
         <div className="track-vehicle" aria-label="Driver vehicle">
@@ -200,6 +215,12 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
         />
       )}
       {sheet === 'report' && <ReportIssueSheet bookingId={booking.id} audience="customer" onClose={() => setSheet(null)} />}
+      {chatOpen && (
+        <JobChat
+          bookingId={booking.id} audience="customer" otherName={firstName} serviceName={booking.service.name}
+          initialChat={booking.chat} onClose={() => setChatOpen(false)} onChatChange={updateChat}
+        />
+      )}
     </div>
   )
 }

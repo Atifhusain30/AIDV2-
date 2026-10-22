@@ -198,6 +198,15 @@ describe('driver job screen', () => {
     expect(screen.getByText(/does not contact 911/)).toBeTruthy()
   })
 
+  it('B12: Message the customer, with the unread count from the job poll', () => {
+    show(tow({ chat: { state: 'open', unread: 12, blockedByMe: false, readOnlyUntil: null } }))
+    const button = screen.getByRole('button', { name: 'Message Casey, 12 unread' })
+    expect(button.textContent).toBe('9+')
+    cleanup()
+    show(tow())
+    expect(screen.getByRole('button', { name: 'Message Casey' }).textContent).toBe('')
+  })
+
   it('labels Report an issue as non-emergency', () => {
     show(tow())
     fireEvent.click(screen.getByRole('button', { name: 'Report an issue' }))
