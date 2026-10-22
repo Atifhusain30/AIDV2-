@@ -51,11 +51,6 @@ export function clearGeocodingCache(): void {
   searchCache.clear()
 }
 
-/** Tests: how many lookups are cached. */
-export function geocodingCacheSize(): number {
-  return geocodeCache.size + searchCache.size
-}
-
 /**
  * Generate cache key from coordinates (rounded to 5 decimal places)
  * 5 decimal places = ~1.1 meter precision, good enough for address lookup
@@ -177,13 +172,6 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
   }
 }
 
-/**
- * Clear the geocode cache (useful for testing)
- */
-export function clearGeocodeCache(): void {
-  geocodeCache.clear()
-}
-
 // Nominatim search response type
 interface NominatimSearchResult {
   place_id: number
@@ -280,9 +268,3 @@ export async function searchAddresses(
   }
 }
 
-/**
- * Clear the search cache (useful for testing)
- */
-export function clearSearchCache(): void {
-  searchCache.clear()
-}

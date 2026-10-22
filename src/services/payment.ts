@@ -1,4 +1,4 @@
-import { loadStripe, type Stripe, type StripeElements } from '@stripe/stripe-js'
+import { loadStripe, type Stripe } from '@stripe/stripe-js'
 import type { PaymentIntent, PaymentStatus } from '../types'
 import { apiService } from './api'
 
@@ -23,24 +23,6 @@ export async function createPaymentIntent(_amount: number, bookingId: string): P
   }
 }
 
-export async function confirmPayment(
-  clientSecret: string,
-  stripe: Stripe,
-  elements: StripeElements,
-): Promise<{ success: boolean; paymentId?: string; error?: string }> {
-  const { error, paymentIntent } = await stripe.confirmPayment({
-    elements,
-    clientSecret,
-    confirmParams: { return_url: window.location.href },
-    redirect: 'if_required',
-  })
-  if (error) return { success: false, error: error.message || 'Payment confirmation failed.' }
-  if (paymentIntent?.status === 'succeeded' || paymentIntent?.status === 'processing') {
-    return { success: true, paymentId: paymentIntent.id }
-  }
-  return { success: false, error: 'Payment was not completed.' }
-}
-
 function mapStripeStatus(status: string): PaymentStatus {
   if (status === 'succeeded') return 'succeeded'
   if (status === 'processing') return 'processing'
@@ -55,6 +37,3 @@ export function formatAmount(cents: number): string {
 export function dollarsToCents(dollars: number): number {
   return Math.round(dollars * 100)
 }
-
-export const paymentService = { getStripe, createPaymentIntent, confirmPayment, formatAmount, dollarsToCents }
-export default paymentService

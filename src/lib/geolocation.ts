@@ -19,35 +19,6 @@ const isGeolocationAvailable = (): boolean => {
 }
 
 /**
- * Request location permissions
- * @returns Permission status or null if not available
- */
-export async function requestLocationPermission(): Promise<'granted' | 'denied' | 'prompt' | null> {
-  if (!isGeolocationAvailable()) {
-    console.log('[Geolocation] Plugin not available, trying browser API')
-    // Try browser API permissions
-    if ('permissions' in navigator) {
-      try {
-        const result = await navigator.permissions.query({ name: 'geolocation' })
-        return result.state as 'granted' | 'denied' | 'prompt'
-      } catch {
-        return null
-      }
-    }
-    return null
-  }
-
-  try {
-    const permission = await Geolocation.requestPermissions()
-    console.log('[Geolocation] Permission status:', permission.location)
-    return permission.location as 'granted' | 'denied' | 'prompt'
-  } catch (error) {
-    console.error('[Geolocation] Permission request error:', error)
-    return null
-  }
-}
-
-/**
  * Get current GPS position
  * @returns GeoCoords or throws error
  */

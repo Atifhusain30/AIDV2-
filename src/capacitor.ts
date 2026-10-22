@@ -37,24 +37,3 @@ export async function initializeCapacitor(): Promise<void> {
     console.error('Error initializing Capacitor:', error);
   }
 }
-
-/**
- * Check if running on native iOS
- */
-export function isNativeIOS(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
-}
-
-/**
- * Check if running on native Android
- */
-export function isNativeAndroid(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
-}
-
-/**
- * Check if running in web browser
- */
-export function isWeb(): boolean {
-  return !Capacitor.isNativePlatform();
-}

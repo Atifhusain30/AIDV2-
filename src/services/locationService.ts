@@ -5,7 +5,7 @@
  * Wraps existing helpers for a clean service interface
  */
 
-import { getCurrentPosition, requestLocationPermission, getMapsUrl } from '../lib/geolocation'
+import { getCurrentPosition, getMapsUrl } from '../lib/geolocation'
 import { reverseGeocode, searchAddresses, AddressSuggestion } from '../lib/geocoding'
 import { GeoCoords } from '../store/useAppStore'
 
@@ -34,14 +34,6 @@ export function requireResolvedLocation(label: string, coords: GeoCoords | null)
     throw new Error('Select an address suggestion or use your current location.')
   }
   return { label: trimmedLabel, coords }
-}
-
-/**
- * Request location permission from user
- * @returns Permission status or null if not available
- */
-export async function requestPermission(): Promise<'granted' | 'denied' | 'prompt' | null> {
-  return requestLocationPermission()
 }
 
 /**
@@ -81,44 +73,13 @@ export function getMapUrl(coords: GeoCoords): string {
   return getMapsUrl(coords)
 }
 
-/**
- * Calculate distance between two coordinates in degrees
- * (For simple comparison, not actual distance)
- */
-export function calculateCoordDistance(
-  p1: { lat: number; lng: number },
-  p2: { lat: number; lng: number }
-): number {
-  return Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lng - p2.lng, 2))
-}
-
-/**
- * Check if coordinates are approximately equal
- * @param tolerance Tolerance in degrees (default ~100m)
- */
-export function coordsEqual(
-  c1: { lat: number; lng: number } | null,
-  c2: { lat: number; lng: number } | null,
-  tolerance = 0.001
-): boolean {
-  if (!c1 || !c2) return c1 === c2
-  return (
-    Math.abs(c1.lat - c2.lat) < tolerance &&
-    Math.abs(c1.lng - c2.lng) < tolerance
-  )
-}
-
 // Default export as service object
 const locationService = {
-  getCurrentCoords,
   getCurrentLocationSelection,
   requireResolvedLocation,
-  requestPermission,
   reverseGeocodeLabel,
   searchAddressSuggestions,
   getMapUrl,
-  calculateCoordDistance,
-  coordsEqual,
 }
 
 export default locationService

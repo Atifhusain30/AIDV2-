@@ -16,22 +16,6 @@ const isNotificationsAvailable = (): boolean => {
 }
 
 /**
- * Generate a stable notification ID from bookingId and status
- * Converts string to a number hash for the notification ID
- */
-const generateNotificationId = (bookingId: string, status: string): number => {
-  const combined = `${bookingId}-${status}`
-  let hash = 0
-  for (let i = 0; i < combined.length; i++) {
-    const char = combined.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash // Convert to 32-bit integer
-  }
-  // Ensure positive and within reasonable range
-  return Math.abs(hash) % 1000000
-}
-
-/**
  * Where the notification permission stands, without asking: 'prompt' = never answered,
  * 'unavailable' = web / plugin missing. Never shows a system prompt.
  */
@@ -97,100 +81,6 @@ export async function clearAllNotifications(): Promise<void> {
     await LocalNotifications.removeAllDeliveredNotifications()
   } catch {
     // Web or plugin unavailable: nothing was scheduled.
-  }
-}
-
-/**
- * Parameters for booking update notification
- */
-export interface NotifyBookingUpdateParams {
-  bookingId: string
-  status: string
-  title: string
-  body: string
-}
-
-/**
- * Schedule a local notification for a booking update
- */
-export async function notifyBookingUpdate(params: NotifyBookingUpdateParams): Promise<void> {
-  const { bookingId, status, title, body } = params
-
-  if (!isNotificationsAvailable()) {
-    console.log(`[Notifications] Would notify: ${title} - ${body}`)
-    return
-  }
-
-  try {
-    const notificationId = generateNotificationId(bookingId, status)
-
-    await LocalNotifications.schedule({
-      notifications: [
-        {
-          id: notificationId,
-          title,
-          body,
-          // Schedule slightly in the future to ensure it fires
-          schedule: { at: new Date(Date.now() + 200) },
-          channelId: 'aid-booking-updates',
-          extra: { bookingId, status },
-        },
-      ],
-    })
-
-    console.log(`[Notifications] Scheduled: ${title}`)
-  } catch (error) {
-    console.error('[Notifications] Schedule error:', error)
-  }
-}
-
-/**
- * Notification templates for different booking statuses
- */
-export interface NotificationTemplate {
-  title: string
-  body: string
-}
-
-export function getNotificationTemplate(
-  status: string,
-  serviceType: string,
-  providerName?: string,
-  providerETA?: number
-): NotificationTemplate | null {
-  const provider = providerName || 'Your provider'
-  
-  switch (status) {
-    case 'accepted':
-      return {
-        title: 'Provider accepted ✅',
-        body: providerETA 
-          ? `${provider} accepted your ${serviceType} request. ETA ${providerETA} min.`
-          : `${provider} accepted your ${serviceType} request.`,
-      }
-    case 'en_route':
-      return {
-        title: 'On the way 🚗',
-        body: `${provider} is en route for ${serviceType}.`,
-      }
-    case 'arrived':
-      return {
-        title: 'Arrived 📍',
-        body: `${provider} has arrived.`,
-      }
-    case 'completed':
-      return {
-        title: 'Completed 🎉',
-        body: `${serviceType} service completed. Thanks for using AID!`,
-      }
-    case 'cancelled':
-      return {
-        title: 'Cancelled',
-        body: `Your ${serviceType} request was cancelled.`,
-      }
-    default:
-      // No notification for 'searching', 'pending', etc.
-      return null
   }
 }
 
