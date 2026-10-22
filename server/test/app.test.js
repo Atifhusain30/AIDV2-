@@ -6,6 +6,8 @@ const { createApp } = require('../app');
 function buildHarness(stripe = null, accountAdmin = null) {
   const users = {
     customerToken: { id: 'customer-1', role: 'customer', status: 'active', firstName: 'Casey', lastName: 'Customer' },
+    otherCustomerToken: { id: 'customer-2', role: 'customer', status: 'active', firstName: 'Olive', lastName: 'Other' },
+    adminToken: { id: 'admin-1', role: 'admin', status: 'active', firstName: 'Ada', lastName: 'Admin' },
     driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true },
     offlineDriverToken: { id: 'driver-3', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: false },
     pendingDriverToken: { id: 'driver-2', role: 'driver', status: 'active', verificationStatus: 'pending' },
@@ -40,8 +42,31 @@ function buildHarness(stripe = null, accountAdmin = null) {
     async getBooking(bookingId, userId, role) {
       const booking = bookings.get(bookingId);
       if (!booking) return null;
-      return role === 'customer' && booking.customerId === userId ? booking : null;
+      if (role === 'customer') return booking.customerId === userId ? booking : null;
+      if (role === 'driver') return booking.driverId === userId ? booking : null;
+      return null;
     },
+    async getActiveBooking(userId, role) {
+      const column = role === 'driver' ? 'driverId' : 'customerId';
+      return [...bookings.values()].find((booking) => booking[column] === userId &&
+        ['pending', 'searching', 'accepted', 'en_route', 'arrived', 'in_progress'].includes(booking.status)) || null;
+    },
+    // Mirrors the SQL compare-and-set: ownership + expected current status, plus an audit event.
+    async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrent, { reason = null } = {}) {
+      const booking = bookings.get(bookingId);
+      const owner = role === 'customer' ? booking?.customerId : booking?.driverId;
+      if (!booking || owner !== actorId || !allowedCurrent.includes(booking.status)) return null;
+      this.events.push({ bookingId, actorId, from: booking.status, to: nextStatus, reason, at: new Date() });
+      const updated = { ...booking, status: nextStatus, ...(nextStatus === 'cancelled' ? { cancelledBy: role } : {}) };
+      bookings.set(bookingId, updated);
+      return updated;
+    },
+    events: [],
+    async reportBookingIssue(bookingId, actorId, issue) {
+      this.issues.push({ bookingId, actorId, ...issue });
+      return { id: String(this.issues.length), bookingId, category: issue.category, status: issue.status };
+    },
+    issues: [],
     async setPaymentIntent(bookingId, customerId, paymentIntentId) {
       const booking = bookings.get(bookingId);
       if (!booking || booking.customerId !== customerId) return null;
@@ -396,4 +421,143 @@ test('driver location must be real coordinates', async () => {
   const ok = await request(app).patch('/api/bookings/booking-1/driver-location').set('Authorization', 'Bearer driverToken').send({ location: { lat: 33.1, lng: -97.0, accuracy: 12 } });
   assert.equal(ok.status, 200);
   assert.deepEqual(repository.savedDriverLocation.location, { lat: 33.1, lng: -97.0 });
+});
+
+// ── B10 job lifecycle ──────────────────────────────────────────────────────────────────────
+const job = (status, extra = {}) => ({ id: 'job-1', status, customerId: 'customer-1', driverId: 'driver-1', ...extra });
+const setStatus = (app, token, body, id = 'job-1') => request(app).patch(`/api/bookings/${id}/status`).set('Authorization', `Bearer ${token}`).send(body);
+
+test('driver moves a job through every step in order, with one audit event per change', async () => {
+  const { app, bookings, repository } = buildHarness();
+  bookings.set('job-1', job('accepted'));
+  for (const status of ['en_route', 'arrived', 'in_progress', 'completed']) {
+    const response = await setStatus(app, 'driverToken', { status });
+    assert.equal(response.status, 200, `to ${status}`);
+    assert.equal(response.body.status, status);
+  }
+  assert.deepEqual(repository.events.map((event) => `${event.from}→${event.to}`), ['accepted→en_route', 'en_route→arrived', 'arrived→in_progress', 'in_progress→completed']);
+  assert.ok(repository.events.every((event) => event.actorId === 'driver-1' && event.at instanceof Date));
+});
+
+test('out-of-order and repeated steps are rejected with the current status', async () => {
+  const cases = [
+    ['accepted', 'arrived'], ['accepted', 'in_progress'], ['accepted', 'completed'], ['en_route', 'completed'],
+    ['en_route', 'en_route'], ['arrived', 'en_route'], ['in_progress', 'arrived'], ['completed', 'in_progress'],
+    ['cancelled', 'en_route'], ['searching', 'en_route'],
+  ];
+  for (const [from, to] of cases) {
+    const { app, bookings, repository } = buildHarness();
+    bookings.set('job-1', job(from));
+    const response = await setStatus(app, 'driverToken', { status: to });
+    assert.equal(response.status, 409, `${from} → ${to}`);
+    assert.equal(response.body.currentStatus, from);
+    assert.equal(bookings.get('job-1').status, from, 'booking unchanged');
+    assert.equal(repository.events.length, 0);
+  }
+});
+
+test('statuses no party may set directly are rejected', async () => {
+  const { app, bookings } = buildHarness();
+  bookings.set('job-1', job('accepted'));
+  for (const status of ['searching', 'pending', 'accepted', 'bogus', undefined]) {
+    assert.equal((await setStatus(app, 'driverToken', { status })).status, 400, `driver → ${status}`);
+  }
+  for (const status of ['en_route', 'arrived', 'in_progress', 'completed', 'searching']) {
+    assert.equal((await setStatus(app, 'customerToken', { status })).status, 400, `customer → ${status}`);
+  }
+  assert.equal(bookings.get('job-1').status, 'accepted');
+});
+
+test('only the assigned driver and the booking\'s own customer can change a job', async () => {
+  const { app, bookings, repository } = buildHarness();
+  bookings.set('job-1', job('accepted'));
+  const otherDriver = await setStatus(app, 'offlineDriverToken', { status: 'en_route' });
+  assert.equal(otherDriver.status, 404);
+  const otherCustomer = await setStatus(app, 'otherCustomerToken', { status: 'cancelled' });
+  assert.equal(otherCustomer.status, 404);
+  const admin = await setStatus(app, 'adminToken', { status: 'cancelled' });
+  assert.equal(admin.status, 403);
+  assert.equal(otherDriver.body.booking, undefined, 'no booking details leak to other parties');
+  assert.equal(bookings.get('job-1').status, 'accepted');
+  assert.equal(repository.events.length, 0);
+});
+
+test('customer can cancel until the driver arrives, then not at all', async () => {
+  for (const status of ['searching', 'accepted', 'en_route']) {
+    const { app, bookings, repository } = buildHarness();
+    bookings.set('job-1', job(status, status === 'searching' ? { driverId: undefined } : {}));
+    const response = await setStatus(app, 'customerToken', { status: 'cancelled', reason: 'found_other_help' });
+    assert.equal(response.status, 200, `cancel from ${status}`);
+    assert.equal(response.body.cancelledBy, 'customer');
+    assert.equal(repository.events[0].reason, 'found_other_help');
+  }
+  for (const status of ['arrived', 'in_progress', 'completed']) {
+    const { app, bookings } = buildHarness();
+    bookings.set('job-1', job(status));
+    const response = await setStatus(app, 'customerToken', { status: 'cancelled' });
+    assert.equal(response.status, 409, `no cancel from ${status}`);
+    assert.equal(bookings.get('job-1').status, status);
+  }
+  const { app, bookings } = buildHarness();
+  bookings.set('job-1', job('arrived'));
+  assert.match((await setStatus(app, 'customerToken', { status: 'cancelled' })).body.error, /already arrived/);
+});
+
+test('driver must give a reason to cancel, and can only cancel before service starts', async () => {
+  const { app, bookings, repository } = buildHarness();
+  bookings.set('job-1', job('arrived'));
+  assert.equal((await setStatus(app, 'driverToken', { status: 'cancelled' })).status, 400);
+  assert.equal((await setStatus(app, 'driverToken', { status: 'cancelled', reason: 'made_up' })).status, 400);
+  const ok = await setStatus(app, 'driverToken', { status: 'cancelled', reason: 'cannot_reach_customer' });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.cancelledBy, 'driver');
+  assert.deepEqual(repository.events.map((event) => [event.from, event.to, event.reason]), [['arrived', 'cancelled', 'cannot_reach_customer']]);
+
+  for (const status of ['in_progress', 'completed']) {
+    const harness = buildHarness();
+    harness.bookings.set('job-1', job(status));
+    const response = await setStatus(harness.app, 'driverToken', { status: 'cancelled', reason: 'other' });
+    assert.equal(response.status, 409, `no driver cancel from ${status}`);
+    if (status === 'in_progress') assert.match(response.body.error, /complete it or report an issue/i);
+  }
+});
+
+test('a cancelled job frees the driver: one job at a time, and they can accept again after a cancel', async () => {
+  const { app, bookings } = buildHarness();
+  bookings.set('job-1', job('en_route'));
+  bookings.set('job-2', { id: 'job-2', status: 'searching', customerId: 'customer-2' });
+  assert.equal((await request(app).post('/api/bookings/job-2/accept').set('Authorization', 'Bearer driverToken')).status, 409, 'busy driver cannot take a second job');
+  assert.match((await request(app).post('/api/bookings/job-2/accept').set('Authorization', 'Bearer driverToken')).body.error, /current job/);
+  assert.equal((await setStatus(app, 'customerToken', { status: 'cancelled' })).status, 200);
+  const accept = await request(app).post('/api/bookings/job-2/accept').set('Authorization', 'Bearer driverToken');
+  assert.equal(accept.status, 200);
+});
+
+test('a concurrent change turns into a 409 with the latest booking instead of skipping a step', async () => {
+  const { app, bookings, repository } = buildHarness();
+  bookings.set('job-1', job('en_route'));
+  const original = repository.updateBookingStatus.bind(repository);
+  repository.updateBookingStatus = async (...args) => {
+    bookings.set('job-1', job('cancelled', { cancelledBy: 'customer' })); // customer cancelled a moment earlier
+    return original(...args);
+  };
+  const response = await setStatus(app, 'driverToken', { status: 'arrived' });
+  assert.equal(response.status, 409);
+  assert.equal(response.body.currentStatus, 'cancelled');
+  assert.equal(response.body.booking.cancelledBy, 'customer');
+});
+
+test('either party can report an issue on an active job, including after service starts', async () => {
+  const { app, bookings, repository } = buildHarness();
+  bookings.set('job-1', job('in_progress'));
+  const driver = await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer driverToken').send({ category: 'vehicle_damage', details: ' Bumper was already cracked ' });
+  assert.equal(driver.status, 201);
+  assert.deepEqual(repository.issues[0], { bookingId: 'job-1', actorId: 'driver-1', role: 'driver', category: 'vehicle_damage', details: 'Bumper was already cracked', status: 'in_progress' });
+  const customer = await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer customerToken').send({ category: 'safety' });
+  assert.equal(customer.status, 201);
+  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer customerToken').send({ category: 'nope' })).status, 400);
+  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer customerToken').send({ category: 'other' })).status, 400, 'other needs details');
+  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer otherCustomerToken').send({ category: 'safety' })).status, 404);
+  bookings.set('job-1', job('completed'));
+  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer driverToken').send({ category: 'safety' })).status, 409);
 });

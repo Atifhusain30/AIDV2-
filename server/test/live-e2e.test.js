@@ -17,6 +17,7 @@ test('live Supabase customer → verified driver → document → completed book
   const driverEmail = `e2e-driver-${suffix}@example.com`;
   const createdIds = [];
   let bookingId;
+  let secondBookingId;
 
   async function createUser(email, role) {
     const { data, error } = await supabase.auth.admin.createUser({
@@ -125,6 +126,43 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(customerBooking.status, 'completed');
     assert.equal(customerBooking.driver.phone, undefined, 'driver phone is hidden after the job');
     assert.equal(customerBooking.driverLocation, undefined, 'live location is hidden after the job');
+    assert.ok(customerBooking.arrivedAt && customerBooking.startedAt && customerBooking.completedAt, 'each step is timestamped');
+    const trail = await pool.query('select actor_id, from_status, to_status from public.booking_events where booking_id=$1 and event_type=$2 order by id', [bookingId, 'status_changed']);
+    assert.deepEqual(trail.rows.map((row) => `${row.from_status}→${row.to_status}`),
+      ['searching→accepted', 'accepted→en_route', 'en_route→arrived', 'arrived→in_progress', 'in_progress→completed']);
+    assert.ok(trail.rows.every((row) => row.actor_id === driver.id));
+    const stored = await pool.query('select driver_lat from public.bookings where id=$1', [bookingId]);
+    assert.equal(stored.rows[0].driver_lat, null, 'last shared position is cleared when the job ends');
+
+    // B10 cancel rules against the real database.
+    const secondResponse = await api('/bookings', customer.token, { method: 'POST', body: JSON.stringify({ serviceType: 'battery_jump', location: { address: '300 Main Street', lat: 32.7767, lng: -96.797 } }) });
+    assert.equal(secondResponse.status, 201);
+    secondBookingId = (await secondResponse.json()).id;
+    assert.equal((await api(`/bookings/${secondBookingId}/accept`, driver.token, { method: 'POST' })).status, 200);
+    const skipped = await api(`/bookings/${secondBookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'in_progress' }) });
+    assert.equal(skipped.status, 409, 'cannot skip steps');
+    assert.equal((await skipped.json()).currentStatus, 'accepted');
+    assert.equal((await api(`/bookings/${secondBookingId}/status`, customer.token, { method: 'PATCH', body: JSON.stringify({ status: 'en_route' }) })).status, 400, 'customers cannot move the job');
+    for (const status of ['en_route', 'arrived']) {
+      assert.equal((await api(`/bookings/${secondBookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status }) })).status, 200);
+    }
+    assert.equal((await api(`/bookings/${secondBookingId}/status`, customer.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) })).status, 409, 'customer cannot cancel after arrival');
+    assert.equal((await api(`/bookings/${secondBookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) })).status, 400, 'driver needs a reason');
+    const issue = await api(`/bookings/${secondBookingId}/issues`, customer.token, { method: 'POST', body: JSON.stringify({ category: 'other', details: 'E2E issue report' }) });
+    assert.equal(issue.status, 201);
+    const driverCancel = await api(`/bookings/${secondBookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled', reason: 'cannot_reach_customer' }) });
+    assert.equal(driverCancel.status, 200);
+    const cancelled = await (await api(`/bookings/${secondBookingId}`, customer.token)).json();
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(cancelled.cancelledBy, 'driver');
+    assert.ok(cancelled.cancelledAt);
+    assert.equal(await (await api('/bookings/active', driver.token)).json(), null, 'driver is free after cancelling');
+    assert.equal((await api(`/bookings/${secondBookingId}/driver-location`, driver.token, { method: 'PATCH', body: JSON.stringify({ location: { lat: 32.79, lng: -96.81 } }) })).status, 404, 'location sharing stops');
+    const cancelEvent = await pool.query("select metadata from public.booking_events where booking_id=$1 and to_status='cancelled' and event_type='status_changed'", [secondBookingId]);
+    assert.deepEqual(cancelEvent.rows[0].metadata, { role: 'driver', reason: 'cannot_reach_customer' });
+    const issueEvent = await pool.query("select actor_id, metadata from public.booking_events where booking_id=$1 and event_type='issue_reported'", [secondBookingId]);
+    assert.equal(issueEvent.rows[0].actor_id, customer.id);
+    assert.equal(issueEvent.rows[0].metadata.details, 'E2E issue report');
 
     const form = new FormData();
     form.append('type', 'identification');
@@ -145,6 +183,7 @@ test('live Supabase customer → verified driver → document → completed book
       assert.equal(removed?.length, stored.rows.length, 'every uploaded test document must be removed from storage');
     }
     if (bookingId) await pool.query('delete from public.bookings where id=$1', [bookingId]).catch(() => {});
+    if (secondBookingId) await pool.query('delete from public.bookings where id=$1', [secondBookingId]).catch(() => {});
     for (const id of createdIds.reverse()) await supabase.auth.admin.deleteUser(id).catch(() => {});
     await pool.end();
   }

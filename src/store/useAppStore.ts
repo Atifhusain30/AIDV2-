@@ -140,7 +140,7 @@ interface AppState {
   updateActiveBookingStatus: (status: Booking['status'], updates?: Partial<Booking>) => void
   clearActiveBooking: () => void
   /** Shown once when the server reports the active job was cancelled by the other side (not persisted). */
-  endedBookingNotice: { bookingId: string; serviceName: string; driverName?: string } | null
+  endedBookingNotice: { bookingId: string; serviceName: string; driverName?: string; byCustomer?: boolean } | null
   setEndedBookingNotice: (notice: AppState['endedBookingNotice']) => void
   bookingHistory: Booking[]
   addToBookingHistory: (booking: Booking) => void

@@ -13,7 +13,9 @@ export default function EndedBookingNotice() {
     <div className="track-ended" role="alert">
       <div>
         <strong>{notice.serviceName} request cancelled</strong>
-        <p>{notice.driverName ? `Your job with ${notice.driverName} was cancelled.` : 'This request is no longer active.'} It won't be reassigned automatically — request again to find another driver.</p>
+        <p>{notice.byCustomer
+          ? 'You cancelled this request.'
+          : `${notice.driverName ? `${notice.driverName} had to cancel` : 'Your driver had to cancel'}. It won't be reassigned automatically — request again to find another driver.`}</p>
       </div>
       <div className="track-ended__actions">
         <button type="button" className="track-ended__again" onClick={() => { rebookFromHistory(notice.bookingId); setNotice(null) }}>Request again</button>

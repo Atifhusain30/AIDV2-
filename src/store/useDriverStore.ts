@@ -10,6 +10,7 @@ import { useAuthStore } from './useAuthStore'
 import { apiService } from '../services/api'
 import { documentService } from '../services/documents'
 import type { SharingStatus } from '../lib/jobLocationSharing'
+import { isJobOver } from '../lib/jobLifecycle'
 
 interface DriverStore {
   // State
@@ -31,7 +32,12 @@ interface DriverStore {
   fetchIncomingRequests: () => Promise<void>
   acceptRequest: (requestId: string) => Promise<boolean>
   declineRequest: (requestId: string) => void
-  updateJobStatus: (status: Booking['status']) => Promise<boolean>
+  /** `reason` is required by the server when cancelling (see DRIVER_CANCEL_REASONS). */
+  updateJobStatus: (status: Booking['status'], reason?: string) => Promise<boolean>
+  syncActiveJob: () => Promise<void>
+  /** Set when the customer cancelled the driver's active job. */
+  jobEndedNotice: { bookingId: string; serviceName: string; customerName?: string } | null
+  dismissJobEndedNotice: () => void
   fetchActiveBooking: (driverId: string) => Promise<void>
   
   // Document management
@@ -56,6 +62,7 @@ const initialState = {
   documents: [],
   verification: null,
   locationSharing: 'off' as SharingStatus,
+  jobEndedNotice: null,
   isLoading: false,
   error: null
 }
@@ -145,28 +152,48 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
     })
   },
 
-  // Update current job status
-  updateJobStatus: async (status) => {
+  // Move the job one step (server enforces the order). On rejection, resync with the server so the
+  // screen shows the real status — e.g. the customer cancelled a moment earlier.
+  updateJobStatus: async (status, reason) => {
     const { activeBooking } = get()
     if (!activeBooking) return false
-    
-    set({ isLoading: true })
-    
-    const result = await apiService.updateBookingStatus(activeBooking.id, status)
-    
+
+    set({ isLoading: true, error: null })
+    const result = await apiService.updateBookingStatus(activeBooking.id, status, reason)
+
     if (result.success && result.data) {
-      // If completed, clear active booking
-      if (status === 'completed' || status === 'cancelled') {
-        set({ activeBooking: null, isLoading: false })
-      } else {
-        set({ activeBooking: result.data, isLoading: false })
-      }
+      // Completing or cancelling frees the driver: no active job, so GPS sharing stops.
+      if (isJobOver(result.data.status)) set({ activeBooking: null, isLoading: false })
+      else set({ activeBooking: result.data, isLoading: false })
       return true
     }
-    
-    set({ isLoading: false, error: result.error })
+
+    set({ isLoading: false, error: result.error || 'Unable to update this job.' })
+    await get().syncActiveJob()
     return false
   },
+
+  // Refresh the active job from the server; if it ended from the customer's side, say so once.
+  syncActiveJob: async () => {
+    const job = get().activeBooking
+    if (!job) return
+    const result = await apiService.getBooking(job.id)
+    if (!result.success || !result.data || get().activeBooking?.id !== job.id) return
+    const latest = result.data
+    if (isJobOver(latest.status)) {
+      set({
+        activeBooking: null,
+        error: null,
+        jobEndedNotice: latest.status === 'cancelled' && latest.cancelledBy !== 'driver'
+          ? { bookingId: latest.id, serviceName: latest.service.name, customerName: latest.customer?.firstName }
+          : null,
+      })
+      return
+    }
+    set({ activeBooking: latest })
+  },
+
+  dismissJobEndedNotice: () => set({ jobEndedNotice: null }),
 
   // Fetch active booking
   fetchActiveBooking: async (driverId) => {

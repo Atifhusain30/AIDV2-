@@ -14,7 +14,10 @@ function parseBooking(booking: Booking): Booking {
     ...booking,
     createdAt: new Date(booking.createdAt),
     acceptedAt: booking.acceptedAt ? new Date(booking.acceptedAt) : undefined,
+    arrivedAt: booking.arrivedAt ? new Date(booking.arrivedAt) : undefined,
+    startedAt: booking.startedAt ? new Date(booking.startedAt) : undefined,
     completedAt: booking.completedAt ? new Date(booking.completedAt) : undefined,
+    cancelledAt: booking.cancelledAt ? new Date(booking.cancelledAt) : undefined,
   }
 }
 
@@ -161,9 +164,14 @@ export async function acceptServiceRequest(requestId: string, _driverId?: string
   return result.success && result.data ? { ...result, data: parseBooking(result.data) } : result
 }
 
-export async function updateBookingStatus(bookingId: string, status: Booking['status']): Promise<ApiResponse<Booking>> {
-  const result = await apiFetch<Booking>(`/bookings/${bookingId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) })
+/** `reason` is a cancellation reason code (required for drivers; see src/lib/jobLifecycle.ts). */
+export async function updateBookingStatus(bookingId: string, status: Booking['status'], reason?: string): Promise<ApiResponse<Booking>> {
+  const result = await apiFetch<Booking>(`/bookings/${bookingId}/status`, { method: 'PATCH', body: JSON.stringify(reason ? { status, reason } : { status }) })
   return result.success && result.data ? { ...result, data: parseBooking(result.data) } : result
+}
+
+export async function reportBookingIssue(bookingId: string, category: string, details?: string): Promise<ApiResponse<{ id: string }>> {
+  return apiFetch(`/bookings/${bookingId}/issues`, { method: 'POST', body: JSON.stringify({ category, details }) })
 }
 
 export async function updateDriverLocation(bookingId: string, location: Location): Promise<ApiResponse<Booking>> {
@@ -194,7 +202,7 @@ export function getAuthState() { return { isAuthenticated: false, user: null, to
 export const apiService = {
   customerLogin, customerRegister, driverLogin, driverRegister, logout, getAuthState,
   getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
-  listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
+  listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, reportBookingIssue, getActiveBooking, getDriverActiveBooking,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, createPaymentIntent,
 }
 

@@ -40,12 +40,12 @@ describe('active booking sync', () => {
     expect(apiService.getBooking).toHaveBeenCalledTimes(2)
   })
 
-  it('stops and tells the customer when the job is cancelled', async () => {
-    vi.mocked(apiService.getBooking).mockResolvedValue({ success: true, data: job({ status: 'cancelled' }) })
+  it('stops and tells the customer when the driver cancels', async () => {
+    vi.mocked(apiService.getBooking).mockResolvedValue({ success: true, data: job({ status: 'cancelled', cancelledBy: 'driver' }) })
     render(<Harness />)
     await flush()
     expect(useAppStore.getState().activeBooking).toBeNull()
-    expect(useAppStore.getState().endedBookingNotice).toEqual({ bookingId: 'booking-9', serviceName: 'Flat tire', driverName: 'Marcus' })
+    expect(useAppStore.getState().endedBookingNotice).toEqual({ bookingId: 'booking-9', serviceName: 'Flat tire', driverName: 'Marcus', byCustomer: false })
     await act(async () => { vi.advanceTimersByTime(BOOKING_POLL_MS * 3) })
     expect(apiService.getBooking).toHaveBeenCalledTimes(1)
   })

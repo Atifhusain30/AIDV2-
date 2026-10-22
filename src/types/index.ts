@@ -283,7 +283,13 @@ export interface Booking {
   notes?: string
   createdAt: Date
   acceptedAt?: Date
+  /** Server timestamps for each lifecycle step (audit trail lives in booking_events). */
+  arrivedAt?: Date
+  startedAt?: Date
   completedAt?: Date
+  cancelledAt?: Date
+  /** Who ended the job, when cancelled. */
+  cancelledBy?: 'customer' | 'driver' | 'support'
 }
 
 // Service Request (incoming to driver)

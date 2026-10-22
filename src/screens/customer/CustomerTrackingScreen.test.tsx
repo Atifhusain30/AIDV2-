@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import CustomerTrackingScreen from './CustomerTrackingScreen'
 import { useAppStore } from '../../store/useAppStore'
 import { apiService } from '../../services/api'
@@ -10,7 +10,7 @@ vi.mock('../../components/tracking/LiveDriverMap', () => ({
     <div data-testid="map" data-driver={props.driver ? `${props.driver.lat},${props.driver.lng}` : 'none'} data-stale={String(Boolean(props.stale))} />
   ),
 }))
-vi.mock('../../services/api', () => ({ apiService: { updateBookingStatus: vi.fn() } }))
+vi.mock('../../services/api', () => ({ apiService: { updateBookingStatus: vi.fn(), reportBookingIssue: vi.fn() } }))
 
 const NOW = Date.parse('2026-10-22T19:00:00Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -86,16 +86,67 @@ describe('customer live tracking', () => {
     expect(screen.queryByRole('link', { name: /Call/ })).toBeNull()
   })
 
-  it('lets the customer cancel only before the driver is on the way', async () => {
+  it('lets the customer cancel while the driver is on the way, with confirmation and an optional reason', async () => {
     vi.mocked(apiService.updateBookingStatus).mockResolvedValue({ success: true, data: job({ status: 'cancelled' }) })
-    useAppStore.setState({ activeBooking: job({ status: 'accepted' }) })
-    const { unmount } = render(<CustomerTrackingScreen booking={job({ status: 'accepted' })} />)
+    useAppStore.setState({ activeBooking: job({ status: 'en_route' }) })
+    render(<CustomerTrackingScreen booking={job({ status: 'en_route' })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
+    const dialog = screen.getByRole('dialog', { name: 'Cancel this request?' })
+    expect(within(dialog).getByText(/Marcus is already on the way/)).toBeTruthy()
+    fireEvent.click(within(dialog).getByLabelText('Wait is too long'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, cancel request' }))
+    await waitFor(() => expect(useAppStore.getState().activeBooking).toBeNull())
+    expect(apiService.updateBookingStatus).toHaveBeenCalledWith('booking-9', 'cancelled', 'wait_too_long')
+  })
+
+  it('keeps the request when the customer backs out of cancelling', () => {
+    render(<CustomerTrackingScreen booking={job({ status: 'accepted' })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Keep request' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(apiService.updateBookingStatus).not.toHaveBeenCalled()
+  })
+
+  it('shows the server reason when a cancel is refused (e.g. the driver just arrived)', async () => {
+    vi.mocked(apiService.updateBookingStatus).mockResolvedValue({ success: false, error: 'Your driver has already arrived, so this request can no longer be cancelled in the app.' })
+    render(<CustomerTrackingScreen booking={job({ status: 'en_route' })} />)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
     fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel request' }))
-    await waitFor(() => expect(useAppStore.getState().activeBooking).toBeNull())
-    expect(apiService.updateBookingStatus).toHaveBeenCalledWith('booking-9', 'cancelled')
-    unmount()
-    render(<CustomerTrackingScreen booking={job({ status: 'en_route' })} />)
-    expect(screen.queryByRole('button', { name: 'Cancel request' })).toBeNull()
+    expect((await screen.findByRole('alert')).textContent).toMatch(/already arrived/)
+  })
+
+  it('once the driver arrives there is no cancel, only reporting a problem', () => {
+    for (const status of ['arrived', 'in_progress'] as const) {
+      render(<CustomerTrackingScreen booking={job({ status, driverEta: undefined })} />)
+      expect(screen.queryByRole('button', { name: 'Cancel request' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Report a problem' })).toBeTruthy()
+      expect(screen.getByText(status === 'arrived' ? /Marcus is here, so this request can't be cancelled/ : /Service has started/)).toBeTruthy()
+      cleanup()
+    }
+  })
+
+  it('shows the right headline for every step, including the tow to the drop-off', () => {
+    const cases: [Booking['status'], RegExp][] = [
+      ['accepted', /DRIVER CONFIRMED/], ['en_route', /DRIVER ON THE WAY/], ['arrived', /DRIVER HAS ARRIVED/], ['in_progress', /SERVICE IN PROGRESS/],
+    ]
+    for (const [status, label] of cases) {
+      render(<CustomerTrackingScreen booking={job({ status })} />)
+      expect(screen.getByText(label)).toBeTruthy()
+      cleanup()
+    }
+    render(<CustomerTrackingScreen booking={job({ status: 'in_progress' })} />)
+    expect(screen.getByRole('heading', { name: 'On the way to drop-off' })).toBeTruthy()
+  })
+
+  it('reports a problem to the server', async () => {
+    vi.mocked(apiService.reportBookingIssue).mockResolvedValue({ success: true, data: { id: '1' } })
+    render(<CustomerTrackingScreen booking={job({ status: 'in_progress' })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Report a problem' }))
+    const send = screen.getByRole('button', { name: 'Send report' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('Damage to my vehicle'))
+    fireEvent.click(send)
+    expect(await screen.findByRole('heading', { name: 'Report saved' })).toBeTruthy()
+    expect(apiService.reportBookingIssue).toHaveBeenCalledWith('booking-9', 'vehicle_damage', undefined)
   })
 })

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import DriverJobScreen from './DriverJobScreen'
 import { useDriverStore } from '../../store/useDriverStore'
 import type { Booking } from '../../types'
@@ -18,7 +18,7 @@ const tow = (overrides: Partial<Booking> = {}): Booking => ({
 
 const updateJobStatus = vi.fn().mockResolvedValue(true)
 function show(booking: Booking | null, extra: Record<string, unknown> = {}) {
-  useDriverStore.setState({ activeBooking: booking, updateJobStatus, locationSharing: 'sharing', currentLocation: { lat: 33.1, lng: -97.0 }, ...extra })
+  useDriverStore.setState({ activeBooking: booking, updateJobStatus, locationSharing: 'sharing', currentLocation: { lat: 33.1, lng: -97.0 }, error: null, jobEndedNotice: null, ...extra })
   const onBack = vi.fn()
   render(<DriverJobScreen onBack={onBack} />)
   return { onBack }
@@ -62,25 +62,85 @@ describe('driver job screen', () => {
     expect(nav.getAttribute('href')).toBe('https://maps.apple.com/?daddr=33.05,-96.99&dirflg=d')
   })
 
-  it('advances the job one step at a time', () => {
-    show(tow({ status: 'accepted' }))
-    fireEvent.click(screen.getByRole('button', { name: /i'm on my way/i }))
-    expect(updateJobStatus).toHaveBeenCalledWith('en_route')
-    cleanup()
-    show(tow({ status: 'arrived' }))
-    fireEvent.click(screen.getByRole('button', { name: /start service/i }))
-    expect(updateJobStatus).toHaveBeenCalledWith('in_progress')
+  it('shows exactly one primary action per step, in order', () => {
+    const service = (overrides: Partial<Booking> = {}) => tow({ dropoffLocation: undefined, service: { id: 'flat_tire', name: 'Flat tire', description: '', basePrice: 79, estimatedTime: 35 }, ...overrides })
+    const steps: [Booking['status'], string, Booking['status'] | undefined][] = [
+      ['accepted', 'Start driving', 'en_route'],
+      ['en_route', "I've arrived", 'arrived'],
+      ['arrived', 'Start service', 'in_progress'],
+    ]
+    for (const [status, label, next] of steps) {
+      show(service({ status }))
+      const buttons = screen.getAllByRole('button').filter((button) => button.classList.contains('aid-primary-button'))
+      expect(buttons.map((button) => button.textContent)).toEqual([label])
+      fireEvent.click(buttons[0])
+      expect(updateJobStatus).toHaveBeenLastCalledWith(next, undefined)
+      cleanup()
+    }
+    show(service({ status: 'in_progress' }))
+    expect(screen.getByRole('button', { name: 'Complete job' })).toBeTruthy()
+    expect(screen.getByText('Tap when the service is finished')).toBeTruthy()
   })
 
-  it('only allows cancelling before arrival, with confirmation', async () => {
-    show(tow({ status: 'en_route' }))
-    fireEvent.click(screen.getByRole('button', { name: /cancel job/i }))
-    const dialog = screen.getByRole('dialog', { name: /cancel this job/i })
-    fireEvent.click(within(dialog).getByRole('button', { name: /yes, cancel/i }))
-    expect(updateJobStatus).toHaveBeenCalledWith('cancelled')
-    cleanup()
+  it('uses tow wording: start the tow once loaded, complete at the drop-off', () => {
     show(tow({ status: 'arrived' }))
-    expect(screen.queryByRole('button', { name: /cancel job/i })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Start tow' })).toBeTruthy()
+    cleanup()
+    show(tow({ status: 'in_progress' }))
+    expect(screen.getByText('Tap once the vehicle is dropped off')).toBeTruthy()
+  })
+
+  it('asks before completing, and can back out', async () => {
+    const { onBack } = show(tow({ status: 'in_progress' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete job' }))
+    expect(updateJobStatus).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('dialog', { name: 'Complete this job?' })
+    expect(within(dialog).getByText(/vehicle is at the drop-off/)).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Not yet' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Complete job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, complete job' }))
+    await waitFor(() => expect(updateJobStatus).toHaveBeenCalledWith('completed', undefined))
+    await waitFor(() => expect(onBack).toHaveBeenCalled())
+  })
+
+  it('disables the action while the update is pending', async () => {
+    let finish: (ok: boolean) => void = () => undefined
+    updateJobStatus.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finish = resolve }))
+    show(tow({ status: 'accepted' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start driving' }))
+    const pending = screen.getByRole('button', { name: /updating/i }) as HTMLButtonElement
+    expect(pending.disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Cancel job' }) as HTMLButtonElement).disabled).toBe(true)
+    finish(true)
+    await waitFor(() => expect(screen.queryByRole('button', { name: /updating/i })).toBeNull())
+  })
+
+  it('shows the server error when a step is refused', () => {
+    show(tow({ status: 'en_route' }), { error: 'Do one step at a time: this job is on the way, so the next step is arrived.' })
+    expect(screen.getByRole('alert').textContent).toMatch(/one step at a time/)
+  })
+
+  it('cancelling needs a reason and a confirmation, and is allowed until service starts', async () => {
+    show(tow({ status: 'arrived' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel job' }))
+    const dialog = screen.getByRole('dialog', { name: 'Cancel this job?' })
+    const confirm = within(dialog).getByRole('button', { name: 'Yes, cancel job' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(within(dialog).getByLabelText("Can't reach the customer"))
+    expect(confirm.disabled).toBe(false)
+    fireEvent.click(confirm)
+    await waitFor(() => expect(updateJobStatus).toHaveBeenCalledWith('cancelled', 'cannot_reach_customer'))
+    cleanup()
+    show(tow({ status: 'in_progress' }))
+    expect(screen.queryByRole('button', { name: 'Cancel job' })).toBeNull()
+    expect(screen.getByText(/can't be cancelled. If something's wrong, report an issue/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Report an issue' })).toBeTruthy()
+  })
+
+  it('tells the driver when the customer cancelled the job', () => {
+    show(null, { jobEndedNotice: { bookingId: 'booking-9', serviceName: 'Towing', customerName: 'Casey' } })
+    expect(screen.getByRole('alert').textContent).toMatch(/Casey cancelled this towing job/)
   })
 
   it('tells the driver when the customer cannot see their location', () => {

@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Star,
   Truck,
+  X,
 } from 'lucide-react'
 import AidBrand from '../../components/brand/AidBrand'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -41,6 +42,8 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
     fetchActiveBooking,
     acceptRequest,
     declineRequest,
+    jobEndedNotice,
+    dismissJobEndedNotice,
   } = useDriverStore()
 
   const eligibility = driverEligibility(user)
@@ -103,6 +106,16 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
         )}
         {error && <p role="alert" className="availability-card__error">{error}</p>}
       </section>
+
+      {jobEndedNotice && !activeBooking && (
+        <div className="job-ended-banner" role="alert">
+          <div>
+            <strong>{jobEndedNotice.serviceName} job cancelled</strong>
+            <p>{jobEndedNotice.customerName || 'The customer'} cancelled before you arrived. You're free for your next request.</p>
+          </div>
+          <button type="button" aria-label="Dismiss" onClick={dismissJobEndedNotice}><X size={18} /></button>
+        </div>
+      )}
 
       {activeBooking && (
         <button type="button" className="driver-active-job" onClick={onOpenActiveJob}>

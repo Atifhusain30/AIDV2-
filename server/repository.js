@@ -117,8 +117,12 @@ function mapBooking(row) {
     driverLocation: row.driver_lat == null ? undefined : { lat: row.driver_lat, lng: row.driver_lng },
     createdAt: row.created_at,
     acceptedAt: row.accepted_at || undefined,
+    arrivedAt: row.arrived_at || undefined,
+    startedAt: row.started_at || undefined,
     completedAt: row.completed_at || undefined,
+    cancelledAt: row.cancelled_at || undefined,
   };
+  if (row.cancelled_by) booking.cancelledBy = row.cancelled_by;
   if (row.dropoff_address) booking.dropoffLocation = { address: row.dropoff_address, lat: row.dropoff_lat, lng: row.dropoff_lng };
   if (row.vehicle_id) booking.vehicle = { vehicleId: row.vehicle_id, label: row.vehicle_label || 'Saved vehicle', plate: row.vehicle_plate || undefined };
   if (row.customer_name != null) {
@@ -139,7 +143,10 @@ const PARTY_SELECT = `
     d.first_name as party_driver_first_name, d.last_name as party_driver_last_name, d.phone as party_driver_phone,
     dp.rating as party_driver_rating, dp.total_jobs as party_driver_total_jobs,
     dp.vehicle_make as party_driver_vehicle_make, dp.vehicle_model as party_driver_vehicle_model,
-    dp.vehicle_color as party_driver_vehicle_color, dp.vehicle_plate as party_driver_vehicle_plate
+    dp.vehicle_color as party_driver_vehicle_color, dp.vehicle_plate as party_driver_vehicle_plate,
+    (select case when e.actor_id = b.customer_id then 'customer' when e.actor_id = b.driver_id then 'driver' else 'support' end
+       from public.booking_events e where e.booking_id = b.id and e.to_status = 'cancelled' and e.event_type = 'status_changed'
+       order by e.created_at desc limit 1) as cancelled_by
   from public.bookings b
   left join public.vehicles v on v.id = b.vehicle_id
   left join public.profiles c on c.id = b.customer_id
@@ -506,25 +513,62 @@ class PostgresRepository {
     });
   }
 
+  // One job at a time: a driver with an unfinished job cannot accept another. The accept is
+  // recorded in the booking's audit trail in the same statement.
   async acceptBooking(bookingId, driverId) {
     const result = await this.pool.query(`
-      update public.bookings set driver_id=$2, status='accepted', accepted_at=now()
-      where id=$1 and status = 'searching' and driver_id is null returning id
-    `, [bookingId, driverId]);
+      with upd as (
+        update public.bookings set driver_id=$2, status='accepted', accepted_at=now()
+        where id=$1 and status = 'searching' and driver_id is null
+          and not exists (select 1 from public.bookings o where o.driver_id=$2 and o.status = any($3::text[]))
+        returning id
+      ), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select id, $2, 'status_changed', 'searching', 'accepted', '{"role":"driver"}'::jsonb from upd
+      )
+      select id from upd
+    `, [bookingId, driverId, [...CONTACT_STATUSES]]);
     return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, 'driver') : null;
   }
 
-  async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrentStatuses) {
-    const ownership = role === 'customer' ? 'customer_id=$2' : role === 'driver' ? 'driver_id=$2' : 'true';
+  /**
+   * Compare-and-set status change (only from `allowedCurrentStatuses`, only by the booking's own
+   * customer/driver), stamping the matching *_at column and writing an audit event atomically.
+   * Ending a job (completed/cancelled) clears the driver's last shared position on the booking.
+   */
+  async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrentStatuses, { reason = null } = {}) {
+    const ownership = role === 'customer' ? 'customer_id=$2' : 'driver_id=$2';
     const result = await this.pool.query(`
-      update public.bookings set status=$3,
-        arrived_at=case when $3='arrived' then now() else arrived_at end,
-        started_at=case when $3='in_progress' then now() else started_at end,
-        completed_at=case when $3='completed' then now() else completed_at end,
-        cancelled_at=case when $3='cancelled' then now() else cancelled_at end
-      where id=$1 and ${ownership} and status=any($4::text[]) returning id
-    `, [bookingId, actorId, nextStatus, allowedCurrentStatuses]);
+      with prev as (
+        select id, status from public.bookings
+        where id=$1 and ${ownership} and status=any($4::text[]) for update
+      ), upd as (
+        update public.bookings b set status=$3,
+          arrived_at=case when $3='arrived' then now() else b.arrived_at end,
+          started_at=case when $3='in_progress' then now() else b.started_at end,
+          completed_at=case when $3='completed' then now() else b.completed_at end,
+          cancelled_at=case when $3='cancelled' then now() else b.cancelled_at end,
+          driver_lat=case when $3 in ('completed','cancelled') then null else b.driver_lat end,
+          driver_lng=case when $3 in ('completed','cancelled') then null else b.driver_lng end
+        from prev where b.id=prev.id
+        returning b.id, prev.status as from_status
+      ), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select id, $2, 'status_changed', from_status, $3, $5::jsonb from upd
+      )
+      select id from upd
+    `, [bookingId, actorId, nextStatus, allowedCurrentStatuses, JSON.stringify(reason ? { role, reason } : { role })]);
     return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, role) : null;
+  }
+
+  async reportBookingIssue(bookingId, actorId, { role, category, details, status }) {
+    const result = await this.pool.query(`
+      insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+      values ($1, $2, 'issue_reported', $3, $3, $4::jsonb)
+      returning id, created_at
+    `, [bookingId, actorId, status, JSON.stringify({ role, category, details: details || null })]);
+    const row = result.rows[0];
+    return { id: String(row.id), bookingId, category, status, createdAt: new Date(row.created_at).toISOString() };
   }
 
   async updateDriverOnlineStatus(driverId, isOnline) {

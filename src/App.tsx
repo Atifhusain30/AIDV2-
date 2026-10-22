@@ -10,6 +10,7 @@ import { useAppStore } from './store/useAppStore'
 import { useAuthStore } from './store/useAuthStore'
 import { useDriverStore } from './store/useDriverStore'
 import { useJobLocationSharing } from './lib/useJobLocationSharing'
+import { useDriverJobSync } from './lib/useDriverJobSync'
 import { useActiveBookingSync } from './lib/useActiveBookingSync'
 import EndedBookingNotice from './components/tracking/EndedBookingNotice'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
@@ -171,6 +172,8 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
   const [currentView, setCurrentView] = useState<DriverView>('home')
   // Share GPS with the customer on every driver screen while a job is active.
   useJobLocationSharing()
+  // Notice a customer cancellation (or any server-side change) to the active job.
+  useDriverJobSync()
   const { user } = useAuthStore()
   const { activeBooking, fetchDocuments } = useDriverStore()
 

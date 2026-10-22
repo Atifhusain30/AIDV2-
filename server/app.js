@@ -6,6 +6,7 @@ const {
   todayIso, parseIsoDate, cleanNotes, verificationReadiness, credentialsCurrent,
 } = require('./verification');
 const { quoteService, PricingError, TOWING } = require('./pricing');
+const { checkRequest, checkTransition, REPORTABLE, ISSUE_CATEGORIES } = require('./lifecycle');
 
 const DOCUMENT_TYPES = new Set(REQUIRED_DOCUMENT_TYPES);
 const publicDocument = ({ storagePath: _storagePath, ...document }) => document;
@@ -44,10 +45,6 @@ const SERVICE_CATALOG = Object.freeze({
 const publicService = (service) => ({ available: true, requiresDropoff: false, ...service });
 const cleanLocation = (location) => ({ address: location.address.trim().slice(0, 300), lat: location.lat, lng: location.lng });
 
-const DRIVER_TRANSITIONS = Object.freeze({
-  en_route: ['accepted'], arrived: ['en_route'], in_progress: ['arrived'], completed: ['in_progress'], cancelled: ['accepted', 'en_route'],
-});
-const CUSTOMER_TRANSITIONS = Object.freeze({ cancelled: ['pending', 'searching', 'accepted'] });
 
 function validCoordinates(location) {
   return Boolean(location) && Number.isFinite(location.lat) && location.lat >= -90 && location.lat <= 90 &&
@@ -240,12 +237,44 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (req.auth.profile.role === 'driver' && req.auth.profile.verificationStatus !== 'verified') {
         return res.status(403).json({ error: 'Verified driver account required' });
       }
-      const transitions = req.auth.profile.role === 'driver' ? DRIVER_TRANSITIONS : CUSTOMER_TRANSITIONS;
-      const allowedCurrent = transitions[req.body.status];
-      if (!allowedCurrent) return res.status(400).json({ error: 'Status transition is not allowed' });
-      const booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, req.auth.profile.role, req.body.status, allowedCurrent);
-      if (!booking) return res.status(409).json({ error: 'Booking status has changed or access was denied' });
+      const role = req.auth.profile.role;
+      const nextStatus = req.body.status;
+      const reason = typeof req.body.reason === 'string' ? req.body.reason : null;
+      // Reject moves this party can never make before loading anything.
+      const request = checkRequest({ role, next: nextStatus, reason });
+      if (!request.ok) return res.status(request.status).json({ error: request.error });
+      const current = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
+      const verdict = checkTransition({ role, booking: current, next: nextStatus, reason });
+      if (!verdict.ok) {
+        return res.status(verdict.status).json(verdict.status === 409
+          ? { error: verdict.error, currentStatus: verdict.currentStatus, booking: current }
+          : { error: verdict.error });
+      }
+      // Compare-and-set on the exact status we validated, so a concurrent change is a 409, never a skipped step.
+      const booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, role, nextStatus, [verdict.from], { reason: verdict.reason });
+      if (!booking) {
+        const latest = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
+        return res.status(409).json({ error: 'This job was just updated. Showing the latest status.', currentStatus: latest?.status, booking: latest });
+      }
       res.json(booking);
+    } catch (error) { next(error); }
+  });
+
+  // Either party can flag a problem on an active job — the only option once service has started.
+  app.post('/api/bookings/:bookingId/issues', authenticate, async (req, res, next) => {
+    try {
+      const role = req.auth.profile.role;
+      if (role !== 'driver' && role !== 'customer') return res.status(403).json({ error: 'Only the customer or the assigned driver can report an issue' });
+      if (role === 'driver' && req.auth.profile.verificationStatus !== 'verified') return res.status(403).json({ error: 'Verified driver account required' });
+      const category = req.body.category;
+      if (typeof category !== 'string' || !Object.hasOwn(ISSUE_CATEGORIES, category)) return res.status(400).json({ error: 'Choose what the issue is about' });
+      const details = typeof req.body.details === 'string' ? req.body.details.trim().slice(0, 1000) : '';
+      if (category === 'other' && !details) return res.status(400).json({ error: 'Describe the issue' });
+      const booking = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
+      if (!booking) return res.status(404).json({ error: 'Booking not found' });
+      if (!REPORTABLE.includes(booking.status)) return res.status(409).json({ error: 'Issues can be reported only on an active job' });
+      const issue = await repository.reportBookingIssue(booking.id, req.auth.identity.id, { role, category, details, status: booking.status });
+      res.status(201).json(issue);
     } catch (error) { next(error); }
   });
 
@@ -263,6 +292,9 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   });
   app.post('/api/bookings/:bookingId/accept', authenticate, requireVerifiedDriver, requireOnlineDriver, async (req, res, next) => {
     try {
+      // One job at a time (also enforced atomically in acceptBooking); this gives the clearer message.
+      const current = await repository.getActiveBooking(req.auth.identity.id, 'driver');
+      if (current) return res.status(409).json({ error: 'Finish or cancel your current job before accepting another' });
       const booking = await repository.acceptBooking(req.params.bookingId, req.auth.identity.id);
       if (!booking) return res.status(409).json({ error: 'Booking is no longer available' });
       res.json(booking);
@@ -478,4 +510,4 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   return app;
 }
 
-module.exports = { createApp, SERVICE_CATALOG, DRIVER_TRANSITIONS, CUSTOMER_TRANSITIONS };
+module.exports = { createApp, SERVICE_CATALOG };

@@ -4,11 +4,13 @@
  */
 
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { AlertCircle, Car, Check, Clock3, Flag, Loader2, MapPin, Phone, Star } from 'lucide-react'
+import { AlertCircle, Car, Check, Clock3, Flag, Info, Loader2, MapPin, Phone, Star } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { apiService } from '../../services/api'
 import { formatPrice } from '../../lib/money'
 import { arrivalClock, driverTracking, driverVehicleLabel, formatAge } from '../../lib/customerTracking'
+import { CUSTOMER_CANCEL_REASONS, CUSTOMER_CANCELLABLE, CUSTOMER_ISSUES, REPORTABLE, customerCancelText, customerNoCancelText } from '../../lib/jobLifecycle'
+import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
 import type { Booking, BookingStatus } from '../../types'
 
 const LiveDriverMap = lazy(() => import('../../components/tracking/LiveDriverMap'))
@@ -21,14 +23,15 @@ const STEPS: { status: BookingStatus; label: string }[] = [
   { status: 'completed', label: 'Done' },
 ]
 
-// Matches server CUSTOMER_TRANSITIONS: once the driver is on the way, cancelling goes through support.
-const CUSTOMER_CANCELLABLE: ReadonlySet<BookingStatus> = new Set<BookingStatus>(['accepted'])
 const CLOCK_TICK_MS = 5000
+const HEADER_LABEL: Partial<Record<BookingStatus, string>> = {
+  accepted: 'DRIVER CONFIRMED', en_route: 'DRIVER ON THE WAY', arrived: 'DRIVER HAS ARRIVED', in_progress: 'SERVICE IN PROGRESS',
+}
 
 export default function CustomerTrackingScreen({ booking }: { booking: Booking }) {
   const { setActiveBooking, updateBookingInHistory } = useAppStore()
   const [now, setNow] = useState(() => Date.now())
-  const [confirmCancel, setConfirmCancel] = useState(false)
+  const [sheet, setSheet] = useState<'cancel' | 'report' | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,16 +51,21 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
   const pickup = { lat: booking.location.lat, lng: booking.location.lng }
   const hasPickup = Number.isFinite(pickup.lat) && Number.isFinite(pickup.lng)
 
-  const cancel = async () => {
+  const canCancel = CUSTOMER_CANCELLABLE.has(booking.status)
+  const noCancelText = customerNoCancelText(booking.status, firstName)
+
+  const cancel = async (reason: string | null) => {
     setBusy(true)
     setError(null)
-    const result = await apiService.updateBookingStatus(booking.id, 'cancelled')
+    const result = await apiService.updateBookingStatus(booking.id, 'cancelled', reason ?? undefined)
     setBusy(false)
+    setSheet(null)
     if (!result.success || !result.data) {
+      // e.g. the driver arrived a moment ago; the next poll shows the real status.
       setError(result.error || 'Unable to cancel this request.')
-      setConfirmCancel(false)
       return
     }
+    // Ends tracking: no active booking means polling and the live map stop.
     setActiveBooking(null)
     updateBookingInHistory(result.data.id, result.data)
   }
@@ -85,7 +93,7 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
   return (
     <div className="track-screen" aria-label="Live tracking">
       <header className="job-header track-header">
-        <div><small>{booking.status === 'accepted' || booking.status === 'en_route' ? 'DRIVER ON THE WAY' : 'ACTIVE REQUEST'}</small><h1>{booking.service.name}</h1></div>
+        <div><small>{HEADER_LABEL[booking.status] ?? 'ACTIVE REQUEST'}</small><h1>{booking.service.name}</h1></div>
         <strong className="job-header__price">{formatPrice(booking.estimatedPrice)}</strong>
       </header>
 
@@ -166,24 +174,25 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
 
         {error && <p className="job-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
 
-        {CUSTOMER_CANCELLABLE.has(booking.status) && (
-          <button type="button" className="job-cancel track-cancel" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel request</button>
-        )}
+        {noCancelText && <p className="job-note track-note"><Info size={15} aria-hidden="true" /> {noCancelText}</p>}
+
+        <div className="job-actions__row track-actions">
+          {canCancel && <button type="button" className="job-cancel" disabled={busy} onClick={() => setSheet('cancel')}>Cancel request</button>}
+          {REPORTABLE.has(booking.status) && <button type="button" className="job-report" disabled={busy} onClick={() => setSheet('report')}>Report a problem</button>}
+        </div>
       </section>
 
-      {confirmCancel && (
-        <div className="account-sheet-backdrop" role="presentation" onMouseDown={() => setConfirmCancel(false)}>
-          <section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby="cancel-request-title" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="account-sheet__handle" />
-            <h2 id="cancel-request-title" className="job-confirm__title">Cancel this request?</h2>
-            <p className="job-confirm__text">{firstName} has already accepted and will be told you no longer need help.</p>
-            <div className="job-confirm__actions">
-              <button type="button" className="job-cancel job-cancel--solid" disabled={busy} onClick={() => void cancel()}>{busy ? 'Cancelling…' : 'Yes, cancel request'}</button>
-              <button type="button" className="job-keep" onClick={() => setConfirmCancel(false)}>Keep request</button>
-            </div>
-          </section>
-        </div>
+      {sheet === 'cancel' && (
+        <ConfirmSheet
+          id="cancel-request" tone="danger" busy={busy}
+          title="Cancel this request?"
+          text={customerCancelText(booking.status, firstName)}
+          reasons={CUSTOMER_CANCEL_REASONS}
+          confirmLabel="Yes, cancel request" busyLabel="Cancelling…" keepLabel="Keep request"
+          onConfirm={(reason) => void cancel(reason)} onClose={() => setSheet(null)}
+        />
       )}
+      {sheet === 'report' && <ReportIssueSheet bookingId={booking.id} choices={CUSTOMER_ISSUES} onClose={() => setSheet(null)} />}
     </div>
   )
 }

@@ -164,6 +164,51 @@ test('accepting and status changes return the booking with both parties', async 
   assert.equal(updated.driver.name, 'Marcus T.');
 });
 
+test('status changes are compare-and-set, timestamped, audited and stop location sharing when the job ends', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => { calls.push({ text, values }); return { rows: [PARTY_ROW] }; }));
+  await repository.updateBookingStatus('booking-9', 'driver-1', 'driver', 'cancelled', ['arrived'], { reason: 'cannot_reach_customer' });
+  const { text, values } = calls[0];
+  assert.match(text, /driver_id=\$2 and status=any\(\$4::text\[\]\) for update/);
+  assert.match(text, /cancelled_at=case when \$3='cancelled' then now\(\)/);
+  assert.match(text, /arrived_at=case when \$3='arrived' then now\(\)/);
+  assert.match(text, /driver_lat=case when \$3 in \('completed','cancelled'\) then null/);
+  assert.match(text, /insert into public\.booking_events \(booking_id, actor_id, event_type, from_status, to_status, metadata\)/);
+  assert.match(text, /select id, \$2, 'status_changed', from_status, \$3, \$5::jsonb from upd/);
+  assert.deepEqual(values, ['booking-9', 'driver-1', 'cancelled', ['arrived'], JSON.stringify({ role: 'driver', reason: 'cannot_reach_customer' })]);
+
+  await repository.updateBookingStatus('booking-9', 'customer-1', 'customer', 'cancelled', ['accepted']);
+  assert.match(calls[2].text, /customer_id=\$2/);
+  assert.equal(calls[2].values[4], JSON.stringify({ role: 'customer' }));
+});
+
+test('a driver with an unfinished job cannot accept another, and accepting is audited', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => { calls.push({ text, values }); return { rows: [] }; }));
+  assert.equal(await repository.acceptBooking('booking-9', 'driver-1'), null);
+  assert.match(calls[0].text, /not exists \(select 1 from public\.bookings o where o\.driver_id=\$2 and o\.status = any\(\$3::text\[\]\)\)/);
+  assert.deepEqual(calls[0].values[2], ['accepted', 'en_route', 'arrived', 'in_progress']);
+  assert.match(calls[0].text, /'status_changed', 'searching', 'accepted'/);
+});
+
+test('bookings expose each lifecycle timestamp and who cancelled', async () => {
+  const row = { ...PARTY_ROW, status: 'cancelled', arrived_at: new Date('2026-01-01T00:20:00Z'), cancelled_at: new Date('2026-01-01T00:25:00Z'), cancelled_by: 'driver' };
+  const repository = new PostgresRepository(poolWith(async () => ({ rows: [row] })));
+  const booking = await repository.getBooking('booking-9', 'customer-1', 'customer');
+  assert.equal(booking.cancelledBy, 'driver');
+  assert.equal(booking.arrivedAt.toISOString(), '2026-01-01T00:20:00.000Z');
+  assert.equal(booking.cancelledAt.toISOString(), '2026-01-01T00:25:00.000Z');
+});
+
+test('issue reports are stored on the booking audit trail', async () => {
+  let captured;
+  const repository = new PostgresRepository(poolWith(async (text, values) => { captured = { text, values }; return { rows: [{ id: 41, created_at: new Date('2026-01-01T01:00:00Z') }] }; }));
+  const issue = await repository.reportBookingIssue('booking-9', 'driver-1', { role: 'driver', category: 'safety', details: '', status: 'in_progress' });
+  assert.match(captured.text, /'issue_reported'/);
+  assert.deepEqual(captured.values, ['booking-9', 'driver-1', 'in_progress', JSON.stringify({ role: 'driver', category: 'safety', details: null })]);
+  assert.deepEqual(issue, { id: '41', bookingId: 'booking-9', category: 'safety', status: 'in_progress', createdAt: '2026-01-01T01:00:00.000Z' });
+});
+
 test('driver location updates record when the location was taken', async () => {
   const queries = [];
   const repository = new PostgresRepository(poolWith(async (text) => { queries.push(text); return { rows: [PARTY_ROW] }; }));
