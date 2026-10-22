@@ -8,11 +8,19 @@ const { PostgresRepository } = require('./repository');
 const { databaseSslConfig } = require('./config');
 const { expiryConfigFromEnv } = require('./lifecycle');
 const { startExpirySweep } = require('./expiry');
+const { createLogger, securityConfigFromEnv } = require('./security');
+const { rateLimitsFromEnv } = require('./rateLimit');
+const { serializeError } = require('./redact');
+
+// E8: one JSON line per event on stdout, already redacted (see redact.js). LOG_LEVEL: debug|info|warn|error|silent.
+const logger = createLogger({ level: process.env.LOG_LEVEL || 'info' });
+const security = securityConfigFromEnv(process.env);
+const rateLimits = rateLimitsFromEnv(process.env);
 
 const required = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'DATABASE_URL'];
 const missing = required.filter((name) => !process.env[name] || /replace|placeholder|your_/i.test(process.env[name]));
 if (missing.length) {
-  console.error(`Missing required server configuration: ${missing.join(', ')}`);
+  logger.error({ msg: `Missing required server configuration: ${missing.join(', ')}` });
   process.exit(1);
 }
 
@@ -45,7 +53,7 @@ const accountAdmin = {
     if (error) throw error;
     if (storagePaths.length) {
       const { error: storageError } = await supabase.storage.from('driver-documents').remove(storagePaths);
-      if (storageError) console.error('Account deleted but driver document cleanup failed:', storageError.message);
+      if (storageError) logger.error({ msg: 'account deleted but driver document cleanup failed', userId, error: serializeError(storageError) });
     }
   },
 };
@@ -78,25 +86,40 @@ const app = createApp({
   accountAdmin,
   documentStorage,
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
-  corsOrigin: process.env.CORS_ORIGIN || 'http://127.0.0.1:5173,http://localhost:5173,capacitor://localhost,http://localhost',
+  corsOrigin: security.corsOrigin,
+  trustProxy: security.trustProxy,
+  hsts: security.hsts,
+  jsonBodyLimit: security.jsonBodyLimit,
+  documentMaxBytes: security.documentMaxBytes,
+  rateLimits,
+  logger,
 });
 const port = Number(process.env.PORT || 3001);
 const host = process.env.HOST || '127.0.0.1';
 const server = app.listen(port, host, () => {
-  console.log(`AID API listening on http://${host}:${port}`);
-  console.log(`Postgres: connected pool configured | Stripe: ${stripe ? 'configured' : 'not configured'}`);
-  console.log(`Requests expire after ${expiryConfig.requestExpiryMinutes} min without a driver; silent jobs are released after ${expiryConfig.staleJobMinutes} min; sweep every ${expiryConfig.sweepSeconds} s`);
+  logger.info({ msg: `AID API listening on http://${host}:${port}` });
+  logger.info({ msg: `Postgres pool configured | Stripe: ${stripe ? 'configured' : 'not configured'}` });
+  logger.info({ msg: `Requests expire after ${expiryConfig.requestExpiryMinutes} min without a driver; silent jobs are released after ${expiryConfig.staleJobMinutes} min; sweep every ${expiryConfig.sweepSeconds} s` });
+  logger.info({
+    msg: 'security', corsOrigins: security.corsOrigin, trustProxy: security.trustProxy, hsts: security.hsts.enabled,
+    rateLimits: rateLimits.enabled ? 'on (in-memory, single instance)' : 'OFF', jsonBodyLimit: security.jsonBodyLimit, documentMaxBytes: security.documentMaxBytes,
+  });
 });
-const expirySweep = startExpirySweep({ repository, intervalMs: expiryConfig.sweepSeconds * 1000 });
+const expirySweep = startExpirySweep({
+  repository,
+  intervalMs: expiryConfig.sweepSeconds * 1000,
+  logger: { log: (line) => logger.info({ msg: line }), error: (...parts) => logger.error({ msg: parts.map(String).join(' ') }) },
+});
 void expirySweep.tick();
 
 async function shutdown(signal) {
-  console.log(`${signal} received; shutting down.`);
+  logger.info({ msg: `${signal} received; shutting down.` });
   expirySweep.stop();
   server.close(async () => {
     await pool.end();
     process.exit(0);
   });
 }
+process.on('unhandledRejection', (error) => logger.error({ msg: 'unhandled rejection', error: serializeError(error) }));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));

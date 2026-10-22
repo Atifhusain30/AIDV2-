@@ -277,6 +277,7 @@ test('validation and rate limit: empty or over-long messages are refused; 30 a m
   const limited = await send(app, 'customerToken', 'one more');
   assert.equal(limited.status, 429);
   assert.equal(limited.body.code, 'chat_rate_limited');
+  assert.equal(limited.headers['retry-after'], '60', 'the app is told when it can send again');
   assert.equal((await send(app, 'driverToken', 'driver has their own limit')).status, 201);
   assert.equal(messages.length, 4);
 });
@@ -392,4 +393,42 @@ test('participant message rows map to mine/theirs only — no sender id', async 
   const repository = new PostgresRepository(poolWith(async () => ({ rows: [row] })));
   const [message] = await repository.listJobMessages(JOB, 'customer-1', '6');
   assert.deepEqual(message, { id: 'm1', seq: '7', mine: false, senderRole: 'driver', body: 'Hi', createdAt: new Date(NOW).toISOString(), readAt: null });
+});
+
+// E3: the shared route limits must never trip during normal use. Both apps on one IP (e.g. a
+// household or carrier NAT) for a full hour with the chat open, at the apps' real intervals.
+test('an hour of normal polling by the customer and driver on one IP never hits a rate limit', { timeout: 120000 }, async () => {
+  let now = NOW;
+  const h = harness();
+  h.repository.updateDriverLocation = async (bookingId) => h.bookings.get(bookingId);
+  const { createApp: build } = require('../app');
+  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, email: user.email } : null; } };
+  const app = build({ auth, repository: h.repository, supportContact: { email: null, phone: null }, clock: () => now });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = (token, path, method = 'GET', body) => fetch(`${base}${path}`, {
+    method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined,
+  }).then(async (response) => { await response.arrayBuffer(); return response.status; });
+  const statuses = [];
+  try {
+    for (let second = 0; second < 3600; second += 1) {
+      const calls = [];
+      if (second % 4 === 0) calls.push(call('customerToken', '/api/bookings/active')); // BOOKING_POLL_MS
+      if (second % 5 === 0) calls.push(call('driverToken', '/api/bookings/active')); // DRIVER_JOB_POLL_MS
+      if (second % 5 === 0) calls.push(call('driverToken', `/api/bookings/${JOB}/driver-location`, 'PATCH', { location: DALLAS })); // jobLocationSharing min interval
+      if (second % 3 === 0) calls.push(call('customerToken', `/api/bookings/${JOB}/messages`)); // CHAT_POLL_MS
+      if (second % 3 === 0) calls.push(call('driverToken', `/api/bookings/${JOB}/messages`));
+      if (second % 30 === 0) calls.push(call('driverToken', `/api/drivers/requests?lat=${DALLAS.lat}&lng=${DALLAS.lng}`)); // request list
+      if (second % 60 === 0) calls.push(call('customerToken', `/api/bookings/${JOB}/messages/read`, 'POST', {}));
+      if (second % 120 === 0) calls.push(call('customerToken', `/api/bookings/${JOB}/messages`, 'POST', { body: 'Still coming?', clientId: `c-${second}` }));
+      statuses.push(...await Promise.all(calls));
+      now += 1000;
+    }
+  } finally {
+    server.close();
+  }
+  assert.ok(statuses.length > 4000, `${statuses.length} requests`);
+  assert.deepEqual(statuses.filter((status) => status === 429), [], 'nothing was rate limited');
+  assert.deepEqual(statuses.filter((status) => status >= 500), [], 'no server errors');
 });

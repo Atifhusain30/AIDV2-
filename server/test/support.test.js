@@ -152,6 +152,7 @@ test(`rate limit: ${REPORTS_PER_HOUR} reports per person per hour`, async () => 
   const blocked = await send(app, 'customerToken', { category: 'other', message: 'one more' });
   assert.equal(blocked.status, 429);
   assert.equal(blocked.body.code, 'report_rate_limited');
+  assert.ok(Number(blocked.headers['retry-after']) > 0, 'Retry-After tells the app when to try again');
   assert.match(blocked.body.error, /911/);
   assert.equal(reports.length, REPORTS_PER_HOUR);
   assert.equal((await send(app, 'driverToken', { category: 'other', message: 'separate person' })).status, 201, 'counted per person');

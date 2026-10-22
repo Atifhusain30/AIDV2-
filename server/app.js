@@ -1,5 +1,4 @@
 const express = require('express');
-const cors = require('cors');
 const multer = require('multer');
 const {
   REQUIRED_DOCUMENT_TYPES, EXPIRING_DOCUMENT_TYPES, DRIVER_DECISIONS, DRIVER_STATUS_FILTERS,
@@ -28,6 +27,10 @@ const {
   MESSAGE_MAX: CHAT_MESSAGE_MAX, MESSAGES_PER_MINUTE, READ_ONLY_HOURS, CHAT_CODES,
   chatState, sendRefusal, cleanMessage, parseCursor, otherParty, readOnlyUntil, blockGuidance,
 } = require('./chat');
+const { createLimiters, rateLimitsFromEnv, sendRateLimited } = require('./rateLimit');
+const {
+  securityHeaders, corsGuard, requestContext, notFound, errorHandler, silentLogger, DEFAULT_CORS_ORIGINS,
+} = require('./security');
 
 // E4 answer codes the apps act on.
 const ACTIVE_REQUEST_CODE = 'active_request_exists';
@@ -48,9 +51,11 @@ function validDocumentFile(file) {
   }
   return false;
 }
-const documentUpload = multer({
+// E2/E3: one file, at most documentMaxBytes (default 10 MB), only JPG/PNG/HEIC/PDF by declared type,
+// then checked again by magic bytes in validDocumentFile before anything is stored.
+const documentUploader = (maxBytes) => multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 4 },
+  limits: { fileSize: maxBytes, files: 1, fields: 4, fieldSize: 1024, parts: 6 },
   fileFilter: (_req, file, callback) => callback(null, DOCUMENT_MIME_TYPES.has(file.mimetype)),
 });
 
@@ -86,8 +91,12 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now() }) {
+function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = DEFAULT_CORS_ORIGINS, requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now(),
+  logger = silentLogger, rateLimits = rateLimitsFromEnv(), rateLimitStore, trustProxy = false, hsts = { enabled: false },
+  jsonBodyLimit = '100kb', documentMaxBytes = 10 * 1024 * 1024 }) {
   const app = express();
+  const limit = createLimiters({ limits: rateLimits, store: rateLimitStore, clock });
+  const documentUpload = documentUploader(documentMaxBytes);
   const requestExpiryMinutes = repository.requestExpiryMinutes || DEFAULT_REQUEST_EXPIRY_MINUTES;
   // E4: end stale work for this caller before answering (the interval sweep in index.js does the rest).
   const expireStaleFor = (auth) => {
@@ -104,18 +113,17 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     error: `This request expired — no driver accepted it within ${requestExpiryMinutes} minutes, so it's no longer available.`,
     code: REQUEST_EXPIRED_CODE,
   });
+  // E8: no framework banner; client IPs from X-Forwarded-For only when TRUST_PROXY says so.
   app.disable('x-powered-by');
-  const allowedOrigins = new Set((Array.isArray(corsOrigin) ? corsOrigin : String(corsOrigin).split(',')).map((origin) => origin.trim()).filter(Boolean));
-  app.use(cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-      return callback(null, false);
-    },
-    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Stripe-Signature'],
-  }));
+  app.set('trust proxy', trustProxy);
+  app.use(requestContext({ logger }));
+  app.use(securityHeaders({ hsts }));
+  app.use(corsGuard(corsOrigin));
+  app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+  // E3: per-IP ceiling on everything below (health checks above are never limited).
+  app.use(limit.global);
 
-  app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  app.post('/api/webhooks/stripe', express.raw({ type: 'application/json', limit: '512kb' }), async (req, res) => {
     if (!stripe || !stripeWebhookSecret) return res.status(503).json({ error: 'Stripe webhook is not configured' });
     try {
       const event = stripe.webhooks.constructEvent(req.body, req.get('stripe-signature'), stripeWebhookSecret);
@@ -128,8 +136,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     }
   });
 
-  app.use(express.json({ limit: '1mb' }));
-  app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+  app.use(express.json({ limit: jsonBodyLimit }));
   app.get('/api/services', (_req, res) => res.json(Object.values(SERVICE_CATALOG).map(publicService)));
 
   async function authenticate(req, res, next) {
@@ -172,7 +179,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   }
 
   app.get('/api/me', authenticate, (req, res) => res.json({ ...req.auth.profile, email: req.auth.identity.email || '' }));
-  app.patch('/api/me', authenticate, async (req, res, next) => {
+  app.patch('/api/me', authenticate, limit.accountChange, async (req, res, next) => {
     try {
       const current = req.auth.profile;
       const patch = {
@@ -183,7 +190,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       res.json(await repository.updateProfile(req.auth.identity.id, patch));
     } catch (error) { next(error); }
   });
-  app.delete('/api/me', authenticate, async (req, res, next) => {
+  app.delete('/api/me', authenticate, limit.accountChange, async (req, res, next) => {
     try {
       if (!accountAdmin) return res.status(503).json({ error: 'Account deletion is not configured' });
       await accountAdmin.deleteUser(req.auth.identity.id);
@@ -194,7 +201,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   app.get('/api/vehicles', authenticate, requireRole('customer'), async (req, res, next) => {
     try { res.json(await repository.listVehicles(req.auth.identity.id)); } catch (error) { next(error); }
   });
-  app.post('/api/vehicles', authenticate, requireRole('customer'), async (req, res, next) => {
+  app.post('/api/vehicles', authenticate, requireRole('customer'), limit.accountChange, async (req, res, next) => {
     try {
       if (!validVehicle(req.body)) return res.status(400).json({ error: 'Valid make, model, and year are required' });
       const vehicle = await repository.createVehicle(req.auth.identity.id, {
@@ -206,7 +213,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       res.status(201).json(vehicle);
     } catch (error) { next(error); }
   });
-  app.patch('/api/vehicles/:vehicleId', authenticate, requireRole('customer'), async (req, res, next) => {
+  app.patch('/api/vehicles/:vehicleId', authenticate, requireRole('customer'), limit.accountChange, async (req, res, next) => {
     try {
       if (!validVehicle(req.body)) return res.status(400).json({ error: 'Valid make, model, and year are required' });
       const vehicle = await repository.updateVehicle(req.auth.identity.id, req.params.vehicleId, {
@@ -218,7 +225,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       res.json(vehicle);
     } catch (error) { next(error); }
   });
-  app.delete('/api/vehicles/:vehicleId', authenticate, requireRole('customer'), async (req, res, next) => {
+  app.delete('/api/vehicles/:vehicleId', authenticate, requireRole('customer'), limit.accountChange, async (req, res, next) => {
     try {
       if (!await repository.deleteVehicle(req.auth.identity.id, req.params.vehicleId)) return res.status(404).json({ error: 'Vehicle not found' });
       res.status(204).end();
@@ -241,7 +248,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     }
   }
 
-  app.post('/api/quotes', authenticate, requireRole('customer'), (req, res, next) => {
+  app.post('/api/quotes', authenticate, requireRole('customer'), limit.quote, (req, res, next) => {
     try {
       const priced = priceRequest(req.body);
       if (priced.error) return res.status(priced.status).json({ error: priced.error });
@@ -249,7 +256,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  app.post('/api/bookings', authenticate, requireRole('customer'), async (req, res, next) => {
+  app.post('/api/bookings', authenticate, requireRole('customer'), limit.bookingCreate, async (req, res, next) => {
     try {
       const priced = priceRequest(req.body);
       if (priced.error) return res.status(priced.status).json({ error: priced.error });
@@ -343,7 +350,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       });
     } catch (error) { next(error); }
   });
-  app.post('/api/bookings/:bookingId/messages', authenticate, async (req, res, next) => {
+  app.post('/api/bookings/:bookingId/messages', authenticate, limit.chatSend, async (req, res, next) => {
     try {
       const cleaned = cleanMessage(req.body);
       if (!isParty(req.auth.profile.role)) return res.status(403).json({ error: 'Only the customer or the driver of a job can use its chat' });
@@ -353,7 +360,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       const chat = await chatFor(booking, req.auth);
       if (chat.state !== 'open') return chatClosed(res, chat.state);
       if (await repository.countRecentJobMessages(req.auth.identity.id, 60) >= chatMessagesPerMinute) {
-        return res.status(429).json({ error: "You're sending messages too quickly. Wait a moment and try again.", code: CHAT_CODES.rateLimited });
+        // Durable per-person rule (counted in the database); 60 s is the longest wait.
+        return sendRateLimited(res, 60, { error: "You're sending messages too quickly. Wait a moment and try again.", code: CHAT_CODES.rateLimited });
       }
       const saved = await repository.createJobMessage({
         bookingId: booking.id, senderId: req.auth.identity.id, senderRole: req.auth.profile.role, body: cleaned.body, clientId: cleaned.clientId,
@@ -382,7 +390,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   });
   // Block the other person on one of your jobs: closes the chat and keeps you apart in dispatch from
   // now on. Does not cancel the job — the answer says what to do instead while it's still going.
-  app.post('/api/bookings/:bookingId/block', authenticate, async (req, res, next) => {
+  app.post('/api/bookings/:bookingId/block', authenticate, limit.block, async (req, res, next) => {
     try {
       const booking = await participantBooking(req, res);
       if (!booking) return;
@@ -395,7 +403,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       });
     } catch (error) { next(error); }
   });
-  app.patch('/api/bookings/:bookingId/status', authenticate, async (req, res, next) => {
+  app.patch('/api/bookings/:bookingId/status', authenticate, limit.statusChange, async (req, res, next) => {
     try {
       if (req.auth.profile.role === 'driver' && req.auth.profile.verificationStatus !== 'verified') {
         return res.status(403).json({ error: 'Verified driver account required' });
@@ -435,7 +443,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   }));
   // A customer or driver reports a problem — general, or about one of their own jobs (any status:
   // during the job from "Report an issue", or afterwards from Help & Support).
-  app.post('/api/support/reports', authenticate, async (req, res, next) => {
+  app.post('/api/support/reports', authenticate, limit.reports, async (req, res, next) => {
     try {
       const role = req.auth.profile.role;
       const userId = req.auth.identity.id;
@@ -450,7 +458,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         bookingStatus = booking.status;
       }
       if (await repository.countRecentSupportReports(userId, 60) >= REPORTS_PER_HOUR) {
-        return res.status(429).json({ error: `You've sent ${REPORTS_PER_HOUR} reports in the last hour. Please wait a little before sending another. If anyone is in danger, call 911.`, code: 'report_rate_limited' });
+        // Durable per-person rule (counted in the database); an hour is the longest wait.
+        return sendRateLimited(res, 3600, { error: `You've sent ${REPORTS_PER_HOUR} reports in the last hour. Please wait a little before sending another. If anyone is in danger, call 911.`, code: 'report_rate_limited' });
       }
       const report = await repository.createSupportReport({ reporterId: userId, role, bookingId, bookingStatus, category, message });
       res.status(201).json(report);
@@ -465,7 +474,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
 
   // ---- B15: ratings both directions (rules in ratings.js) ----
   // The customer rates the driver and the driver rates the customer, once each, after completion.
-  app.post('/api/bookings/:bookingId/rating', authenticate, async (req, res, next) => {
+  app.post('/api/bookings/:bookingId/rating', authenticate, limit.ratings, async (req, res, next) => {
     try {
       const role = req.auth.profile.role;
       const userId = req.auth.identity.id;
@@ -510,7 +519,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   // The app sends its current position as ?lat=&lng= (stored as the driver's last position);
   // otherwise the last position from the past LOCATION_MAX_AGE_MINUTES is used. With no position,
   // the answer says so (status 'location_required') rather than listing requests from anywhere.
-  app.get('/api/drivers/requests', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
+  app.get('/api/drivers/requests', authenticate, limit.location, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
     try {
       const driverId = req.auth.identity.id;
       const sent = req.query.lat !== undefined || req.query.lng !== undefined;
@@ -538,7 +547,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       res.json({ isOnline: req.body.isOnline });
     } catch (error) { next(error); }
   });
-  app.post('/api/bookings/:bookingId/accept', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
+  app.post('/api/bookings/:bookingId/accept', authenticate, limit.accept, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
     try {
       // A job this driver went silent on, or a request past its window, ends first (E4).
       await repository.expireStaleBookings({ driverId: req.auth.identity.id });
@@ -579,7 +588,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       res.json(booking);
     } catch (error) { next(error); }
   });
-  app.patch('/api/bookings/:bookingId/driver-location', authenticate, requireVerifiedDriver, async (req, res, next) => {
+  app.patch('/api/bookings/:bookingId/driver-location', authenticate, limit.location, requireVerifiedDriver, async (req, res, next) => {
     try {
       const location = req.body.location;
       if (!validCoordinates(location)) return res.status(400).json({ error: 'Valid coordinates are required' });
@@ -590,7 +599,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   });
 
   // The vehicle customers should look for when the driver arrives, plus the equipment it carries.
-  app.patch('/api/drivers/me/vehicle', authenticate, requireRole('driver'), async (req, res, next) => {
+  app.patch('/api/drivers/me/vehicle', authenticate, requireRole('driver'), limit.accountChange, async (req, res, next) => {
     try {
       const result = cleanDriverVehicle(req.body);
       if (!result.ok) return res.status(400).json({ error: result.error, field: result.field });
@@ -609,7 +618,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       res.json(withUrls);
     } catch (error) { next(error); }
   });
-  app.post('/api/drivers/me/documents', authenticate, requireRole('driver'), documentUpload.single('file'), async (req, res, next) => {
+  app.post('/api/drivers/me/documents', authenticate, requireRole('driver'), limit.documentUpload, documentUpload.single('file'), async (req, res, next) => {
     try {
       if (!documentStorage) return res.status(503).json({ error: 'Document storage is not configured' });
       if (!DOCUMENT_TYPES.has(req.body.type)) return res.status(400).json({ error: 'Unsupported document type' });
@@ -638,7 +647,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  app.delete('/api/drivers/me/documents/:documentId', authenticate, requireRole('driver'), async (req, res, next) => {
+  app.delete('/api/drivers/me/documents/:documentId', authenticate, requireRole('driver'), limit.accountChange, async (req, res, next) => {
     try {
       if (!documentStorage) return res.status(503).json({ error: 'Document storage is not configured' });
       const document = await repository.getDriverDocument(req.auth.identity.id, req.params.documentId);
@@ -665,7 +674,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       });
     } catch (error) { next(error); }
   });
-  app.post('/api/drivers/me/verification/submit', authenticate, requireRole('driver'), async (req, res, next) => {
+  app.post('/api/drivers/me/verification/submit', authenticate, requireRole('driver'), limit.accountChange, async (req, res, next) => {
     try {
       const readiness = verificationReadiness(await repository.listDriverDocuments(req.auth.identity.id));
       if (!readiness.canSubmit) return res.status(409).json({ error: 'Upload every required, unexpired document before submitting', ...readiness });
@@ -814,11 +823,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  app.use((error, _req, res, _next) => {
-    if (error instanceof multer.MulterError) return res.status(400).json({ error: 'Document upload exceeds the allowed limits' });
-    console.error('[AID API]', error);
-    res.status(500).json({ error: 'Internal server error' });
-  });
+  app.use(notFound);
+  app.use(errorHandler({ logger, multer, documentMaxBytes }));
   return app;
 }
 
