@@ -982,3 +982,9 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
   .auth__footer { padding-top: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .role-option:active { transform: none; } }
+
+/* Rating sheet (B15) on the one sheet style. */
+.rating-sheet .rating-stars { margin-top: 18px; }
+.rating-done-icon { background: rgba(242, 196, 109, .12); color: var(--aid-warning); }
+.rating-done-icon svg { fill: var(--aid-warning); }
+.rating-comment { margin-top: 18px; }
