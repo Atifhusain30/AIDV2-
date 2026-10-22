@@ -5,7 +5,8 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowRight, Briefcase, Clock3, LifeBuoy, MapPinned, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Briefcase, Clock3, LifeBuoy, Link2Off as LinkIcon, MapPinned, ShieldCheck } from 'lucide-react'
+import Button from './components/ui/Button'
 import DriverSettingsScreen from './screens/driver/DriverSettingsScreen'
 import { useAppStore } from './store/useAppStore'
 import { useAuthStore } from './store/useAuthStore'
@@ -21,6 +22,7 @@ import { apiService } from './services/api'
 import { settleStaleActiveBooking } from './services/bookingService'
 import type { Booking, Driver } from './types'
 import { App as CapacitorApp } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 import { supabase } from './auth/supabase'
 import { installSessionWatch, signOut } from './auth/signOut'
 import { completeRecoveryFromUrl } from './auth/recovery'
@@ -73,54 +75,36 @@ function AppModeSelector({
   onSelectDriver: () => void
 }) {
   return (
-    <main className="mode-selector safe-top safe-bottom">
-      <div className="mode-selector__map" aria-hidden="true">
-        <span className="mode-selector__road mode-selector__road--a" />
-        <span className="mode-selector__road mode-selector__road--b" />
-        <span className="mode-selector__road mode-selector__road--c" />
-        <div className="mode-selector__beacon"><span /></div>
-      </div>
-
+    <main className="welcome safe-top safe-bottom">
       <motion.section
-        className="mode-selector__content"
-        initial={{ opacity: 0, y: 18 }}
+        className="welcome__inner"
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.48, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
-        <AidBrand label="ROADSIDE, REIMAGINED" />
+        <AidBrand />
 
-        <div className="mode-selector__hero">
-          <p className="eyebrow">Assistance without the uncertainty</p>
+        <div className="welcome__hero">
           <h1>Help, right when it matters.</h1>
-          <p>One trusted place to request help, follow every update, or earn by helping drivers get moving again.</p>
+          <p>Request roadside help and follow your driver live — or earn by helping drivers get moving again.</p>
+          <ul className="welcome__trust" aria-label="Service benefits">
+            <li><ShieldCheck size={16} aria-hidden="true" /> Verified drivers</li>
+            <li><Clock3 size={16} aria-hidden="true" /> Clear arrival times</li>
+            <li><MapPinned size={16} aria-hidden="true" /> Live progress</li>
+          </ul>
         </div>
 
-        <div className="mode-selector__trust" role="group" aria-label="Service benefits">
-          <span><Clock3 size={15} aria-hidden="true" /> Clear arrival times</span>
-          <span><ShieldCheck size={15} aria-hidden="true" /> Verified providers</span>
-          <span><MapPinned size={15} aria-hidden="true" /> Live progress</span>
-        </div>
-
-        <div className="mode-selector__roles">
-          <motion.button className="role-card role-card--customer" onClick={onSelectCustomer} whileTap={{ scale: 0.985 }}>
-            <div className="role-card__icon"><LifeBuoy size={25} /></div>
-            <div className="role-card__copy">
-              <span>FOR CUSTOMERS</span>
-              <strong>Get roadside help</strong>
-              <p>Request service and follow your provider live.</p>
-            </div>
-            <div className="role-card__arrow"><ArrowRight size={20} /></div>
-          </motion.button>
-
-          <motion.button className="role-card role-card--driver" onClick={onSelectDriver} whileTap={{ scale: 0.985 }}>
-            <div className="role-card__icon"><Briefcase size={25} /></div>
-            <div className="role-card__copy">
-              <span>FOR PROVIDERS</span>
-              <strong>Drive with AID</strong>
-              <p>Accept nearby work and manage every job.</p>
-            </div>
-            <div className="role-card__arrow"><ArrowRight size={20} /></div>
-          </motion.button>
+        <div className="welcome__roles">
+          <button type="button" className="role-option role-option--primary" onClick={onSelectCustomer}>
+            <span className="role-option__icon" aria-hidden="true"><LifeBuoy size={22} /></span>
+            <span className="role-option__text"><strong>Get roadside help</strong><small>Request service and track it live</small></span>
+            <ArrowRight size={20} aria-hidden="true" />
+          </button>
+          <button type="button" className="role-option" onClick={onSelectDriver}>
+            <span className="role-option__icon" aria-hidden="true"><Briefcase size={22} /></span>
+            <span className="role-option__text"><strong>Drive with AID</strong><small>Take nearby jobs on your schedule</small></span>
+            <ArrowRight size={20} aria-hidden="true" />
+          </button>
         </div>
       </motion.section>
     </main>
@@ -388,10 +372,11 @@ function App() {
         }
         listener = registered
       })
-      .catch(() => setRecoveryError('Unable to initialize password recovery links.'))
+      // Deep links only exist in the phone app; in a web preview these calls can fail with no link at all.
+      .catch(() => { if (Capacitor.isNativePlatform()) setRecoveryError('Unable to initialize password recovery links.') })
     void CapacitorApp.getLaunchUrl()
       .then((launch) => { if (launch?.url) void handleUrl(launch.url) })
-      .catch(() => setRecoveryError('Unable to read the password recovery link.'))
+      .catch(() => { if (Capacitor.isNativePlatform()) setRecoveryError('Unable to read the password recovery link.') })
     return () => {
       cancelled = true
       void listener?.remove()
@@ -454,11 +439,16 @@ function App() {
 
   if (recoveryError) {
     return (
-      <main className="auth-portal safe-top safe-bottom">
-        <section className="auth-portal__content">
-          <AidBrand compact label="ACCOUNT RECOVERY" />
-          <div className="auth-portal__intro"><h1>That reset link did not work.</h1><p role="alert">{recoveryError}</p></div>
-          <button type="button" className="aid-primary-button" onClick={() => { setRecoveryError(null); setAppMode('customer') }}>Request another link</button>
+      <main className="auth safe-top safe-bottom">
+        <section className="auth__inner">
+          <header className="auth__top"><AidBrand compact /></header>
+          <div className="auth__done">
+            <span className="auth__done-icon auth__done-icon--error" aria-hidden="true"><LinkIcon size={24} /></span>
+            <h1>That reset link didn't work</h1>
+            <p role="alert">{recoveryError}</p>
+            <p className="auth__muted">Links expire after a while and work once. Ask for a new one from sign in.</p>
+            <Button block size="lg" onClick={() => { setRecoveryError(null); setAppMode('customer') }}>Request another link</Button>
+          </div>
         </section>
       </main>
     )

@@ -1,6 +1,9 @@
-import { useState, type FormEvent } from 'react'
-import { Eye, EyeOff, Loader2, LockKeyhole } from 'lucide-react'
+/** Set a new password after opening the reset link (same look as sign-in). */
+
+import { useId, useState, type FormEvent } from 'react'
+import { AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react'
 import AidBrand from '../brand/AidBrand'
+import Button from '../ui/Button'
 import { managedAuth } from '../../auth/supabase'
 
 export default function PasswordRecoveryScreen({ onComplete }: { onComplete: () => void }) {
@@ -10,6 +13,7 @@ export default function PasswordRecoveryScreen({ onComplete }: { onComplete: () 
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const ids = { password: useId(), confirm: useId(), error: useId() }
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -30,22 +34,42 @@ export default function PasswordRecoveryScreen({ onComplete }: { onComplete: () 
   }
 
   return (
-    <main className="auth-portal safe-top safe-bottom">
-      <section className="auth-portal__content">
-        <header className="auth-portal__header"><AidBrand compact label="ACCOUNT RECOVERY" /></header>
-        <div className="auth-portal__intro"><p className="eyebrow">Secure your account</p><h1>Choose a new password.</h1><p>Use at least eight characters, then sign in with your new password.</p></div>
+    <main className="auth safe-top safe-bottom">
+      <section className="auth__inner">
+        <header className="auth__top"><AidBrand compact /></header>
         {message ? (
-          <div className="auth-form">
-            <p role="status" className="auth-form__error">{message}</p>
-            <button type="button" className="aid-primary-button" onClick={onComplete}>Return to sign in</button>
+          <div className="auth__done">
+            <span className="auth__done-icon auth__done-icon--ok" aria-hidden="true"><CheckCircle2 size={26} /></span>
+            <h1>Password updated</h1>
+            <p role="status">{message}</p>
+            <Button block size="lg" onClick={onComplete}>Return to sign in</Button>
           </div>
         ) : (
-          <form className="auth-form" onSubmit={handleSubmit}>
-            <label><span>New password</span><div className="auth-field"><LockKeyhole size={18} /><input type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" /><button type="button" className="auth-field__reveal" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
-            <label><span>Confirm password</span><div className="auth-field"><LockKeyhole size={18} /><input type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Repeat your password" /></div></label>
-            {error && <p role="alert" className="auth-form__error">{error}</p>}
-            <button type="submit" className="aid-primary-button" disabled={isLoading}>{isLoading ? <Loader2 size={20} className="animate-spin" /> : 'Update password'}</button>
-          </form>
+          <>
+            <div className="auth__intro">
+              <h1>Choose a new password</h1>
+              <p>Use at least 8 characters. You'll sign in with it next time.</p>
+            </div>
+            <form className="auth__form" onSubmit={handleSubmit}>
+              <div className="ui-field">
+                <label htmlFor={ids.password}>New password</label>
+                <div className="auth__password">
+                  <input id={ids.password} className="ui-input auth__input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={8}
+                    value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" aria-describedby={error ? ids.error : undefined} />
+                  <button type="button" className="auth__reveal" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}>
+                    {showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+                  </button>
+                </div>
+              </div>
+              <div className="ui-field">
+                <label htmlFor={ids.confirm}>Confirm password</label>
+                <input id={ids.confirm} className="ui-input auth__input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={8}
+                  value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Repeat your password" aria-describedby={error ? ids.error : undefined} />
+              </div>
+              {error && <p id={ids.error} role="alert" className="ui-alert ui-alert--danger auth__message"><AlertCircle size={16} aria-hidden="true" /> <span>{error}</span></p>}
+              <Button type="submit" block size="lg" loading={isLoading} loadingLabel="Updating…">Update password</Button>
+            </form>
+          </>
         )}
       </section>
     </main>

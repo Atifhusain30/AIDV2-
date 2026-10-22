@@ -1,19 +1,14 @@
-import { useState } from 'react'
+/**
+ * Sign in / create account for customers and drivers (managed auth). The first impression:
+ * black canvas, the AID mark, one clear headline, tall labelled fields, one violet action. After
+ * sign-up that needs email confirmation, a "Check your email" step replaces the form.
+ */
+
+import { useId, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import {
-  ArrowLeftRight,
-  ArrowRight,
-  Briefcase,
-  Eye,
-  EyeOff,
-  LifeBuoy,
-  Loader2,
-  LockKeyhole,
-  Mail,
-  Phone,
-  UserRound,
-} from 'lucide-react'
+import { AlertCircle, ArrowLeftRight, CheckCircle2, Eye, EyeOff, MailCheck } from 'lucide-react'
 import AidBrand from '../brand/AidBrand'
+import Button from '../ui/Button'
 import { useAuthStore } from '../../store/useAuthStore'
 
 type PortalRole = 'customer' | 'driver'
@@ -22,6 +17,21 @@ interface AuthPortalProps {
   role: PortalRole
   onLoginSuccess: () => void
   onSwitchRole: () => void
+}
+
+const COPY = {
+  customer: {
+    signIn: { title: 'Welcome back', text: 'Sign in to request help and follow your driver live.' },
+    signUp: { title: 'Help is one tap away.', text: 'Create your account once. Next time, requesting help takes two taps.' },
+    switchLabel: 'Switch to driver mode',
+    email: 'you@email.com',
+  },
+  driver: {
+    signIn: { title: 'Ready when you are.', text: 'Sign in to go online, take nearby jobs and manage every job.' },
+    signUp: { title: 'Earn on your schedule.', text: 'Create your driver account, then upload your documents to get verified.' },
+    switchLabel: 'I need roadside help',
+    email: 'driver@email.com',
+  },
 }
 
 export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthPortalProps) {
@@ -33,21 +43,15 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
   const [lastName, setLastName] = useState('')
   const [phone, setPhone] = useState('')
   const [recoveryMessage, setRecoveryMessage] = useState('')
+  const ids = { first: useId(), last: useId(), phone: useId(), email: useId(), password: useId(), message: useId() }
 
-  const {
-    customerLogin,
-    customerRegister,
-    driverLogin,
-    driverRegister,
-    requestPasswordReset,
-
-    isLoading,
-    error,
-    notice,
-    clearError,
-  } = useAuthStore()
+  const { customerLogin, customerRegister, driverLogin, driverRegister, requestPasswordReset, isLoading, error, notice, clearError } = useAuthStore()
 
   const isDriver = role === 'driver'
+  const copy = COPY[role]
+  const heading = isLogin ? copy.signIn : copy.signUp
+  // Sign-up that needs the email confirmed first: the server answered with a notice, not a session.
+  const checkEmail = !isLogin && Boolean(notice) && !error
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -82,124 +86,113 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
     await requestPasswordReset(normalizedEmail)
   }
 
-  return (
-    <main className="auth-portal safe-top safe-bottom">
-      <div className="auth-portal__ambient" aria-hidden="true">
-        <div className="auth-route auth-route--one" />
-        <div className="auth-route auth-route--two" />
-        <div className="auth-beacon"><span /></div>
-      </div>
+  const problem = error || recoveryMessage
+  const describedBy = problem ? ids.message : undefined
 
+  return (
+    <main className="auth safe-top safe-bottom">
       <motion.section
-        className="auth-portal__content"
-        initial={{ opacity: 0, y: 16 }}
+        className="auth__inner"
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
       >
-        <header className="auth-portal__header">
-          <AidBrand compact label={isDriver ? 'FOR DRIVERS' : 'ROADSIDE'} />
-          <div className={`auth-role-chip ${isDriver ? 'auth-role-chip--driver' : ''}`}>
-            {isDriver ? <Briefcase size={14} /> : <LifeBuoy size={14} />}
-            {isDriver ? 'Driver mode' : 'Customer mode'}
-          </div>
+        <header className="auth__top">
+          <AidBrand compact />
+          <span className="ui-chip">{isDriver ? 'Driver' : 'Customer'}</span>
         </header>
 
-        <div className="auth-portal__intro">
-          <p className="eyebrow">{isLogin ? 'Good to see you' : 'Create your AID account'}</p>
-          <h1>{isDriver ? (isLogin ? 'Ready when you are.' : 'Earn on your schedule.') : (isLogin ? 'Welcome back' : 'Help is now one tap away.')}</h1>
-          <p>
-            {isDriver
-              ? 'Manage requests, navigate to customers, and track every job from one calm workspace.'
-              : 'Get back on the road with verified help, clear arrival times, and live service updates.'}
-          </p>
-        </div>
+        {checkEmail ? (
+          <div className="auth__done" role="status">
+            <span className="auth__done-icon" aria-hidden="true"><MailCheck size={26} /></span>
+            <h1>Check your email</h1>
+            <p>{notice}</p>
+            <p className="auth__muted">We sent it to <strong>{email.trim()}</strong>. Open the link on this phone, then sign in.</p>
+            <Button block size="lg" onClick={() => { clearError(); setIsLogin(true) }}>Back to sign in</Button>
+          </div>
+        ) : (
+          <>
+            <div className="auth__intro">
+              <h1>{heading.title}</h1>
+              <p>{heading.text}</p>
+            </div>
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <AnimatePresence initial={false}>
-            {!isLogin && (
-              <motion.div
-                className="auth-form__registration"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-              >
-                <div className="auth-form__split">
-                  <label>
-                    <span>First name</span>
-                    <div className="auth-field">
-                      <UserRound size={18} />
-                      <input value={firstName} onChange={(event) => setFirstName(event.target.value)} required={!isLogin} autoComplete="given-name" placeholder="Alex" />
+            <form className="auth__form" onSubmit={handleSubmit}>
+              <AnimatePresence initial={false}>
+                {!isLogin && (
+                  <motion.div
+                    className="auth__register"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <div className="auth__split">
+                      <div className="ui-field">
+                        <label htmlFor={ids.first}>First name</label>
+                        <input id={ids.first} className="ui-input auth__input" value={firstName} onChange={(event) => setFirstName(event.target.value)} required={!isLogin} autoComplete="given-name" />
+                      </div>
+                      <div className="ui-field">
+                        <label htmlFor={ids.last}>Last name</label>
+                        <input id={ids.last} className="ui-input auth__input" value={lastName} onChange={(event) => setLastName(event.target.value)} required={!isLogin} autoComplete="family-name" />
+                      </div>
                     </div>
-                  </label>
-                  <label>
-                    <span>Last name</span>
-                    <div className="auth-field">
-                      <UserRound size={18} />
-                      <input value={lastName} onChange={(event) => setLastName(event.target.value)} required={!isLogin} autoComplete="family-name" placeholder="Morgan" />
+                    <div className="ui-field">
+                      <label htmlFor={ids.phone}>Phone</label>
+                      <input id={ids.phone} className="ui-input auth__input" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} required={!isLogin} autoComplete="tel" placeholder="(555) 000-0000" />
                     </div>
-                  </label>
-                </div>
-                <label>
-                  <span>Phone</span>
-                  <div className="auth-field">
-                    <Phone size={18} />
-                    <input type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} required={!isLogin} autoComplete="tel" placeholder="(555) 000-0000" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="ui-field">
+                <label htmlFor={ids.email}>Email</label>
+                <input id={ids.email} className="ui-input auth__input" type="email" inputMode="email" autoCapitalize="none" spellCheck={false}
+                  aria-invalid={error ? true : undefined} aria-describedby={describedBy}
+                  value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" placeholder={copy.email} />
+              </div>
+
+              <div className="ui-field">
+                {isLogin ? (
+                  <div className="auth__label-row">
+                    <label htmlFor={ids.password}>Password</label>
+                    <button type="button" className="auth__link" onClick={() => void handlePasswordRecovery()}>Forgot password?</button>
                   </div>
-                </label>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                ) : <label htmlFor={ids.password}>Password</label>}
+                <div className="auth__password">
+                  <input id={ids.password} className="ui-input auth__input" type={showPassword ? 'text' : 'password'}
+                    aria-invalid={error ? true : undefined} aria-describedby={describedBy}
+                    value={password} onChange={(event) => setPassword(event.target.value)} required
+                    autoComplete={isLogin ? 'current-password' : 'new-password'} placeholder={isLogin ? '' : 'At least 8 characters'} />
+                  <button type="button" className="auth__reveal" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}>
+                    {showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+                  </button>
+                </div>
+              </div>
 
-          <label>
-            <span>Email</span>
-            <div className="auth-field">
-              <Mail size={18} aria-hidden="true" />
-              <input type="email" aria-invalid={error ? true : undefined} aria-describedby={error ? 'auth-form-message' : undefined} value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" placeholder={isDriver ? 'driver@email.com' : 'you@email.com'} />
-            </div>
-          </label>
+              {problem && (
+                <p id={ids.message} className="ui-alert ui-alert--danger auth__message" role="alert"><AlertCircle size={16} aria-hidden="true" /> <span>{problem}</span></p>
+              )}
+              {!problem && notice && (
+                <p id={ids.message} className="ui-alert auth__message auth__message--ok" role="status"><CheckCircle2 size={16} aria-hidden="true" /> <span>{notice}</span></p>
+              )}
 
-          <label>
-            <span>Password</span>
-            <div className="auth-field">
-              <LockKeyhole size={18} aria-hidden="true" />
-              <input type={showPassword ? 'text' : 'password'} aria-invalid={error ? true : undefined} aria-describedby={error ? 'auth-form-message' : undefined} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete={isLogin ? 'current-password' : 'new-password'} placeholder="••••••••" />
-              <button type="button" className="auth-field__reveal" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
-                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-              </button>
-            </div>
-          </label>
+              <Button type="submit" block size="lg" loading={isLoading} loadingLabel={isLogin ? 'Signing in…' : 'Creating account…'}>
+                {isLogin ? 'Sign in' : 'Create account'}
+              </Button>
+            </form>
+          </>
+        )}
 
-          {isLogin && (
-            <button
-              type="button"
-              className="auth-form__forgot"
-              onClick={() => void handlePasswordRecovery()}
-            >
-              Forgot password?
-            </button>
+        <footer className="auth__footer">
+          {!checkEmail && (
+            <p>{isLogin ? 'New to AID?' : 'Already have an account?'} <button type="button" className="auth__link" onClick={toggleMode}>{isLogin ? 'Create account' : 'Sign in'}</button></p>
           )}
-
-          <AnimatePresence>
-            {(error || notice || recoveryMessage) && (
-              <motion.p id="auth-form-message" className="auth-form__error" role={error || recoveryMessage ? 'alert' : 'status'} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                {error || notice || recoveryMessage}
-              </motion.p>
-            )}
-          </AnimatePresence>
-
-          <motion.button className="aid-primary-button" type="submit" disabled={isLoading} whileTap={{ scale: 0.985 }}>
-            {isLoading ? <><Loader2 size={20} className="animate-spin" aria-hidden="true" /><span className="sr-only">{isLogin ? 'Signing in…' : 'Creating account…'}</span></> : <>{isLogin ? 'Sign in' : 'Create account'}<ArrowRight size={20} aria-hidden="true" /></>}
-          </motion.button>
-        </form>
-
-        <div className="auth-portal__actions">
-          <p>{isLogin ? 'New to AID?' : 'Already have an account?'} <button type="button" onClick={toggleMode}>{isLogin ? 'Create account' : 'Sign in'}</button></p>
-          <button type="button" className="role-switch" onClick={onSwitchRole}>
-            <ArrowLeftRight size={17} aria-hidden="true" />
-            {isDriver ? 'I need roadside help' : 'Switch to driver mode'}
+          <button type="button" className="auth__switch" onClick={onSwitchRole}>
+            <ArrowLeftRight size={16} aria-hidden="true" />
+            {copy.switchLabel}
           </button>
-
-        </div>
+        </footer>
       </motion.section>
     </main>
   )
