@@ -149,6 +149,56 @@ describe('request sheet', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('F1: uses the one bottom-sheet style with the request button pinned in its footer', async () => {
+    const sheet = open('flat_tire')
+    expect(sheet.className).toContain('ui-sheet')
+    const request = await within(sheet).findByRole('button', { name: /request · \$79/i })
+    expect(request.closest('.ui-sheet__footer')).toBeTruthy()
+    // Sentence-case labels, no shouty micro-labels.
+    expect(within(sheet).getByText('Help at')).toBeTruthy()
+    expect(within(sheet).queryByText('HELP AT')).toBeNull()
+  })
+
+  it('F1: with more than one saved vehicle, the vehicle is picked right in the sheet', async () => {
+    const sheet = open('flat_tire', {
+      vehicles: [
+        { id: 'veh-1', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123' },
+        { id: 'veh-2', make: 'Toyota', model: 'Camry', year: 2018, color: 'Grey', plate: 'XYZ789' },
+      ] as never,
+    })
+    const group = await within(sheet).findByRole('radiogroup', { name: 'Vehicle' })
+    expect((within(group).getByRole('radio', { name: /2020 Honda Civic/ }) as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(within(group).getByRole('radio', { name: /2018 Toyota Camry/ }))
+    expect(useAppStore.getState().activeVehicleId).toBe('veh-2')
+  })
+
+  it('F1: from Home it takes two taps — the problem, then Request — with location and vehicle already filled in', async () => {
+    const { default: HomeScreen } = await import('../../screens/HomeScreen')
+    useAppStore.setState({
+      activeModal: null, currentScreen: 'home', activeBooking: null, bookingHistory: [],
+      serviceFormData: { selectedService: null, problemDescription: '', vehicleType: null, dropoff: null },
+      userLocationLabel: '500 Elm St, Denton, TX', userCoords: HERE,
+      vehicles: [{ id: 'veh-1', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123' }] as never, activeVehicleId: 'veh-1',
+    })
+    render(<HomeScreen />)
+    fireEvent.click(screen.getByRole('button', { name: /flat tire/i })) // tap 1
+    const sheet = await screen.findByRole('dialog', { name: 'Flat tire' })
+    fireEvent.click(await within(sheet).findByRole('button', { name: /request · \$79/i })) // tap 2
+    await waitFor(() => expect(bookingService.requestAndStartBooking).toHaveBeenCalledWith(expect.objectContaining({
+      service: expect.objectContaining({ id: 'flat_tire' }), locationLabel: '500 Elm St, Denton, TX',
+    })))
+  })
+
+  it('F5: shows a loading placeholder (no prices) while the catalog loads', async () => {
+    let resolve: (value: unknown) => void = () => undefined
+    vi.mocked(apiService.listServices).mockImplementationOnce(() => new Promise((done) => { resolve = done }) as never)
+    const sheet = open(null)
+    expect(within(sheet).getByRole('status', { name: /loading services/i })).toBeTruthy()
+    expect(within(sheet).queryByText(/\$/)).toBeNull()
+    resolve({ success: true, data: CATALOG })
+    expect(await within(sheet).findByRole('list', { name: /services/i })).toBeTruthy()
+  })
+
   it('does not allow requesting without real prices', async () => {
     vi.mocked(apiService.listServices).mockResolvedValueOnce({ success: false, error: 'Unable to reach AID.' })
     const sheet = open('battery_jump')

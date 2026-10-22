@@ -74,7 +74,7 @@ export default function MapPinPicker({ lat, lng, onChange }: MapPinPickerProps) 
   const center: LatLngExpression = [lat, lng]
 
   return (
-    <div className="rounded-xl overflow-hidden border border-gray-700">
+    <div className="pin-map">
       <MapContainer
         center={center}
         zoom={16}
@@ -91,7 +91,7 @@ export default function MapPinPicker({ lat, lng, onChange }: MapPinPickerProps) 
       </MapContainer>
       
       {/* Attribution overlay (styled) */}
-      <div className="px-2 py-1 bg-gray-800/80 text-xs text-gray-400 text-right">
+      <div className="pin-map__credit">
         © OpenStreetMap contributors
       </div>
     </div>

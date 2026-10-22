@@ -1,12 +1,12 @@
 /**
- * One request sheet for every on-demand roadside service.
- * Location comes from the customer's confirmed GPS/address, prices come from the
- * server catalog (the price shown is the price charged), and towing requires a
- * drop-off chosen from real address search results.
+ * One request sheet for every on-demand roadside service (F1: Home → problem → Request).
+ * Location comes from the customer's confirmed GPS/address, the vehicle from their garage (chosen
+ * here when there's more than one), prices come from the server catalog (the price shown is the
+ * price charged), and towing requires a drop-off chosen from real address search results.
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { AlertCircle, Battery, Car, ChevronRight, CircleDot, Droplets, Fuel, KeyRound, Loader2, MapPin, Navigation, Search, Truck, X, Zap } from 'lucide-react'
+import { AlertCircle, Battery, Car, Check, CircleDot, Droplets, Fuel, KeyRound, Loader2, MapPin, Navigation, Search, Truck, Zap } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { apiService, type PriceQuote, type ServiceOption } from '../../services/api'
 import * as bookingService from '../../services/bookingService'
@@ -14,7 +14,10 @@ import { searchAddressSuggestions } from '../../services/locationService'
 import type { ServiceType } from '../../types'
 import { formatPrice } from '../../lib/money'
 import { isJobOver } from '../../lib/jobLifecycle'
-import Dialog from '../ui/Dialog'
+import BottomSheet from '../ui/BottomSheet'
+import Button from '../ui/Button'
+import { InfoRow, ListRow } from '../ui/ListRow'
+import { SkeletonRows } from '../ui/Skeleton'
 
 const ICONS: Partial<Record<ServiceType, typeof Battery>> = {
   battery_jump: Battery, flat_tire: CircleDot, towing: Truck, lockout: KeyRound,
@@ -59,11 +62,8 @@ function DropoffSearch({ value, onChange }: { value: Place | null; onChange: (pl
 
   if (value) {
     return (
-      <div className="request-row">
-        <span className="request-row__icon"><MapPin size={18} aria-hidden="true" /></span>
-        <span className="request-row__text"><small>TOW TO</small><strong>{value.address}</strong></span>
-        <button type="button" className="request-row__action" onClick={() => { onChange(null); setQuery('') }}>Change</button>
-      </div>
+      <InfoRow icon={<MapPin size={18} />} title={value.address} subtitle="Tow to"
+        trailing={<button type="button" className="request-row__action" onClick={() => { onChange(null); setQuery('') }}>Change</button>} />
     )
   }
 
@@ -86,7 +86,7 @@ function DropoffSearch({ value, onChange }: { value: Place | null; onChange: (pl
         />
         {searching && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
       </div>
-      {error && <p className="request-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
+      {error && <p className="ui-alert ui-alert--danger request-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
       {results.length > 0 && (
         <ul id={listId} role="listbox" className="request-search__results">
           {results.map((place) => (
@@ -106,7 +106,7 @@ export default function RequestSheet() {
   const {
     activeModal, setActiveModal, serviceFormData, setServiceFormData, resetServiceFormData,
     userLocationLabel, userCoords, setPendingReturnModal, setActiveModalPreserveStep,
-    vehicles, activeVehicleId, setCurrentScreen, activeBooking, setActiveRequestRedirect,
+    vehicles, activeVehicleId, setActiveVehicle, setCurrentScreen, activeBooking, setActiveRequestRedirect,
   } = useAppStore()
   const isOpen = activeModal === 'services'
   // One active request at a time (E4): opening the sheet with one in progress goes to that request.
@@ -221,89 +221,99 @@ export default function RequestSheet() {
   }
 
   const ServiceIcon = (service && ICONS[service.id]) || Car
+  const title = service?.name ?? (serviceFormData.selectedService && TITLES[serviceFormData.selectedService]) ?? 'What happened?'
+  const subtitle = serviceFormData.selectedService ? undefined : 'Choose the closest match. The price is set before you request.'
+
+  const footer = catalog && service ? (
+    <>
+      {hasLocation ? (
+        <Button size="lg" block disabled={submitting || needsDropoff || price === null} loading={submitting} loadingLabel="Requesting…" onClick={() => void submit()}>
+          {price === null ? `Request · from ${formatPrice(service.basePrice)}` : `Request · ${formatPrice(price)}`}
+        </Button>
+      ) : (
+        <Button size="lg" block icon={<Navigation size={18} aria-hidden="true" />} onClick={chooseLocation}>Set your location</Button>
+      )}
+      <p>
+        {distancePriced
+          ? quote?.distanceMiles != null ? `${quote.distanceMiles} mi tow · ${rateText}` : `Choose where the vehicle should be towed. ${rateText}`
+          : `${formatPrice(service.basePrice)} flat price. You won't be charged until the job is done.`}
+      </p>
+    </>
+  ) : undefined
 
   return (
-    <Dialog labelledBy={titleId} className="account-sheet request-sheet" dismissible={!submitting} onClose={close}>
-        <div className="account-sheet__header">
-          <div>
-            <small>{serviceFormData.selectedService ? 'REQUEST HELP' : 'WHAT HAPPENED?'}</small>
-            <h2 id={titleId} tabIndex={-1}>{service?.name ?? (serviceFormData.selectedService && TITLES[serviceFormData.selectedService]) ?? 'Choose a service'}</h2>
-          </div>
-          <button type="button" aria-label="Close" disabled={submitting} onClick={close}><X size={20} aria-hidden="true" /></button>
+    <BottomSheet titleId={titleId} title={title} subtitle={subtitle} className="request-sheet" dismissible={!submitting} onClose={close} footer={footer}>
+      {catalogError && (
+        <div className="ui-alert ui-alert--danger request-error" role="alert">
+          <AlertCircle size={16} aria-hidden="true" /> <span>{catalogError}</span>
+          <button type="button" onClick={() => void loadCatalog()}>Try again</button>
         </div>
+      )}
+      {!catalog && !catalogError && <SkeletonRows count={serviceFormData.selectedService ? 3 : 5} label="Loading services and prices" />}
 
-        {catalogError && (
-          <div className="request-error" role="alert">
-            <AlertCircle size={16} aria-hidden="true" /> <span>{catalogError}</span>
-            <button type="button" onClick={() => void loadCatalog()}>Try again</button>
-          </div>
-        )}
-        {!catalog && !catalogError && <div className="request-loading" role="status"><Loader2 size={20} className="animate-spin" aria-hidden="true" /> Loading prices…</div>}
-
-        {catalog && !service && (
-          <ul className="request-picker" aria-label="Services">
+      {catalog && !service && (
+        options.length === 0 ? (
+          <p className="ui-alert">No services are available right now. Please try again later.</p>
+        ) : (
+          <ul className="ui-list request-picker" aria-label="Services">
             {options.map((option) => {
               const Icon = ICONS[option.id] || Car
               return (
                 <li key={option.id}>
-                  <button type="button" onClick={() => setServiceFormData({ selectedService: option.id })}>
-                    <span className="request-picker__icon"><Icon size={20} aria-hidden="true" /></span>
-                    <span className="request-picker__text"><strong>{option.name}</strong><small>{option.description}</small></span>
-                    <span className="request-picker__price">{option.requiresDropoff ? 'from ' : ''}{formatPrice(option.basePrice)}</span>
-                    <ChevronRight size={17} aria-hidden="true" />
-                  </button>
+                  <ListRow icon={<Icon size={20} />} title={option.name} subtitle={option.description}
+                    trailing={<span className="request-picker__price">{option.requiresDropoff ? 'from ' : ''}{formatPrice(option.basePrice)}</span>}
+                    onClick={() => setServiceFormData({ selectedService: option.id })} />
                 </li>
               )
             })}
           </ul>
-        )}
+        )
+      )}
 
-        {catalog && service && (
-          <>
-            <div className="request-summary">
-              <span className="request-summary__icon"><ServiceIcon size={22} aria-hidden="true" /></span>
-              <span className="request-summary__text"><strong>{service.description}</strong><small>Driver arrival time is shown once a driver accepts</small></span>
-              <button type="button" className="request-row__action" onClick={() => setServiceFormData({ selectedService: null })}>Change</button>
-            </div>
+      {catalog && service && (
+        <>
+          <div className="ui-list request-summary">
+            <InfoRow icon={<ServiceIcon size={20} />} title={service.description || service.name} subtitle="Arrival time shows once a driver accepts"
+              trailing={<button type="button" className="request-row__action" onClick={() => setServiceFormData({ selectedService: null })}>Change</button>} />
+            <ListRow icon={<Navigation size={18} />} className={hasLocation ? '' : 'is-missing'}
+              title={userLocationLabel || 'Add where you are'} subtitle={service.requiresDropoff ? 'Pick up at' : 'Help at'}
+              ariaLabel={`${service.requiresDropoff ? 'Pick up at' : 'Help at'}: ${userLocationLabel || 'add where you are'}. Change location`} onClick={chooseLocation} />
+            {vehicles.length <= 1 && (
+              <InfoRow icon={<Car size={18} />} title={vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : 'No vehicle saved'}
+                subtitle={vehicle ? 'Vehicle' : 'Optional — add one in Account to skip this next time'} />
+            )}
+          </div>
 
-            <button type="button" className={`request-row${hasLocation ? '' : ' is-missing'}`} onClick={chooseLocation}>
-              <span className="request-row__icon"><Navigation size={18} aria-hidden="true" /></span>
-              <span className="request-row__text"><small>{service.requiresDropoff ? 'PICK UP AT' : 'HELP AT'}</small><strong>{userLocationLabel || 'Add where you are'}</strong></span>
-              <ChevronRight size={17} aria-hidden="true" />
-            </button>
+          {service.requiresDropoff && <DropoffSearch value={dropoff} onChange={(place) => setServiceFormData({ dropoff: place })} />}
 
-            {service.requiresDropoff && <DropoffSearch value={dropoff} onChange={(place) => setServiceFormData({ dropoff: place })} />}
+          {vehicles.length > 1 && (
+            <fieldset className="request-vehicles">
+              <legend id={`${titleId}-vehicle`}>Vehicle</legend>
+              <div role="radiogroup" aria-labelledby={`${titleId}-vehicle`}>
+                {vehicles.map((item) => {
+                  const checked = item.id === vehicle?.id
+                  return (
+                    <label key={item.id} className={`job-choice${checked ? ' is-selected' : ''}`}>
+                      <input type="radio" name="request-vehicle" value={item.id} checked={checked} onChange={() => setActiveVehicle(item.id)} />
+                      <span>{item.year} {item.make} {item.model}<small> · {item.plate}</small></span>
+                      {checked && <Check size={16} aria-hidden="true" />}
+                    </label>
+                  )
+                })}
+              </div>
+            </fieldset>
+          )}
 
-            <div className="request-row request-row--static">
-              <span className="request-row__icon"><Car size={18} aria-hidden="true" /></span>
-              <span className="request-row__text"><small>VEHICLE</small><strong>{vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : 'No vehicle saved'}</strong></span>
-            </div>
+          <label className="request-notes" htmlFor={notesId}>
+            <span>Anything the driver should know? (optional)</span>
+            <textarea id={notesId} rows={2} maxLength={1000} placeholder="e.g. Parked on the shoulder, hazard lights on" value={serviceFormData.problemDescription}
+              onChange={(event) => setServiceFormData({ problemDescription: event.target.value })} />
+          </label>
 
-            <label className="request-notes" htmlFor={notesId}>
-              <span>Anything the driver should know? (optional)</span>
-              <textarea id={notesId} rows={2} maxLength={1000} placeholder="e.g. Parked on the shoulder, hazard lights on" value={serviceFormData.problemDescription}
-                onChange={(event) => setServiceFormData({ problemDescription: event.target.value })} />
-            </label>
-
-            {quoteError && <p className="request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {quoteError}</p>}
-            {error && <p className="request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}
-
-            <div className="request-footer">
-              {hasLocation ? (
-                <button type="button" className="aid-primary-button" disabled={submitting || needsDropoff || price === null} onClick={() => void submit()}>
-                  {submitting ? 'Requesting…' : price === null ? `Request · from ${formatPrice(service.basePrice)}` : `Request · ${formatPrice(price)}`}
-                </button>
-              ) : (
-                <button type="button" className="aid-primary-button" onClick={chooseLocation}>Set your location</button>
-              )}
-              <p>
-                {distancePriced
-                  ? quote?.distanceMiles != null ? `${quote.distanceMiles} mi tow · ${rateText}` : `Choose where the vehicle should be towed. ${rateText}`
-                  : `${formatPrice(service.basePrice)} flat price. You won't be charged until the job is done.`}
-              </p>
-            </div>
-          </>
-        )}
-    </Dialog>
+          {quoteError && <p className="ui-alert ui-alert--danger request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {quoteError}</p>}
+          {error && <p className="ui-alert ui-alert--danger request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}
+        </>
+      )}
+    </BottomSheet>
   )
 }

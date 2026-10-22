@@ -1,21 +1,20 @@
 import {
   ArrowRight,
   Battery,
-  Bell,
   Car,
   ChevronRight,
   CircleDot,
-  Clock3,
+  Droplets,
   Fuel,
   KeyRound,
   MapPin,
   Navigation,
   Plus,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
   Sun,
   Truck,
-  UserRound,
   Wrench,
   Zap,
 } from 'lucide-react'
@@ -27,6 +26,9 @@ import { driverTracking } from '../lib/customerTracking'
 import { customerStatusLine } from '../lib/jobLifecycle'
 import RequestSheet from '../components/request/RequestSheet'
 import { SafetySheet } from '../components/safety/Safety'
+import PersonAvatar from '../components/ui/PersonAvatar'
+import SectionHeader from '../components/ui/SectionHeader'
+import { List, ListRow } from '../components/ui/ListRow'
 
 const services: Array<{ label: string; icon: typeof Battery; service: ServiceType }> = [
   { label: "Won't start", icon: Battery, service: 'battery_jump' },
@@ -36,7 +38,6 @@ const services: Array<{ label: string; icon: typeof Battery; service: ServiceTyp
   { label: 'Fuel', icon: Fuel, service: 'fuel_delivery' },
   { label: 'EV charge', icon: Zap, service: 'ev_charging' },
 ]
-
 
 export default function HomeScreen() {
   const {
@@ -59,6 +60,7 @@ export default function HomeScreen() {
 
   const activeVehicle = vehicles.find((vehicle) => vehicle.id === activeVehicleId) ?? vehicles[0]
   const recentBooking = bookingHistory.find((booking) => booking.status === 'completed')
+  const firstName = user?.name ? user.name.split(' ')[0] : ''
 
   // Every on-demand service uses the same request sheet.
   const startService = (service: ServiceType | null) => {
@@ -70,100 +72,97 @@ export default function HomeScreen() {
   return (
     <div className="consumer-home">
       <header className="consumer-topbar">
-        <AidBrand compact label="ROADSIDE" />
-        <div className="consumer-topbar__actions">
-          <button type="button" className="consumer-icon-button" aria-label="Activity" onClick={() => setCurrentScreen('history')}>
-            <Bell size={20} aria-hidden="true" />
-          </button>
-          <button type="button" className="consumer-avatar" aria-label="Open account" onClick={() => setCurrentScreen('profile')}>
-            {user?.name ? user.name.charAt(0).toUpperCase() : <UserRound size={20} />}
-          </button>
-        </div>
+        <AidBrand compact />
+        <button type="button" className="consumer-avatar" aria-label="Open account" onClick={() => setCurrentScreen('profile')}>
+          <PersonAvatar name={user?.name} size="sm" />
+        </button>
       </header>
 
-      <button type="button" className="consumer-location" onClick={() => setActiveModal('locationConfirm')}>
-        <span className="consumer-location__pin" aria-hidden="true"><MapPin size={20} /></span>
-        <span><small>YOUR LOCATION</small><strong>{userLocationLabel || 'Confirm your location'}</strong></span>
-        <ChevronRight size={19} aria-hidden="true" />
-      </button>
-
-      {activeBooking && (
-        <button type="button" className="consumer-active" onClick={() => setCurrentScreen('chat')} aria-label="Track active request">
-          <div className="consumer-active__status"><span><i /> ACTIVE REQUEST</span><strong>{activeEta != null ? `≈ ${activeEta} min` : activeBooking.driver ? '-- min' : 'Finding driver'}</strong></div>
-          <div className="consumer-active__main">
-            <span className="consumer-active__nav"><Navigation size={22} /></span>
-            <div><strong>{customerStatusLine(activeBooking)}</strong><p>{activeBooking.service.name} · {activeBooking.location.address}</p></div>
-            <ChevronRight size={20} />
-          </div>
-          <div className="consumer-active__footer"><span><Clock3 size={15} /> Live status</span><span>{activeBooking.driver ? 'Track driver' : 'View request'} <ArrowRight size={15} /></span></div>
+      {activeBooking ? (
+        /* A live request supersedes the normal Home: one dominant thing to do — follow it. */
+        <>
+        <h1 className="sr-only">Your request</h1>
+        <button type="button" className="consumer-live" onClick={() => setCurrentScreen('chat')}>
+          <span className="sr-only">Track active request: </span>
+          <span className="consumer-live__top">
+            <span className="consumer-live__status"><i className="ui-dot ui-dot--live" aria-hidden="true" /> {activeBooking.driver ? 'Driver on the way' : 'Request sent'}</span>
+            <span className="consumer-live__eta">{activeEta != null ? `${activeEta} min` : activeBooking.driver ? 'Live' : 'Finding a driver'}</span>
+          </span>
+          <strong className="consumer-live__title">{customerStatusLine(activeBooking)}</strong>
+          <span className="consumer-live__meta">{activeBooking.service.name} · {activeBooking.location.address}</span>
+          <span className="consumer-live__cta"><Navigation size={18} aria-hidden="true" /> {activeBooking.driver ? 'Track your driver' : 'View your request'} <ArrowRight size={18} aria-hidden="true" /></span>
         </button>
+        </>
+      ) : (
+        <>
+          <button type="button" className="consumer-location" onClick={() => setActiveModal('locationConfirm')}>
+            <span className="consumer-location__pin" aria-hidden="true"><MapPin size={19} /></span>
+            <span className="consumer-location__text"><small>Your location</small><strong>{userLocationLabel || 'Confirm your location'}</strong></span>
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
+
+          <section className="consumer-intro" aria-labelledby="consumer-help-title">
+            {firstName && <p>Hi {firstName}</p>}
+            <h1 id="consumer-help-title">How can we help?</h1>
+          </section>
+
+          <section className="service-launcher" aria-label="Roadside services">
+            <div className="service-shortcuts">
+              {services.map(({ label, icon: Icon, service }) => (
+                <button key={service} type="button" aria-label={label === 'Tow' ? 'Need a tow' : label} onClick={() => startService(service)}>
+                  <span aria-hidden="true"><Icon size={22} strokeWidth={1.9} /></span>
+                  <strong>{label}</strong>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="guided-help" onClick={() => startService(null)}>
+              <span className="guided-help__icon" aria-hidden="true"><Wrench size={18} /></span>
+              <span><strong>Not sure what you need?</strong><small>Tell us what happened</small></span>
+              <ChevronRight size={18} aria-hidden="true" />
+            </button>
+            <p className="consumer-trust"><ShieldCheck size={14} aria-hidden="true" /> Every AID driver is verified</p>
+          </section>
+        </>
       )}
 
       {/* The app shell provides the page's one <main>. */}
-      <div>
-        <section className="consumer-intro" aria-labelledby="consumer-help-title">
-          <p>{user?.name ? 'Hi, ' + user.name.split(' ')[0] : 'Roadside assistance'}</p>
-          <h1 id="consumer-help-title">How can we help?</h1>
-          <span><ShieldCheck size={13} aria-hidden="true" /> Every AID driver is verified</span>
-        </section>
-
-        <section className="service-launcher" aria-label="Roadside services">
-          <div className="service-shortcuts">
-            {services.map(({ label, icon: Icon, service }) => (
-              <button key={service} type="button" aria-label={label === 'Tow' ? 'Need a tow' : label} onClick={() => startService(service)}>
-                <span aria-hidden="true"><Icon size={23} strokeWidth={1.8} /></span>
-                <strong>{label}</strong>
-              </button>
-            ))}
-          </div>
-          <button type="button" className="guided-help" onClick={() => startService(null)}>
-            <span className="guided-help__icon"><Wrench size={20} /></span>
-            <span><strong>Not sure what you need?</strong><small>Tell us what happened</small></span>
-            <ArrowRight size={19} />
-          </button>
-        </section>
-
-        <section className="consumer-section" aria-labelledby="garage-title">
-          <div className="consumer-section__heading"><h2 id="garage-title">Your garage</h2><button type="button" onClick={() => setCurrentScreen('profile')}>{activeVehicle ? 'Manage' : 'Add'}</button></div>
+      <section className="ui-section" aria-labelledby="garage-title">
+        <SectionHeader id="garage-title" title="Your garage" action={{ label: activeVehicle ? 'Manage' : 'Add', onClick: () => setCurrentScreen('profile'), ariaLabel: activeVehicle ? 'Manage vehicles' : 'Add a vehicle' }} />
+        <List>
           {activeVehicle ? (
-            <button type="button" className="garage-card" onClick={() => setCurrentScreen('profile')}>
-              <span className="garage-card__vehicle"><Car size={23} /></span>
-              <span><strong>{activeVehicle.year} {activeVehicle.make} {activeVehicle.model}</strong><small>{activeVehicle.color} · {activeVehicle.plate}</small></span>
-              <span className="garage-card__ready"><ShieldCheck size={16} /> READY</span>
-              <ChevronRight size={18} />
-            </button>
+            <ListRow icon={<Car size={20} />} title={`${activeVehicle.year} ${activeVehicle.make} ${activeVehicle.model}`} subtitle={`${activeVehicle.color} · ${activeVehicle.plate}`}
+              trailing={<span className="ui-chip ui-chip--success">Ready</span>} onClick={() => setCurrentScreen('profile')} />
           ) : (
-            <button type="button" className="garage-empty" onClick={() => setCurrentScreen('profile')}>
-              <span><Plus size={22} /></span>
-              <div><strong>Add a vehicle to request faster</strong><p>We’ll use it automatically when you need help.</p></div>
-              <ChevronRight size={18} />
-            </button>
+            <ListRow icon={<Plus size={20} />} title="Add a vehicle to request faster" subtitle="We’ll use it automatically when you need help." onClick={() => setCurrentScreen('profile')} />
           )}
+        </List>
+      </section>
+
+      {recentBooking && !activeBooking && (
+        <section className="ui-section" aria-labelledby="recent-title">
+          <SectionHeader id="recent-title" title="Use again" action={{ label: 'See activity', onClick: () => setCurrentScreen('history') }} />
+          <List>
+            <ListRow icon={<RotateCcw size={19} />} title={recentBooking.service.name} subtitle={recentBooking.location.address}
+              trailing={<span className="ui-row__value consumer-again">Request again</span>} onClick={() => rebookFromHistory(recentBooking.id)} />
+          </List>
         </section>
+      )}
 
-        {recentBooking && (
-          <section className="consumer-section" aria-labelledby="recent-title">
-            <div className="consumer-section__heading"><h2 id="recent-title">Use again</h2><button type="button" onClick={() => setCurrentScreen('history')}>See activity</button></div>
-            <button type="button" className="repeat-service" onClick={() => rebookFromHistory(recentBooking.id)}>
-              <span><Clock3 size={20} /></span>
-              <div><strong>{recentBooking.service.name}</strong><small>{recentBooking.location.address}</small></div>
-              <span>Request again <ArrowRight size={15} /></span>
-            </button>
-          </section>
-        )}
+      <section className="ui-section" aria-labelledby="care-title">
+        <SectionHeader id="care-title" title="Vehicle care" />
+        <div className="care-grid" role="group" aria-label="Vehicle care">
+          <button type="button" onClick={() => startService('oil_change')} disabled={Boolean(activeBooking)}><span aria-hidden="true"><Droplets size={19} /></span><strong>Oil change</strong><small>At your location</small></button>
+          <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sparkles size={19} /></span><strong>Detailing</strong> <small>Coming soon</small></button>
+          <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sun size={19} /></span><strong>Window tint</strong> <small>Coming soon</small></button>
+        </div>
+      </section>
 
-        <section className="consumer-section" aria-labelledby="care-title">
-          <div className="consumer-section__heading"><h2 id="care-title">Vehicle care</h2></div>
-          <div className="care-row">
-            <button type="button" onClick={() => startService('oil_change')}><span><Car size={20} /></span><strong>Oil change</strong><small>At your location</small></button>
-            <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sparkles size={20} /></span><strong>Detailing</strong> <small>Coming soon</small></button>
-            <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sun size={20} /></span><strong>Window tint</strong> <small>Coming soon</small></button>
-          </div>
-        </section>
-
-        <button type="button" className="consumer-safety" aria-haspopup="dialog" onClick={() => setShowSafety(true)}><ShieldCheck size={18} aria-hidden="true" /><span><strong>Safety</strong><small>AID is not an emergency service. If you’re in danger, call 911.</small></span></button>
-        {showSafety && <SafetySheet audience="customer" onClose={() => setShowSafety(false)} />}
-      </div>
+      <button type="button" className="consumer-safety" aria-haspopup="dialog" onClick={() => setShowSafety(true)}>
+        <ShieldCheck size={18} aria-hidden="true" />
+        <span><strong>Safety</strong><small>AID is not an emergency service. If you’re in danger, call 911.</small></span>
+        <ChevronRight size={16} aria-hidden="true" />
+      </button>
+      {showSafety && <SafetySheet audience="customer" onClose={() => setShowSafety(false)} />}
 
       <RequestSheet />
     </div>

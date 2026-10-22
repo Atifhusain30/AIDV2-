@@ -85,6 +85,31 @@ describe('consumer roadside home', () => {
     expect(state.bookingHistory).toHaveLength(1)
   })
 
+  it('a live request takes over the top of Home: track it first, no second request offered', () => {
+    useAppStore.setState({
+      activeBooking: {
+        id: 'b-live', status: 'en_route', createdAt: new Date(), estimatedPrice: 79,
+        service: { id: 'flat_tire', name: 'Flat tire', description: '', basePrice: 79, estimatedTime: 35 },
+        location: { address: '1 Main St', lat: 1, lng: 1 },
+        driver: { id: 'd1', name: 'Sam D.', firstName: 'Sam' },
+      } as never,
+    })
+    render(<HomeScreen />)
+    const track = screen.getByRole('button', { name: /track active request/i })
+    expect(track.textContent).toMatch(/Flat tire/)
+    expect(screen.queryByRole('heading', { name: 'How can we help?' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Won't start/i })).toBeNull()
+    fireEvent.click(track)
+    expect(useAppStore.getState().currentScreen).toBe('chat')
+  })
+
+  it('vehicle care is a compact grid (nothing scrolls sideways off-screen)', () => {
+    render(<HomeScreen />)
+    const care = screen.getByRole('group', { name: 'Vehicle care' })
+    expect(care.className).not.toMatch(/care-row/)
+    expect(care.querySelectorAll('button')).toHaveLength(3)
+  })
+
   it('does not promise 24/7 help and opens safety info instead', () => {
     render(<HomeScreen />)
     expect(screen.queryByText(/24\/7/)).toBeNull()

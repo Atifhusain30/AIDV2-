@@ -81,7 +81,7 @@ describe('design system primitives', () => {
     expect(initials('Marcus T.')).toBe('MT')
     expect(initials('  ')).toBe('')
     const { container } = render(<PersonAvatar name="Preview D." />)
-    expect(container.textContent).toBe('PD')
+    expect(container.firstElementChild?.getAttribute('data-initials')).toBe('PD')
     expect(container.firstElementChild?.getAttribute('aria-hidden')).toBe('true')
   })
 
