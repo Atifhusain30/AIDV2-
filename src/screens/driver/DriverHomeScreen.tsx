@@ -18,6 +18,8 @@ import AidBrand from '../../components/brand/AidBrand'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
 import type { Driver } from '../../types'
+import { driverEligibility, ELIGIBILITY_COPY } from '../../lib/driverEligibility'
+import { formatCalendarDate } from '../../lib/dates'
 
 interface DriverHomeScreenProps {
   onOpenOnboarding: () => void
@@ -32,6 +34,7 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
     incomingRequests,
     activeBooking,
     isLoading,
+    error,
     setOnlineStatus,
     fetchIncomingRequests,
     fetchActiveBooking,
@@ -39,7 +42,9 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
     declineRequest,
   } = useDriverStore()
 
-  const isVerified = Boolean(user?.isVerified && user?.verificationStatus === 'verified')
+  const eligibility = driverEligibility(user)
+  const isVerified = eligibility === 'eligible'
+  const blocker = eligibility === 'eligible' ? null : ELIGIBILITY_COPY[eligibility]
 
   useEffect(() => {
     if (user?.id) fetchActiveBooking(user.id)
@@ -52,8 +57,9 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
     return () => window.clearInterval(timer)
   }, [fetchIncomingRequests, isOnline])
 
+  // Going offline is always allowed; going online requires eligibility.
   const toggleAvailability = () => {
-    if (!isVerified) return
+    if (!isOnline && !isVerified) return
     void setOnlineStatus(!isOnline)
   }
 
@@ -82,18 +88,19 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
           <div>
             <small>AVAILABILITY</small>
             <strong>{isOnline ? 'Online and receiving requests' : 'You are offline'}</strong>
-            <p>{isVerified ? (isOnline ? 'Stay ready for nearby roadside calls.' : 'Go online when you are ready to help.') : 'Verification is required before taking work.'}</p>
+            <p>{blocker ? `${blocker.title}. ${blocker.detail}` : isOnline ? 'Stay ready for nearby roadside calls.' : 'Go online when you are ready to help.'}</p>
           </div>
         </div>
-        <button
-          type="button"
-          className="availability-card__button"
-          onClick={toggleAvailability}
-          disabled={!isVerified || isLoading}
-          aria-label={!isVerified ? 'Complete verification to go online' : isOnline ? 'Go offline' : 'Go online'}
-        >
-          {isOnline ? 'Go offline' : isVerified ? 'Go online' : 'Verification required'}
-        </button>
+        {isOnline || isVerified ? (
+          <button type="button" className="availability-card__button" onClick={toggleAvailability} disabled={isLoading}>
+            {isOnline ? 'Go offline' : 'Go online'}
+          </button>
+        ) : (
+          <button type="button" className="availability-card__button" onClick={onOpenOnboarding}>
+            {blocker?.action}
+          </button>
+        )}
+        {error && <p role="alert" className="availability-card__error">{error}</p>}
       </section>
 
       {activeBooking && (
@@ -116,7 +123,7 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
         {!isVerified ? (
           <button type="button" className="readiness-prompt" onClick={onOpenOnboarding}>
             <span><FileCheck2 size={22} /></span>
-            <div><strong>Finish verification first</strong><p>Upload your license, insurance, and required documents.</p></div>
+            <div><strong>{blocker?.title}</strong><p>{blocker?.detail}</p></div>
             <ChevronRight size={19} />
           </button>
         ) : !isOnline ? (
@@ -154,9 +161,9 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
 
       <section className="driver-section" aria-labelledby="readiness-title">
         <div className="driver-section__heading"><div><span>ACCOUNT STATUS</span><h2 id="readiness-title">Driver readiness</h2></div></div>
-        <button type="button" className="driver-readiness" onClick={!isVerified ? onOpenOnboarding : onOpenSettings}>
+        <button type="button" className="driver-readiness" onClick={onOpenOnboarding}>
           <span className={isVerified ? 'is-ready' : ''}>{isVerified ? <ShieldCheck size={21} /> : <FileCheck2 size={21} />}</span>
-          <div><strong>{isVerified ? 'Ready to take requests' : 'Verification incomplete'}</strong><p>{isVerified ? 'Documents and account are in good standing.' : 'Complete the required steps to start earning.'}</p></div>
+          <div><strong>{isVerified ? 'Ready to take requests' : blocker?.title}</strong><p>{isVerified ? `Documents approved${user?.credentialsValidUntil ? ` through ${formatCalendarDate(user.credentialsValidUntil)}` : ''}.` : blocker?.detail}</p></div>
           <ChevronRight size={19} />
         </button>
       </section>

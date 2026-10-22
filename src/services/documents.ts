@@ -1,6 +1,6 @@
 import { FilePicker, type PickedFile } from '@capawesome/capacitor-file-picker'
 import { Capacitor } from '@capacitor/core'
-import type { DriverDocument } from '../types'
+import type { DriverDocument, DriverDocumentType, DriverVerification, VerificationStatus } from '../types'
 import { supabase } from '../auth/supabase'
 
 const API_BASE_URL = (() => {
@@ -10,12 +10,18 @@ const API_BASE_URL = (() => {
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'application/pdf']
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 
-export const DOCUMENT_TYPE_LABELS: Record<DriverDocument['type'], string> = {
-  drivers_license: "Driver's License",
-  identification: 'Government ID',
-  insurance: 'Insurance Card',
-  vehicle_registration: 'Vehicle Registration',
+/** Mirrors server/verification.js — every individual provider needs all four. */
+export const DOCUMENT_REQUIREMENTS: Record<DriverDocumentType, { label: string; hint: string; requiresExpiration: boolean }> = {
+  drivers_license: { label: "Driver's license", hint: 'Front of a valid, unexpired license. All text readable.', requiresExpiration: true },
+  identification: { label: 'Government ID', hint: 'Passport, state ID, or other government photo ID.', requiresExpiration: false },
+  insurance: { label: 'Commercial auto insurance', hint: 'Policy page or card that covers business use of your vehicle.', requiresExpiration: true },
+  vehicle_registration: { label: 'Vehicle registration', hint: 'Current registration for the vehicle you will drive.', requiresExpiration: true },
 }
+export const REQUIRED_DOCUMENT_TYPES = Object.keys(DOCUMENT_REQUIREMENTS) as DriverDocumentType[]
+
+export const DOCUMENT_TYPE_LABELS: Record<DriverDocumentType, string> = Object.fromEntries(
+  REQUIRED_DOCUMENT_TYPES.map((type) => [type, DOCUMENT_REQUIREMENTS[type].label]),
+) as Record<DriverDocumentType, string>
 
 function validateFile(file: PickedFile): PickedFile {
   if (file.size && file.size > MAX_FILE_SIZE) throw new Error('File size exceeds 10MB limit')
@@ -24,7 +30,7 @@ function validateFile(file: PickedFile): PickedFile {
 }
 
 export async function pickDocument(): Promise<PickedFile | null> {
-  const result = await FilePicker.pickFiles({ readData: true })
+  const result = await FilePicker.pickFiles({ types: ['application/pdf'], readData: true })
   return result.files?.[0] ? validateFile(result.files[0]) : null
 }
 
@@ -44,30 +50,32 @@ async function responseError(response: Response): Promise<string> {
   return body?.error || `Request failed (${response.status})`
 }
 
-export async function uploadDocument(
-  file: PickedFile,
-  documentType: DriverDocument['type'],
-  _driverId?: string,
-): Promise<DriverDocument> {
+function parseDocument(document: DriverDocument): DriverDocument {
+  return { ...document, uploadedAt: new Date(document.uploadedAt) }
+}
+
+export async function uploadDocument(file: PickedFile, documentType: DriverDocumentType, expiresOn?: string): Promise<DriverDocument> {
+  if (DOCUMENT_REQUIREMENTS[documentType].requiresExpiration && !expiresOn) {
+    throw new Error('Enter the expiration date printed on this document.')
+  }
   if (!file.data) throw new Error('The selected file could not be read')
   const formData = new FormData()
   formData.append('file', base64ToBlob(file.data, file.mimeType || 'application/octet-stream'), file.name || `document-${Date.now()}`)
   formData.append('type', documentType)
+  if (expiresOn) formData.append('expiresOn', expiresOn)
   const response = await fetch(`${API_BASE_URL}/drivers/me/documents`, {
     method: 'POST',
     headers: await authHeaders(),
     body: formData,
   })
   if (!response.ok) throw new Error(await responseError(response))
-  const data = await response.json() as DriverDocument
-  return { ...data, uploadedAt: new Date(data.uploadedAt) }
+  return parseDocument(await response.json() as DriverDocument)
 }
 
 export async function getStoredDocuments(): Promise<DriverDocument[]> {
   const response = await fetch(`${API_BASE_URL}/drivers/me/documents`, { headers: await authHeaders() })
   if (!response.ok) throw new Error(await responseError(response))
-  const data = await response.json() as DriverDocument[]
-  return data.map((document) => ({ ...document, uploadedAt: new Date(document.uploadedAt) }))
+  return (await response.json() as DriverDocument[]).map(parseDocument)
 }
 
 export async function deleteStoredDocument(documentId: string): Promise<void> {
@@ -76,6 +84,22 @@ export async function deleteStoredDocument(documentId: string): Promise<void> {
     headers: await authHeaders(),
   })
   if (!response.ok) throw new Error(await responseError(response))
+}
+
+export async function getVerification(): Promise<DriverVerification> {
+  const response = await fetch(`${API_BASE_URL}/drivers/me/verification`, { headers: await authHeaders() })
+  if (!response.ok) throw new Error(await responseError(response))
+  const verification = await response.json() as DriverVerification
+  return { ...verification, documents: verification.documents.map(parseDocument) }
+}
+
+export async function submitVerification(): Promise<{ status: VerificationStatus }> {
+  const response = await fetch(`${API_BASE_URL}/drivers/me/verification/submit`, {
+    method: 'POST',
+    headers: await authHeaders(),
+  })
+  if (!response.ok) throw new Error(await responseError(response))
+  return response.json()
 }
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
@@ -87,11 +111,14 @@ export function isFilePickerAvailable(): boolean {
   return Capacitor.isPluginAvailable('FilePicker')
 }
 
-export function validateDocumentRequirements(documents: DriverDocument[]): { isComplete: boolean; missing: DriverDocument['type'][] } {
-  const required: DriverDocument['type'][] = ['drivers_license', 'identification']
-  const uploaded = new Set(documents.map((document) => document.type))
-  const missing = required.filter((type) => !uploaded.has(type))
-  return { isComplete: missing.length === 0, missing }
+/** Newest upload per type — older uploads are history only (matches the server). */
+export function latestDocumentsByType(documents: DriverDocument[]): Partial<Record<DriverDocumentType, DriverDocument>> {
+  const latest: Partial<Record<DriverDocumentType, DriverDocument>> = {}
+  for (const document of documents) {
+    const current = latest[document.type]
+    if (!current || new Date(document.uploadedAt) > new Date(current.uploadedAt)) latest[document.type] = document
+  }
+  return latest
 }
 
 export const documentService = {
@@ -100,8 +127,10 @@ export const documentService = {
   uploadDocument,
   getStoredDocuments,
   deleteStoredDocument,
+  getVerification,
+  submitVerification,
   isAvailable: isFilePickerAvailable,
-  validateRequirements: validateDocumentRequirements,
+  latestDocumentsByType,
   DOCUMENT_TYPE_LABELS,
 }
 export default documentService

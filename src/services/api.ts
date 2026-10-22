@@ -52,6 +52,7 @@ export interface ApiProfile {
   phone: string
   createdAt: string
   verificationStatus?: VerificationStatus
+  credentialsValidUntil?: string | null
   isVerified?: boolean
   isOnline?: boolean
   rating?: number

@@ -33,7 +33,7 @@ export type PaymentStatus =
 export type UserRole = 'customer' | 'driver' | 'admin'
 
 // Driver Verification Status
-export type VerificationStatus = 'pending' | 'under_review' | 'verified' | 'rejected'
+export type VerificationStatus = 'pending' | 'under_review' | 'verified' | 'rejected' | 'suspended'
 
 // Service Definition
 export interface Service {
@@ -77,6 +77,8 @@ export interface Driver extends UserBase {
   isOnline: boolean
   isVerified: boolean
   verificationStatus: VerificationStatus
+  /** Earliest expiration among approved license/insurance/registration (YYYY-MM-DD). */
+  credentialsValidUntil?: string | null
   documents: DriverDocument[]
   rating: number
   totalJobs: number
@@ -86,14 +88,41 @@ export interface Driver extends UserBase {
 }
 
 // Driver Document (DL, ID, etc.)
+export type DriverDocumentType = 'drivers_license' | 'identification' | 'insurance' | 'vehicle_registration'
+
 export interface DriverDocument {
   id: string
-  type: 'drivers_license' | 'identification' | 'insurance' | 'vehicle_registration'
-  fileUrl: string
+  type: DriverDocumentType
+  fileUrl?: string
   fileName: string
+  mimeType?: string
   uploadedAt: Date
   status: 'pending' | 'approved' | 'rejected'
-  rejectionReason?: string
+  /** YYYY-MM-DD; required for license, insurance, and registration. */
+  expiresOn?: string | null
+  /** Reviewer's reason when a document is rejected. */
+  reviewNotes?: string | null
+}
+
+export interface VerificationReadiness {
+  missing: DriverDocumentType[]
+  rejected: DriverDocumentType[]
+  unapproved: DriverDocumentType[]
+  expired: DriverDocumentType[]
+  canSubmit: boolean
+  canVerify: boolean
+  credentialsValidUntil: string | null
+}
+
+export interface DriverVerification {
+  status: VerificationStatus
+  reviewNotes: string | null
+  submittedAt: string | null
+  reviewedAt: string | null
+  credentialsValidUntil: string | null
+  requiredDocuments: DriverDocumentType[]
+  readiness: VerificationReadiness
+  documents: DriverDocument[]
 }
 
 // Driver's Vehicle Info

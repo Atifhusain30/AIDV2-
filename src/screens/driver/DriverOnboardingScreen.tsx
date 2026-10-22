@@ -1,406 +1,225 @@
 /**
- * Driver Onboarding Screen
- * Document upload flow for driver verification
+ * Driver verification — individual providers upload four documents, submit
+ * for review, and follow the admin decision. All rules are enforced by the
+ * server (server/verification.js); this screen mirrors them for guidance.
  */
 
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Upload, 
-  FileCheck, 
-  AlertCircle, 
-  ChevronRight, 
-  ChevronLeft,
-  Camera,
-  X,
-  Loader2,
-  Check,
-  Shield,
-  Clock
-} from 'lucide-react'
+import { useEffect, useId, useState } from 'react'
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, ChevronRight, Clock3, FileText, Loader2, ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import { useDriverStore } from '../../store/useDriverStore'
-import { useAuthStore } from '../../store/useAuthStore'
-import { documentService, DOCUMENT_TYPE_LABELS } from '../../services/documents'
-import type { DriverDocument } from '../../types'
+import { documentService, DOCUMENT_REQUIREMENTS, REQUIRED_DOCUMENT_TYPES } from '../../services/documents'
+import type { DriverDocument, DriverDocumentType, DriverVerification } from '../../types'
+import { formatCalendarDate } from '../../lib/dates'
 
 interface DriverOnboardingScreenProps {
   onComplete: () => void
   onSkip?: () => void
 }
 
-type OnboardingStep = 'welcome' | 'drivers_license' | 'identification' | 'review' | 'complete'
+type ChipTone = 'neutral' | 'progress' | 'success' | 'danger'
 
-export default function DriverOnboardingScreen({ onComplete, onSkip }: DriverOnboardingScreenProps) {
-  const [currentStep, setCurrentStep] = useState<OnboardingStep>('welcome')
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  
-  const { user } = useAuthStore()
-  const { documents, addDocument, fetchDocuments } = useDriverStore()
+const todayIso = () => new Date().toISOString().slice(0, 10)
+const tomorrowIso = () => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
 
-  // Fetch existing documents on mount
-  useEffect(() => {
-    fetchDocuments()
-  }, [fetchDocuments])
+const formatDate = formatCalendarDate
 
-  const steps: OnboardingStep[] = ['welcome', 'drivers_license', 'identification', 'review', 'complete']
-  const stepIndex = steps.indexOf(currentStep)
+function documentState(document: DriverDocument | undefined, status: DriverVerification['status']): { label: string; tone: ChipTone } {
+  if (!document) return { label: 'Needed', tone: 'neutral' }
+  if (document.status === 'rejected') return { label: 'Needs replacement', tone: 'danger' }
+  if (document.expiresOn && document.expiresOn <= todayIso()) return { label: 'Expired', tone: 'danger' }
+  if (document.status === 'approved') return { label: 'Approved', tone: 'success' }
+  return status === 'under_review' ? { label: 'In review', tone: 'progress' } : { label: 'Uploaded', tone: 'progress' }
+}
 
-  const getDocumentByType = (type: DriverDocument['type']): DriverDocument | undefined => {
-    return documents.find(d => d.type === type)
+function StatusHeader({ verification }: { verification: DriverVerification }) {
+  switch (verification.status) {
+    case 'under_review':
+      return (
+        <header className="verify-status is-progress">
+          <Clock3 size={22} aria-hidden="true" />
+          <div><h1>Your application is under review</h1><p>We review applications in the order received and will update this screen when a decision is made.</p></div>
+        </header>
+      )
+    case 'verified':
+      return (
+        <header className="verify-status is-success">
+          <ShieldCheck size={22} aria-hidden="true" />
+          <div>
+            <h1>You're verified</h1>
+            <p>{verification.credentialsValidUntil ? `Eligible to drive through ${formatDate(verification.credentialsValidUntil)}. Upload renewals before then to keep driving.` : 'Your documents are approved.'}</p>
+          </div>
+        </header>
+      )
+    case 'rejected':
+      return (
+        <header className="verify-status is-danger">
+          <AlertCircle size={22} aria-hidden="true" />
+          <div><h1>Changes needed</h1><p>{verification.reviewNotes || 'Some documents need to be replaced before we can approve you.'}</p></div>
+        </header>
+      )
+    case 'suspended':
+      return (
+        <header className="verify-status is-danger">
+          <ShieldAlert size={22} aria-hidden="true" />
+          <div><h1>Your account is suspended</h1><p>{verification.reviewNotes || 'Contact AID support for details.'}</p></div>
+        </header>
+      )
+    default:
+      return (
+        <header className="verify-status">
+          <ShieldCheck size={22} aria-hidden="true" />
+          <div><h1>Become a verified driver</h1><p>Upload the four documents below, then submit them for review. Customers only see verified drivers.</p></div>
+        </header>
+      )
   }
+}
 
-  const handleUpload = async (documentType: DriverDocument['type']) => {
+function UploadSheet({ type, onClose }: { type: DriverDocumentType; onClose: () => void }) {
+  const requirement = DOCUMENT_REQUIREMENTS[type]
+  const uploadVerificationDocument = useDriverStore((state) => state.uploadVerificationDocument)
+  const [expiresOn, setExpiresOn] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const titleId = useId()
+  const dateId = useId()
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !isUploading) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isUploading, onClose])
+
+  const choose = async (kind: 'photo' | 'pdf') => {
+    setError(null)
+    if (requirement.requiresExpiration) {
+      if (!expiresOn) return setError('Enter the expiration date printed on this document.')
+      if (expiresOn <= todayIso()) return setError('This document has expired. Upload a current one.')
+    }
     setIsUploading(true)
-    setUploadError(null)
-
     try {
-      const file = await documentService.pickImage()
-      
-      if (!file) {
-        setIsUploading(false)
-        return
-      }
-
-      if (!user) throw new Error('Driver session required')
-      const document = await documentService.uploadDocument(file, documentType, user.id)
-      addDocument(document)
-      
-      // Auto-advance to next step
-      setTimeout(() => {
-        nextStep()
-      }, 500)
-    } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Upload failed')
+      const file = kind === 'photo' ? await documentService.pickImage() : await documentService.pickDocument()
+      if (!file) return
+      await uploadVerificationDocument(file, type, requirement.requiresExpiration ? expiresOn : undefined)
+      onClose()
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Upload failed. Try again.')
     } finally {
       setIsUploading(false)
     }
   }
 
-  const nextStep = () => {
-    const nextIndex = stepIndex + 1
-    if (nextIndex < steps.length) {
-      setCurrentStep(steps[nextIndex])
-    }
-  }
+  return (
+    <div className="account-sheet-backdrop" role="presentation" onMouseDown={() => !isUploading && onClose()}>
+      <section className="account-sheet verify-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="account-sheet__handle" />
+        <div className="account-sheet__header">
+          <div><small>UPLOAD DOCUMENT</small><h2 id={titleId}>{requirement.label}</h2></div>
+          <button type="button" aria-label="Close" disabled={isUploading} onClick={onClose}><X size={20} /></button>
+        </div>
+        <p className="verify-sheet__hint">{requirement.hint}</p>
 
-  const prevStep = () => {
-    const prevIndex = stepIndex - 1
-    if (prevIndex >= 0) {
-      setCurrentStep(steps[prevIndex])
-    }
-  }
-
-  const renderUploadCard = (documentType: DriverDocument['type'], title: string, description: string) => {
-    const existingDoc = getDocumentByType(documentType)
-    
-    return (
-      <motion.div
-        className="bg-white/5 border border-white/10 rounded-2xl p-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <h3 className="text-lg font-semibold text-white mb-2">{title}</h3>
-        <p className="text-gray-400 text-sm mb-6">{description}</p>
-
-        {existingDoc ? (
-          // Document uploaded
-          <div className="space-y-4">
-            <div className="aspect-video rounded-xl overflow-hidden bg-black/30 relative">
-              {existingDoc.fileUrl && (
-                <img 
-                  src={existingDoc.fileUrl} 
-                  alt={title}
-                  className="w-full h-full object-cover"
-                />
-              )}
-              <div className="absolute top-3 right-3">
-                <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400 flex items-center gap-1">
-                  <Check size={12} />
-                  Uploaded
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => handleUpload(documentType)}
-              className="w-full py-3 rounded-xl border border-white/10 text-gray-300 text-sm hover:bg-white/5 transition-colors"
-            >
-              Replace Document
-            </button>
-          </div>
-        ) : (
-          // Upload prompt
-          <button
-            onClick={() => handleUpload(documentType)}
-            disabled={isUploading}
-            className="w-full aspect-video rounded-xl border-2 border-dashed border-white/20 hover:border-emerald-500/50 transition-colors flex flex-col items-center justify-center gap-3 group"
-          >
-            {isUploading ? (
-              <Loader2 size={32} className="text-emerald-400 animate-spin" />
-            ) : (
-              <>
-                <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
-                  <Camera size={24} className="text-gray-400 group-hover:text-emerald-400" />
-                </div>
-                <span className="text-gray-400 group-hover:text-emerald-400 text-sm">
-                  Tap to upload photo
-                </span>
-              </>
-            )}
-          </button>
+        {requirement.requiresExpiration && (
+          <label className="verify-sheet__field" htmlFor={dateId}>
+            <span>Expiration date</span>
+            <input id={dateId} type="date" min={tomorrowIso()} value={expiresOn} disabled={isUploading} onChange={(event) => setExpiresOn(event.target.value)} />
+          </label>
         )}
 
-        {/* Error message */}
-        <AnimatePresence>
-          {uploadError && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2"
-            >
-              <AlertCircle size={16} className="text-red-400" />
-              <span className="text-red-400 text-sm">{uploadError}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+        {error && <p role="alert" className="verify-sheet__error"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}
+
+        <div className="verify-sheet__actions">
+          <button type="button" className="aid-primary-button" disabled={isUploading} onClick={() => void choose('photo')}>
+            {isUploading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Camera size={18} aria-hidden="true" />}
+            {isUploading ? 'Uploading…' : 'Choose photo'}
+          </button>
+          <button type="button" className="verify-sheet__secondary" disabled={isUploading} onClick={() => void choose('pdf')}>
+            <FileText size={18} aria-hidden="true" /> Choose PDF
+          </button>
+        </div>
+        <p className="verify-sheet__privacy">Documents are stored privately and only seen by the AID review team.</p>
+      </section>
+    </div>
+  )
+}
+
+export default function DriverOnboardingScreen({ onComplete }: DriverOnboardingScreenProps) {
+  const { verification, fetchVerification, submitVerification } = useDriverStore()
+  const [activeType, setActiveType] = useState<DriverDocumentType | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  useEffect(() => { void fetchVerification() }, [fetchVerification])
+
+  if (!verification) {
+    return (
+      <div className="driver-work verify safe-top safe-bottom">
+        <button type="button" className="verify__back" onClick={onComplete}><ArrowLeft size={18} aria-hidden="true" /> Back to work</button>
+        <div className="driver-empty-state" role="status"><Loader2 size={25} className="animate-spin" aria-hidden="true" /><strong>Loading your verification</strong></div>
+      </div>
     )
   }
 
+  const latest = documentService.latestDocumentsByType(verification.documents)
+  const { readiness } = verification
+  const outstanding = readiness.missing.length + readiness.rejected.length + readiness.expired.length
+  const canApply = verification.status === 'pending' || verification.status === 'rejected'
+
+  const handleSubmit = async () => {
+    setIsSubmitting(true)
+    setSubmitError(null)
+    try {
+      await submitVerification()
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to submit. Try again.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
-    <div className="driver-onboarding min-h-screen px-6 py-8 safe-top">
-      {/* Progress Bar */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs text-gray-500">Step {stepIndex + 1} of {steps.length}</span>
-          {onSkip && currentStep !== 'complete' && (
-            <button onClick={onSkip} className="text-xs text-gray-400 hover:text-white">
-              Skip for now
-            </button>
-          )}
-        </div>
-        <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-          <motion.div
-            className="h-full bg-gradient-to-r from-emerald-500 to-teal-500"
-            initial={{ width: 0 }}
-            animate={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-      </div>
+    <div className="driver-work verify safe-top safe-bottom">
+      <button type="button" className="verify__back" onClick={onComplete}><ArrowLeft size={18} aria-hidden="true" /> Back to work</button>
 
-      <AnimatePresence mode="wait">
-        {/* Welcome Step */}
-        {currentStep === 'welcome' && (
-          <motion.div
-            key="welcome"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="flex flex-col items-center text-center"
-          >
-            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center mb-6 shadow-lg shadow-emerald-500/30">
-              <Shield size={40} className="text-white" />
-            </div>
-            
-            <h1 className="text-2xl font-bold text-white mb-3">
-              Document Verification
-            </h1>
-            <p className="text-gray-400 mb-8 max-w-sm">
-              To ensure safety for everyone, we need to verify your identity. This only takes a few minutes.
-            </p>
+      <StatusHeader verification={verification} />
 
-            <div className="w-full space-y-3 mb-8">
-              {[
-                { icon: FileCheck, text: "Driver's License (front)" },
-                { icon: FileCheck, text: 'Government ID' }
-              ].map((item, i) => (
-                <div key={i} className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/10">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                    <item.icon size={20} className="text-emerald-400" />
-                  </div>
-                  <span className="text-white text-sm">{item.text}</span>
-                </div>
-              ))}
-            </div>
+      <section className="driver-section" aria-labelledby="documents-title">
+        <div className="driver-section__heading"><div><span>REQUIRED</span><h2 id="documents-title">Documents</h2></div></div>
+        <ul className="verify-list">
+          {REQUIRED_DOCUMENT_TYPES.map((type) => {
+            const document = latest[type]
+            const state = documentState(document, verification.status)
+            const requirement = DOCUMENT_REQUIREMENTS[type]
+            return (
+              <li key={type}>
+                <button type="button" className="verify-item" onClick={() => setActiveType(type)} aria-label={`${requirement.label}: ${state.label}`}>
+                  <span className={`verify-item__icon is-${state.tone}`} aria-hidden="true">
+                    {state.tone === 'success' ? <CheckCircle2 size={20} /> : state.tone === 'danger' ? <AlertCircle size={20} /> : <FileText size={20} />}
+                  </span>
+                  <span className="verify-item__copy">
+                    <strong>{requirement.label}</strong>
+                    <small>{document?.expiresOn ? `Expires ${formatDate(document.expiresOn)}` : document ? document.fileName : requirement.hint}</small>
+                    {document?.status === 'rejected' && document.reviewNotes && <em>{document.reviewNotes}</em>}
+                  </span>
+                  <span className={`verify-chip is-${state.tone}`}>{state.label}</span>
+                  <ChevronRight size={18} aria-hidden="true" />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </section>
 
-            <button
-              onClick={nextStep}
-              className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-2"
-            >
-              Get Started
-              <ChevronRight size={20} />
-            </button>
-          </motion.div>
-        )}
+      {canApply && (
+        <footer className="verify-footer">
+          <p>{readiness.canSubmit ? 'All documents uploaded. Submit when ready.' : `${outstanding} document${outstanding === 1 ? '' : 's'} still needed`}</p>
+          {submitError && <p role="alert" className="verify-sheet__error"><AlertCircle size={16} aria-hidden="true" /> {submitError}</p>}
+          <button type="button" className="aid-primary-button" disabled={!readiness.canSubmit || isSubmitting} onClick={() => void handleSubmit()}>
+            {isSubmitting ? 'Submitting…' : 'Submit for review'}
+          </button>
+        </footer>
+      )}
 
-        {/* Driver's License Step */}
-        {currentStep === 'drivers_license' && (
-          <motion.div
-            key="dl"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-          >
-            {renderUploadCard(
-              'drivers_license',
-              "Driver's License",
-              'Take a clear photo of the front of your valid driver\'s license. Make sure all text is readable.'
-            )}
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={prevStep}
-                className="flex-1 py-4 rounded-xl border border-white/10 text-white font-medium flex items-center justify-center gap-2"
-              >
-                <ChevronLeft size={20} />
-                Back
-              </button>
-              <button
-                onClick={nextStep}
-                disabled={!getDocumentByType('drivers_license')}
-                className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                Continue
-                <ChevronRight size={20} />
-              </button>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Identification Step */}
-        {currentStep === 'identification' && (
-          <motion.div
-            key="id"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-          >
-            {renderUploadCard(
-              'identification',
-              'Government ID',
-              'Upload a government-issued ID (passport, state ID, etc.) for identity verification.'
-            )}
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={prevStep}
-                className="flex-1 py-4 rounded-xl border border-white/10 text-white font-medium flex items-center justify-center gap-2"
-              >
-                <ChevronLeft size={20} />
-                Back
-              </button>
-              <button
-                onClick={nextStep}
-                disabled={!getDocumentByType('identification')}
-                className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                Continue
-                <ChevronRight size={20} />
-              </button>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Review Step */}
-        {currentStep === 'review' && (
-          <motion.div
-            key="review"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-          >
-            <h2 className="text-xl font-bold text-white mb-6">Review Your Documents</h2>
-            
-            <div className="space-y-4 mb-6">
-              {documents.map((doc) => (
-                <div key={doc.id} className="p-4 rounded-xl bg-white/5 border border-white/10 flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-black/30">
-                    {doc.fileUrl && (
-                      <img src={doc.fileUrl} alt={doc.type} className="w-full h-full object-cover" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="text-white font-medium">{DOCUMENT_TYPE_LABELS[doc.type]}</h4>
-                    <p className="text-gray-500 text-sm">{doc.fileName}</p>
-                  </div>
-                  <div className="px-3 py-1 rounded-full text-xs font-medium bg-amber-500/20 text-amber-400 flex items-center gap-1">
-                    <Clock size={12} />
-                    Pending
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 mb-6">
-              <p className="text-emerald-300 text-sm">
-                Your documents will be reviewed within 24-48 hours. You'll be notified once verified.
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={prevStep}
-                className="flex-1 py-4 rounded-xl border border-white/10 text-white font-medium flex items-center justify-center gap-2"
-              >
-                <ChevronLeft size={20} />
-                Back
-              </button>
-              <button
-                onClick={nextStep}
-                className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-2"
-              >
-                Submit
-                <ChevronRight size={20} />
-              </button>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Complete Step */}
-        {currentStep === 'complete' && (
-          <motion.div
-            key="complete"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex flex-col items-center text-center pt-12"
-          >
-            <motion.div
-              className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center mb-8"
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ type: 'spring', delay: 0.2 }}
-            >
-              <Check size={48} className="text-white" />
-            </motion.div>
-
-            <h1 className="text-2xl font-bold text-white mb-3">
-              Documents Submitted!
-            </h1>
-            <p className="text-gray-400 mb-8">
-              Our team is reviewing your documents. You'll receive a notification once verified.
-            </p>
-
-            <div className="w-full p-4 rounded-xl bg-white/5 border border-white/10 mb-8">
-              <div className="flex items-center gap-3 mb-2">
-                <Clock size={20} className="text-amber-400" />
-                <span className="text-white font-medium">Verification Pending</span>
-              </div>
-              <p className="text-gray-500 text-sm">
-                Estimated time: 24-48 hours
-              </p>
-            </div>
-
-            <button
-              onClick={onComplete}
-              className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold py-4 rounded-xl"
-            >
-              Go to Dashboard
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {activeType && <UploadSheet type={activeType} onClose={() => setActiveType(null)} />}
     </div>
   )
 }

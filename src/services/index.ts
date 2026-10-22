@@ -36,7 +36,9 @@ export {
   pickImage,
   uploadDocument,
   getStoredDocuments,
-  validateDocumentRequirements,
+  getVerification,
+  submitVerification,
+  DOCUMENT_REQUIREMENTS,
   DOCUMENT_TYPE_LABELS
 } from './documents'
 

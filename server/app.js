@@ -221,7 +221,9 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   app.get('/api/drivers/requests', authenticate, requireVerifiedDriver, requireOnlineDriver, async (_req, res, next) => {
     try { res.json(await repository.listAvailableBookings()); } catch (error) { next(error); }
   });
-  app.patch('/api/drivers/me/online', authenticate, requireVerifiedDriver, async (req, res, next) => {
+  // Going offline is always allowed (e.g. after credentials lapse); going online requires eligibility.
+  const requireEligibleToGoOnline = (req, res, next) => (req.body.isOnline === false ? next() : requireVerifiedDriver(req, res, next));
+  app.patch('/api/drivers/me/online', authenticate, requireRole('driver'), requireEligibleToGoOnline, async (req, res, next) => {
     try {
       if (typeof req.body.isOnline !== 'boolean') return res.status(400).json({ error: 'isOnline must be a boolean' });
       await repository.updateDriverOnlineStatus(req.auth.identity.id, req.body.isOnline);

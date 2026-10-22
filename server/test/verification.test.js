@@ -214,6 +214,15 @@ test('verified drivers with lapsed credentials cannot go online or receive jobs'
   assert.equal((await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer driver').send({ isOnline: true })).status, 403);
 });
 
+test('a driver whose credentials lapsed or who was suspended can still go offline', async () => {
+  const { app, profiles } = harness();
+  Object.assign(profiles['driver-1'], { verificationStatus: 'verified', credentialsValidUntil: PAST, isOnline: true });
+  const offline = await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer driver').send({ isOnline: false });
+  assert.equal(offline.status, 200);
+  assert.equal(profiles['driver-1'].isOnline, false);
+  assert.equal((await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer customer').send({ isOnline: false })).status, 403);
+});
+
 test('approving renewed insurance extends a verified driver\'s eligibility', async () => {
   const { app, profiles } = harness();
   const ids = await uploadAll(app);

@@ -354,6 +354,7 @@ function App() {
             role: 'driver',
             isVerified: profile.isVerified,
             verificationStatus: profile.verificationStatus,
+            credentialsValidUntil: profile.credentialsValidUntil ?? null,
             isOnline: profile.isOnline,
             rating: profile.rating,
             totalJobs: profile.totalJobs,

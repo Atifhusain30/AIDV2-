@@ -4,7 +4,8 @@
  */
 
 import { create } from 'zustand'
-import type { ServiceRequest, Booking, Location, DriverDocument } from '../types'
+import type { ServiceRequest, Booking, Location, DriverDocument, DriverDocumentType, DriverVerification } from '../types'
+import type { PickedFile } from '@capawesome/capacitor-file-picker'
 import { useAuthStore } from './useAuthStore'
 import { apiService } from '../services/api'
 import { documentService } from '../services/documents'
@@ -16,6 +17,7 @@ interface DriverStore {
   incomingRequests: ServiceRequest[]
   activeBooking: Booking | null
   documents: DriverDocument[]
+  verification: DriverVerification | null
   isLoading: boolean
   error: string | null
 
@@ -33,6 +35,11 @@ interface DriverStore {
   fetchDocuments: () => Promise<void>
   addDocument: (document: DriverDocument) => void
   removeDocument: (documentId: string) => Promise<void>
+
+  // Verification (individual provider onboarding)
+  fetchVerification: () => Promise<DriverVerification | null>
+  uploadVerificationDocument: (file: PickedFile, type: DriverDocumentType, expiresOn?: string) => Promise<void>
+  submitVerification: () => Promise<void>
   
   // Reset
   reset: () => void
@@ -44,8 +51,20 @@ const initialState = {
   incomingRequests: [],
   activeBooking: null,
   documents: [],
+  verification: null,
   isLoading: false,
   error: null
+}
+
+/** Keep the signed-in driver's profile in step with the server's review decision. */
+function syncDriverProfile(verification: Pick<DriverVerification, 'status' | 'credentialsValidUntil'>) {
+  const { user, updateUser } = useAuthStore.getState()
+  if (user?.role !== 'driver') return
+  updateUser({
+    verificationStatus: verification.status,
+    isVerified: verification.status === 'verified',
+    credentialsValidUntil: verification.credentialsValidUntil,
+  })
 }
 
 export const useDriverStore = create<DriverStore>((set, get) => ({
@@ -184,6 +203,30 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Unable to remove document' })
     }
+  },
+
+  fetchVerification: async () => {
+    try {
+      const verification = await documentService.getVerification()
+      set({ verification, documents: verification.documents, error: null })
+      syncDriverProfile(verification)
+      return verification
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Unable to load verification status' })
+      return null
+    }
+  },
+
+  // Errors are thrown so the upload sheet can show them next to the field.
+  uploadVerificationDocument: async (file, type, expiresOn) => {
+    await documentService.uploadDocument(file, type, expiresOn)
+    await get().fetchVerification()
+  },
+
+  submitVerification: async () => {
+    const result = await documentService.submitVerification()
+    await get().fetchVerification()
+    syncDriverProfile({ status: result.status, credentialsValidUntil: get().verification?.credentialsValidUntil ?? null })
   },
 
   // Reset store
