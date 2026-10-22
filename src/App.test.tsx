@@ -10,6 +10,7 @@ import { profileToUser } from './auth/serverProfile'
 vi.mock('./lib/notifications', () => ({
   initNotifications: vi.fn(),
   registerNotificationTapHandler: vi.fn(),
+  getNotificationPermission: vi.fn(async () => 'prompt'),
 }))
 
 vi.mock('./lib/leafletFix', () => ({
@@ -111,6 +112,9 @@ describe('first-run flow', () => {
     render(<App />)
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Go offline' })).toBeTruthy())
+    // Signed in and on the work screen, yet no notification permission was requested (contextual only).
+    expect(initNotifications).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: /Get alerts/ })).toBeNull()
     expect((useAuthStore.getState().user as { verificationStatus?: string }).verificationStatus).toBe('verified')
     expect(useDriverStore.getState().isOnline).toBe(true)
 

@@ -16,7 +16,9 @@ import { useDriverJobSync } from './lib/useDriverJobSync'
 import { useActiveBookingSync } from './lib/useActiveBookingSync'
 import { useRealtimeConnection } from './lib/useRealtimeConnection'
 import EndedBookingNotice from './components/tracking/EndedBookingNotice'
-import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
+import { registerNotificationTapHandler } from './lib/notifications'
+import { syncAlertsIfAllowed } from './lib/alertsPrompt'
+import AlertsExplainer from './components/AlertsExplainer'
 import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
 import { settleStaleActiveBooking } from './services/bookingService'
@@ -387,9 +389,10 @@ function App() {
   useEffect(() => {
     if (isAuthenticated && user) {
       setAppMode(user.role === 'driver' ? 'driver' : 'customer')
-      // Ask for native notification permission only after the user has signed in
-      // or entered guest mode, when booking updates are relevant.
-      void initNotifications()
+      // Never ask for notification permission here (sign-in / app start). The ask comes after an
+      // in-app explainer at a useful moment (first request / first time online — alertsPrompt.ts);
+      // this only sets up the channel when alerts were already allowed.
+      void syncAlertsIfAllowed()
     }
   }, [isAuthenticated, user])
 
@@ -474,7 +477,7 @@ function App() {
         />
       )
     }
-    return <CustomerApp />
+    return <><CustomerApp /><AlertsExplainer /></>
   }
 
   // Driver flow
@@ -487,7 +490,7 @@ function App() {
         />
       )
     }
-    return <DriverApp onLogout={handleLogout} />
+    return <><DriverApp onLogout={handleLogout} /><AlertsExplainer /></>
   }
 
   return null

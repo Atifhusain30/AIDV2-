@@ -31,6 +31,7 @@ import { List, ListRow } from '../../components/ui/ListRow'
 import { EmptyState } from '../../components/ui/States'
 import { SkeletonRows } from '../../components/ui/Skeleton'
 import { pollInterval } from '../../lib/realtime'
+import { offerAlerts } from '../../lib/alertsPrompt'
 import { useCoalescedRefresh, useRealtimeConnected, useRealtimeEvents } from '../../lib/useRealtimeStatus'
 
 /** Request list (with one GPS reading per refresh, B8): every 30 s; 60 s as a safety net while live updates are up. */
@@ -121,7 +122,11 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
   // Going offline is always allowed; going online requires eligibility and vehicle details.
   const toggleAvailability = () => {
     if (!isOnline && !canWork) return
-    void setOnlineStatus(!isOnline)
+    const goingOnline = !isOnline
+    void setOnlineStatus(goingOnline).then(() => {
+      // First time online is when job alerts become useful: explainer, then the system prompt.
+      if (goingOnline && useDriverStore.getState().isOnline) void offerAlerts('driver')
+    })
   }
 
   const handleAccept = async (requestId: string) => {

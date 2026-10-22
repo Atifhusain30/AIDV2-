@@ -32,8 +32,24 @@ const generateNotificationId = (bookingId: string, status: string): number => {
 }
 
 /**
- * Initialize notifications - request permission and create channel
- * Call this once on app startup
+ * Where the notification permission stands, without asking: 'prompt' = never answered,
+ * 'unavailable' = web / plugin missing. Never shows a system prompt.
+ */
+export async function getNotificationPermission(): Promise<'prompt' | 'granted' | 'denied' | 'unavailable'> {
+  if (!isNotificationsAvailable()) return 'unavailable'
+  try {
+    const { display } = await LocalNotifications.checkPermissions()
+    if (display === 'granted' || display === 'denied') return display
+    return 'prompt'
+  } catch {
+    return 'unavailable'
+  }
+}
+
+/**
+ * Request permission (shows the system prompt if never answered) and create the Android channel.
+ * Only call this from a contextual moment — after the in-app explainer (src/lib/alertsPrompt.ts) or
+ * when permission is already granted. Never on app start or sign-in.
  */
 export async function initNotifications(): Promise<void> {
   if (!isNotificationsAvailable()) {

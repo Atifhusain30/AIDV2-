@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Booking } from '../types'
 import { useAppStore } from '../store/useAppStore'
 import { apiService } from './api'
+import { offerAlerts } from '../lib/alertsPrompt'
 import { reconcileManagedBooking, requestAndStartBooking, settleStaleActiveBooking } from './bookingService'
 
 vi.mock('./api', () => ({ apiService: { createBooking: vi.fn(), getActiveBooking: vi.fn(), getBooking: vi.fn() } }))
+vi.mock('../lib/alertsPrompt', () => ({ offerAlerts: vi.fn(async () => undefined) }))
 
 const booking = (overrides: Partial<Booking> = {}) => ({
   id: 'booking-1',
@@ -51,6 +53,15 @@ describe('one active request per customer (E4)', () => {
     vi.mocked(apiService.createBooking).mockResolvedValue({ success: true, data: booking({ id: 'booking-new' }) })
     expect(await requestAndStartBooking(input)).toEqual({ booking: expect.objectContaining({ id: 'booking-new' }), alreadyActive: false })
     expect(useAppStore.getState().activeRequestRedirect).toBe(false)
+    // Sending a request is the contextual moment to offer alerts (explainer, then system prompt).
+    expect(offerAlerts).toHaveBeenCalledWith('customer')
+  })
+
+  it('does not offer alerts when the customer was only taken to an existing request', async () => {
+    vi.mocked(apiService.createBooking).mockResolvedValue({ success: false, error: 'busy', code: 'active_request_exists' })
+    vi.mocked(apiService.getActiveBooking).mockResolvedValue({ success: true, data: booking({ id: 'booking-existing' }) })
+    await requestAndStartBooking(input)
+    expect(offerAlerts).not.toHaveBeenCalled()
   })
 })
 

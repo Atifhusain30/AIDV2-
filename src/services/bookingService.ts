@@ -10,6 +10,7 @@ import { useAppStore } from '../store/useAppStore'
 import { Booking, Service, PriceBreakdown } from '../types'
 import { apiService } from './api'
 import { ACTIVE_REQUEST_CODE } from '../lib/jobLifecycle'
+import { offerAlerts } from '../lib/alertsPrompt'
 
 // Types for booking creation input
 export interface CreateBookingInput {
@@ -129,5 +130,7 @@ export async function requestAndStartBooking(
   }
   if (!result.success || !result.data) throw new Error(result.error || 'Unable to request service.')
   startBooking(result.data)
+  // The useful moment for alerts: the request is sent and a driver's updates are coming.
+  void offerAlerts('customer')
   return { booking: result.data, alreadyActive: false }
 }

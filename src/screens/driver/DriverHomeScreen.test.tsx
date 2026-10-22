@@ -4,6 +4,9 @@ import DriverHomeScreen from './DriverHomeScreen'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
 import { apiService } from '../../services/api'
+import { offerAlerts } from '../../lib/alertsPrompt'
+
+vi.mock('../../lib/alertsPrompt', () => ({ offerAlerts: vi.fn(async () => undefined) }))
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
@@ -141,6 +144,19 @@ describe('driver work layout', () => {
     renderHome()
     expect(screen.queryByRole('button', { name: /^go online$/i })).toBeNull()
     expect(screen.getByRole('button', { name: /^finish vehicle$/i })).toBeTruthy()
+  })
+
+  it('going online is the moment to offer job alerts (explainer first), going offline is not', async () => {
+    const setOnlineStatus = vi.fn(async (online: boolean) => { useDriverStore.setState({ isOnline: online }) })
+    useDriverStore.setState({ isOnline: false, setOnlineStatus })
+    setDriver({ verificationStatus: 'verified', isVerified: true, credentialsValidUntil: '2099-01-01', vehicle: TOW_TRUCK })
+    renderHome()
+    fireEvent.click(screen.getByRole('button', { name: /^go online$/i }))
+    await waitFor(() => expect(offerAlerts).toHaveBeenCalledWith('driver'))
+    vi.mocked(offerAlerts).mockClear()
+    fireEvent.click(await screen.findByRole('button', { name: /^go offline$/i }))
+    await waitFor(() => expect(setOnlineStatus).toHaveBeenCalledWith(false))
+    expect(offerAlerts).not.toHaveBeenCalled()
   })
 
   it('always lets an online driver without vehicle details go offline', () => {
