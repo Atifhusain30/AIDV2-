@@ -71,7 +71,7 @@ describe('driver job screen', () => {
     ]
     for (const [status, label, next] of steps) {
       show(service({ status }))
-      const buttons = screen.getAllByRole('button').filter((button) => button.classList.contains('aid-primary-button'))
+      const buttons = screen.getAllByRole('button').filter((button) => button.classList.contains('job-primary'))
       expect(buttons.map((button) => button.textContent)).toEqual([label])
       fireEvent.click(buttons[0])
       expect(updateJobStatus).toHaveBeenLastCalledWith(next, undefined)
@@ -205,6 +205,23 @@ describe('driver job screen', () => {
     cleanup()
     show(tow())
     expect(screen.getByRole('button', { name: 'Message Casey' }).textContent).toBe('')
+  })
+
+  it('design: one dominant next step pinned at the bottom; the rest are quiet rows', () => {
+    show(tow({ status: 'en_route' }))
+    const bar = screen.getByRole('group', { name: 'Next step' })
+    expect(bar.className).toContain('ui-actionbar')
+    expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual(["I've arrived"])
+    // Compact progress replaces the five-circle row.
+    expect(screen.getByRole('group', { name: 'Job progress' }).textContent).toContain('On the way · Step 2 of 5')
+    expect(document.querySelector('.job-steps')).toBeNull()
+    const options = screen.getByRole('group', { name: 'Job options' })
+    for (const name of ['Report an issue', 'Safety', 'Call 911', 'Cancel job']) {
+      expect(within(options).getByRole('button', { name }).className).toContain('ui-row')
+    }
+    // Initials avatar (no generic letter), and the customer's note is labelled, not an icon.
+    expect(document.querySelector('.ui-avatar')?.getAttribute('data-initials')).toBe('CC')
+    expect(screen.getByText('Note from Casey')).toBeTruthy()
   })
 
   it('labels Report an issue as non-emergency', () => {

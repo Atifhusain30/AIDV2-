@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
-  ChevronRight,
   Clock3,
   Wallet,
   FileCheck2,
@@ -15,7 +14,6 @@ import {
   Truck,
   X,
 } from 'lucide-react'
-import AidBrand from '../../components/brand/AidBrand'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
 import type { Driver } from '../../types'
@@ -27,6 +25,11 @@ import { formatDistance, LOCATION_PROMPT_COPY } from '../../lib/nearbyRequests'
 import { completedTodayCount, driverRatingLabel, driverRatingNote, timeOfDayGreeting } from '../../lib/driverStats'
 import { apiService } from '../../services/api'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
+import Button from '../../components/ui/Button'
+import SectionHeader from '../../components/ui/SectionHeader'
+import { List, ListRow } from '../../components/ui/ListRow'
+import { EmptyState } from '../../components/ui/States'
+import { SkeletonRows } from '../../components/ui/Skeleton'
 import { pollInterval } from '../../lib/realtime'
 import { useCoalescedRefresh, useRealtimeConnected, useRealtimeEvents } from '../../lib/useRealtimeStatus'
 
@@ -127,105 +130,95 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
   }
 
   return (
-    <div className="driver-work safe-top">
+    <div className="driver-work ui-screen safe-top">
       {listening && <RealtimeNotice />}
       <header className="driver-work__header">
         <div>
-          <AidBrand compact label="DRIVER" />
           <h1>Work</h1>
           <p>{timeOfDayGreeting()}, {user?.firstName || 'Driver'}.</p>
         </div>
-        <div className="driver-work__header-actions">
-          <button type="button" className="aid-icon-button" aria-label="Driver settings" onClick={onOpenSettings}><Settings size={19} /></button>
-        </div>
+        <button type="button" className="ui-icon-btn" aria-label="Driver settings" onClick={onOpenSettings}><Settings size={20} aria-hidden="true" /></button>
       </header>
 
-      <section className={`availability-card ${isOnline ? 'is-online' : ''}`}>
-        <div className="availability-card__copy">
-          <span className="availability-card__icon"><Power size={21} /></span>
+      <section className={`driver-status${isOnline ? ' is-online' : ''}`} aria-label="Availability">
+        <div className="driver-status__text">
+          <span className="driver-status__dot" aria-hidden="true" />
           <div>
-            <small>AVAILABILITY</small>
-            <strong>{isOnline ? 'Online and receiving requests' : 'You are offline'}</strong>
-            <p>{blocker ? `${blocker.title}. ${blocker.detail}` : isOnline ? 'Stay ready for nearby roadside calls.' : 'Go online when you are ready to help.'}</p>
+            <strong>{isOnline ? "You're online" : "You're offline"}</strong>
+            <p>{blocker ? `${blocker.title}. ${blocker.detail}` : isOnline ? 'Nearby roadside requests show below.' : 'Go online when you are ready to help.'}</p>
           </div>
         </div>
         {isOnline || canWork ? (
-          <button type="button" className="availability-card__button" onClick={toggleAvailability} disabled={isLoading}>
+          <Button size="lg" block variant={isOnline ? 'secondary' : 'primary'} icon={<Power size={18} aria-hidden="true" />} onClick={toggleAvailability} disabled={isLoading}>
             {isOnline ? 'Go offline' : 'Go online'}
-          </button>
+          </Button>
         ) : (
-          <button type="button" className="availability-card__button" onClick={openBlocker}>
-            {blocker?.action}
-          </button>
+          <Button size="lg" block onClick={openBlocker}>{blocker?.action}</Button>
         )}
-        {error && <p role="alert" className="availability-card__error">{error}</p>}
+        {error && <p role="alert" className="ui-alert ui-alert--danger">{error}</p>}
       </section>
 
       {jobEndedNotice && !activeBooking && (
-        <div className="job-ended-banner" role="alert">
+        <div className="ui-alert ui-alert--danger driver-ended" role="alert">
           <div>
             <strong>{jobEndedNotice.serviceName} job {jobEndedNotice.bySystem ? 'released' : 'cancelled'}</strong>
             <p>{jobEndedNotice.bySystem
               ? "AID didn't get your location or a status update for a long time, so the job was cancelled and the customer told. Keep AID open while you drive to a job."
               : `${jobEndedNotice.customerName || 'The customer'} cancelled before you arrived. You're free for your next request.`}</p>
           </div>
-          <button type="button" aria-label="Dismiss" onClick={dismissJobEndedNotice}><X size={18} /></button>
+          <button type="button" className="ui-icon-btn ui-icon-btn--plain" aria-label="Dismiss" onClick={dismissJobEndedNotice}><X size={18} aria-hidden="true" /></button>
         </div>
       )}
 
       {activeBooking && (
-        <button type="button" className="driver-active-job" onClick={onOpenActiveJob}>
-          <div className="driver-active-job__label"><span><i /> Active job</span><span>Open navigation</span></div>
-          <div className="driver-active-job__body">
-            <span><Navigation size={22} /></span>
-            <div><strong>{activeBooking.service.name}</strong><p>{activeBooking.location.address}</p></div>
-            <ChevronRight size={20} />
-          </div>
+        <button type="button" className="consumer-live driver-live" onClick={onOpenActiveJob}>
+          <span className="consumer-live__top"><span className="consumer-live__status"><span className="ui-live-dot" aria-hidden="true" /> Active job</span></span>
+          <span className="consumer-live__title">{activeBooking.service.name}</span>
+          <span className="consumer-live__meta">{activeBooking.location.address}</span>
+          <span className="consumer-live__cta"><Navigation size={18} aria-hidden="true" /> Open job</span>
         </button>
       )}
 
       <section className="driver-section" aria-labelledby="incoming-title">
-        <div className="driver-section__heading">
-          <div><span>NEARBY WORK</span><h2 id="incoming-title">Incoming requests</h2></div>
-          {isOnline && <span className="driver-live-label"><i /> LIVE</span>}
-        </div>
+        <SectionHeader id="incoming-title" title="Incoming requests">
+          {isOnline && <span className="ui-chip ui-chip--success"><span className="ui-live-dot" aria-hidden="true" /> Live</span>}
+        </SectionHeader>
 
         {!canWork ? (
-          <button type="button" className="readiness-prompt" onClick={openBlocker}>
-            <span>{isVerified ? <Truck size={22} /> : <FileCheck2 size={22} />}</span>
-            <div><strong>{blocker?.title}</strong><p>{blocker?.detail}</p></div>
-            <ChevronRight size={19} />
-          </button>
+          <List>
+            <ListRow icon={isVerified ? <Truck size={20} /> : <FileCheck2 size={20} />} title={blocker?.title} subtitle={blocker?.detail} onClick={openBlocker} />
+          </List>
         ) : !isOnline ? (
-          <div className="driver-empty-state"><Power size={25} /><strong>Go online to receive work</strong><p>New roadside requests will appear here.</p></div>
+          <EmptyState compact icon={<Power size={22} />} title="Go online to receive work" body="New roadside requests will appear here." headingLevel={3} />
         ) : nearbyStatus === 'location_required' ? (
-          <button type="button" className="readiness-prompt" onClick={() => void retryLocation()} disabled={isLoading}>
-            <span><LocateFixed size={22} /></span>
-            <div><strong>{locationPrompt.title}</strong><p>{locationPrompt.detail(radiusMiles)}</p></div>
-            <span className="readiness-prompt__action">Try again</span>
-          </button>
+          <List>
+            <ListRow icon={<LocateFixed size={20} />} title={locationPrompt.title} subtitle={locationPrompt.detail(radiusMiles)}
+              trailing={<span className="request-row__action">Try again</span>} disabled={isLoading} onClick={() => void retryLocation()} />
+          </List>
         ) : incomingRequests.length === 0 ? (
           nearbyStatus === 'idle' ? (
-            <div className="driver-empty-state"><LocateFixed size={25} /><strong>Finding requests near you</strong><p>Checking your location.</p></div>
+            <SkeletonRows count={2} card label="Finding requests near you" />
           ) : (
-            <div className="driver-empty-state"><Clock3 size={25} /><strong>No requests near you right now</strong><p>New requests within {radiusMiles} miles of you will appear here.</p></div>
+            <EmptyState compact icon={<Clock3 size={22} />} title="No requests near you right now" body={`New requests within ${radiusMiles} miles of you will appear here.`} headingLevel={3} />
           )
         ) : (
           <div className="request-list">
             {incomingRequests.map((request) => (
-              <article className="request-card" key={request.id}>
-                <div className="request-card__top">
-                  <span className="request-card__service"><Truck size={19} /></span>
-                  <div><strong>{request.service.name}</strong><p>{request.customerName || 'Nearby customer'}</p></div>
-                  <span className="request-card__price">{formatPrice(request.estimatedPrice)}</span>
+              <article className="driver-request" key={request.id} aria-label={`${request.service.name} request`}>
+                <div className="driver-request__top">
+                  <div>
+                    <strong>{request.service.name}</strong>
+                    <p>{request.customerName || 'Nearby customer'}</p>
+                  </div>
+                  <span className="driver-request__price">{formatPrice(request.estimatedPrice)}</span>
                 </div>
-                <p className="request-card__location">
-                  <MapPin size={15} /> {request.location.address}
-                  {formatDistance(request.distanceMiles) && <span className="request-card__distance">{formatDistance(request.distanceMiles)}</span>}
+                <p className="driver-request__where">
+                  <MapPin size={15} aria-hidden="true" /> <span>{request.location.address}</span>
+                  {formatDistance(request.distanceMiles) && <span className="ui-chip">{formatDistance(request.distanceMiles)}</span>}
                 </p>
-                <div className="request-card__actions">
-                  <button type="button" onClick={() => declineRequest(request.id)}>Decline</button>
-                  <button type="button" onClick={() => void handleAccept(request.id)}>Accept request</button>
+                <div className="driver-request__actions">
+                  <Button variant="secondary" onClick={() => declineRequest(request.id)}>Decline</Button>
+                  <Button onClick={() => void handleAccept(request.id)}>Accept request</Button>
                 </div>
               </article>
             ))}
@@ -234,13 +227,13 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
       </section>
 
       <section className="driver-section" aria-labelledby="today-title">
-        <div className="driver-section__heading"><div><span>PERFORMANCE</span><h2 id="today-title">Today</h2></div></div>
-        <div className="driver-metrics">
-          <div aria-label="Earnings coming soon"><span><Wallet size={18} /></span><small>Earnings</small><strong>Soon</strong></div>
-          <div aria-label="Jobs completed today"><span><CheckCircle2 size={18} /></span><small>Completed</small><strong>{completedToday.state === 'loading' ? '…' : completedToday.state === 'error' ? '—' : completedToday.count}</strong></div>
-          <div aria-label="Rating"><span><Star size={18} /></span><small>Rating</small><strong>{driverRatingLabel(user)}</strong></div>
+        <SectionHeader id="today-title" title="Today" />
+        <div className="driver-stats">
+          <div aria-label="Earnings coming soon"><Wallet size={17} aria-hidden="true" /><strong>Soon</strong><small>Earnings</small></div>
+          <div aria-label="Jobs completed today"><CheckCircle2 size={17} aria-hidden="true" /><strong>{completedToday.state === 'loading' ? '…' : completedToday.state === 'error' ? '—' : completedToday.count}</strong><small>Completed</small></div>
+          <div aria-label="Rating"><Star size={17} aria-hidden="true" /><strong>{driverRatingLabel(user)}</strong><small>Rating</small></div>
         </div>
-        <p className="driver-metrics__note">
+        <p className="driver-stats__note">
           {completedToday.state === 'error'
             ? "Couldn't load today's jobs. They'll show next time you open Work."
             : `Earnings and payouts are coming soon. ${driverRatingNote(user)}`}
@@ -248,17 +241,22 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
       </section>
 
       <section className="driver-section" aria-labelledby="readiness-title">
-        <div className="driver-section__heading"><div><span>ACCOUNT STATUS</span><h2 id="readiness-title">Driver readiness</h2></div></div>
-        <button type="button" className="driver-readiness" onClick={onOpenOnboarding}>
-          <span className={isVerified ? 'is-ready' : ''}>{isVerified ? <ShieldCheck size={21} /> : <FileCheck2 size={21} />}</span>
-          <div><strong>{canWork ? 'Ready to take requests' : isVerified ? 'Documents verified' : blocker?.title}</strong><p>{isVerified ? `Documents approved${user?.credentialsValidUntil ? ` through ${formatCalendarDate(user.credentialsValidUntil)}` : ''}.` : blocker?.detail}</p></div>
-          <ChevronRight size={19} />
-        </button>
-        <button type="button" className="driver-readiness driver-readiness--vehicle" onClick={onOpenVehicle}>
-          <span className={hasVehicle ? 'is-ready' : ''}><Truck size={21} /></span>
-          <div><strong>{hasVehicle ? 'Vehicle & equipment' : vehicleBlocker.title}</strong><p>{hasVehicle ? vehicleSummary : vehicleBlocker.detail}</p></div>
-          <ChevronRight size={19} />
-        </button>
+        <SectionHeader id="readiness-title" title="Driver readiness" />
+        <List>
+          <ListRow
+            icon={isVerified ? <ShieldCheck size={20} /> : <FileCheck2 size={20} />}
+            tone={isVerified ? 'default' : 'danger'}
+            title={canWork ? 'Ready to take requests' : isVerified ? 'Documents verified' : blocker?.title}
+            subtitle={isVerified ? `Documents approved${user?.credentialsValidUntil ? ` through ${formatCalendarDate(user.credentialsValidUntil)}` : ''}.` : blocker?.detail}
+            onClick={onOpenOnboarding}
+          />
+          <ListRow
+            icon={<Truck size={20} />}
+            title={hasVehicle ? 'Vehicle & equipment' : vehicleBlocker.title}
+            subtitle={hasVehicle ? vehicleSummary : vehicleBlocker.detail}
+            onClick={onOpenVehicle}
+          />
+        </List>
       </section>
     </div>
   )

@@ -151,7 +151,7 @@ export default function HomeScreen() {
       <section className="ui-section" aria-labelledby="care-title">
         <SectionHeader id="care-title" title="Vehicle care" />
         <div className="care-grid" role="group" aria-label="Vehicle care">
-          <button type="button" onClick={() => startService('oil_change')} disabled={Boolean(activeBooking)}><span aria-hidden="true"><Droplets size={19} /></span><strong>Oil change</strong><small>At your location</small></button>
+          <button type="button" onClick={() => startService('oil_change')} disabled={Boolean(activeBooking)}><span aria-hidden="true"><Droplets size={19} /></span><strong>Oil change</strong><small>Mobile</small></button>
           <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sparkles size={19} /></span><strong>Detailing</strong> <small>Coming soon</small></button>
           <button type="button" className="is-soon" disabled><span aria-hidden="true"><Sun size={19} /></span><strong>Window tint</strong> <small>Coming soon</small></button>
         </div>

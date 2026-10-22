@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import DriverHomeScreen from './DriverHomeScreen'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
@@ -203,6 +203,17 @@ describe('driver work layout', () => {
     expect(screen.getByText('13 mi away')).toBeTruthy()
     const names = screen.getAllByRole('article').map((card) => card.querySelector('strong')?.textContent)
     expect(names).toEqual(["Won't start", 'Flat tire'])
+  })
+
+  it('design: Accept is the one primary action on each request; no shouty section eyebrows', () => {
+    setDriver(READY)
+    holdState()
+    useDriverStore.setState({ isOnline: true, nearbyStatus: 'ok', requestRadiusMiles: 25, incomingRequests: [job('a', "Won't start", 1.24)] as never })
+    renderHome()
+    const card = screen.getByRole('article')
+    expect(within(card).getByRole('button', { name: 'Accept request' }).className).toContain('ui-btn--primary')
+    expect(within(card).getByRole('button', { name: 'Decline' }).className).toContain('ui-btn--secondary')
+    for (const eyebrow of ['NEARBY WORK', 'PERFORMANCE', 'ACCOUNT STATUS', 'AVAILABILITY']) expect(screen.queryByText(eyebrow)).toBeNull()
   })
 
   it('says there are no requests nearby (with the radius) instead of a blank list', () => {

@@ -1,10 +1,12 @@
 /**
- * Driver active job: who to help, where to go, and one clear next step.
+ * Driver active job: one focused command surface. Where you are in the job (compact progress),
+ * who to help, where to go — and one dominant next step pinned in the thumb zone. Report, Safety,
+ * Call 911 and Cancel stay one tap away as quiet rows, never competing with the next step.
  * GPS sharing runs app-wide (useJobLocationSharing); this screen shows its state.
  */
 
 import { useState } from 'react'
-import { AlertCircle, Car, Check, ChevronLeft, Flag, Info, Loader2, MapPin, Navigation, Phone, Star, StickyNote, Wrench, X } from 'lucide-react'
+import { AlertCircle, Car, Check, ChevronLeft, Flag, Info, Navigation, Phone, Star, Wrench, X, XCircle } from 'lucide-react'
 import { useDriverStore } from '../../store/useDriverStore'
 import { formatPrice } from '../../lib/money'
 import { DRIVER_CANCEL_REASONS, DRIVER_CANCELLABLE, REPORTABLE, driverNextAction } from '../../lib/jobLifecycle'
@@ -17,6 +19,13 @@ import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
 import LiveRegion from '../../components/ui/LiveRegion'
+import Button, { buttonClass } from '../../components/ui/Button'
+import PersonAvatar from '../../components/ui/PersonAvatar'
+import StepProgress from '../../components/ui/StepProgress'
+import StickyActionBar from '../../components/ui/StickyActionBar'
+import { EmptyState } from '../../components/ui/States'
+import { List, ListRow } from '../../components/ui/ListRow'
+import { TripStops } from '../../components/tracking/TrackLayout'
 import { useAnnounceOnChange, useAnnouncer } from '../../lib/announce'
 
 interface DriverJobScreenProps {
@@ -25,12 +34,12 @@ interface DriverJobScreenProps {
   onCompleted?: (job: Booking) => void
 }
 
-const STEPS: { status: BookingStatus; label: string }[] = [
-  { status: 'accepted', label: 'Accepted' },
-  { status: 'en_route', label: 'On the way' },
-  { status: 'arrived', label: 'Arrived' },
-  { status: 'in_progress', label: 'In service' },
-  { status: 'completed', label: 'Done' },
+const STEPS: { id: BookingStatus; label: string }[] = [
+  { id: 'accepted', label: 'Accepted' },
+  { id: 'en_route', label: 'On the way' },
+  { id: 'arrived', label: 'Arrived' },
+  { id: 'in_progress', label: 'In service' },
+  { id: 'completed', label: 'Done' },
 ]
 
 const directions = (lat: number, lng: number) => `https://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`
@@ -51,26 +60,28 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
 
   // F4: a screen reader hears each status change (from the driver's own tap or the server).
   const [liveText, announce] = useAnnouncer()
-  const stepLabel = job ? STEPS.find((step) => step.status === job.status)?.label : undefined
+  const stepLabel = job ? STEPS.find((step) => step.id === job.status)?.label : undefined
   useAnnounceOnChange(job?.status, `Job status: ${stepLabel ?? (job?.status === 'cancelled' ? 'Cancelled' : job?.status === 'completed' ? 'Completed' : 'Updated')}.`, announce)
 
   if (!job) {
+    const ended = jobEndedNotice
     return (
-      <div className="job-screen job-screen--empty">
-        {jobEndedNotice ? <X size={40} aria-hidden="true" /> : <AlertCircle size={40} aria-hidden="true" />}
-        <p role={jobEndedNotice ? 'alert' : undefined}>
-          {jobEndedNotice
-            ? jobEndedNotice.bySystem
-              ? `This ${jobEndedNotice.serviceName.toLowerCase()} job was released: AID didn't get your location or a status update for a long time, so it was cancelled and the customer told.`
-              : `${jobEndedNotice.customerName || 'The customer'} cancelled this ${jobEndedNotice.serviceName.toLowerCase()} job. You're free for your next request.`
-            : 'No active job right now.'}
-        </p>
-        <button type="button" className="aid-primary-button" onClick={() => { dismissJobEndedNotice(); onBack() }}>Back to dashboard</button>
+      <div className="job-screen job-screen--empty safe-top">
+        <EmptyState
+          icon={ended ? <X size={24} /> : <AlertCircle size={24} />}
+          title={ended ? 'Job ended' : 'No active job'}
+          body={<span role={ended ? 'alert' : undefined}>{ended
+            ? ended.bySystem
+              ? `This ${ended.serviceName.toLowerCase()} job was released: AID didn't get your location or a status update for a long time, so it was cancelled and the customer told.`
+              : `${ended.customerName || 'The customer'} cancelled this ${ended.serviceName.toLowerCase()} job. You're free for your next request.`
+            : 'New requests show on your dashboard.'}</span>}
+          action={{ label: 'Back to dashboard', onClick: () => { dismissJobEndedNotice(); onBack() } }}
+        />
       </div>
     )
   }
 
-  const stepIndex = STEPS.findIndex((step) => step.status === job.status)
+  const stepIndex = Math.max(0, STEPS.findIndex((step) => step.id === job.status))
   const customerName = job.customer?.firstName || 'the customer'
   const customerFirst = job.customer?.firstName || 'Customer'
   const action = driverNextAction(job, customerName)
@@ -80,6 +91,7 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
   const showDirections = job.status === 'accepted' || job.status === 'en_route' || headingToDropoff
   const canCancel = DRIVER_CANCELLABLE.has(job.status)
   const customerRating = ratingSummary(job.customer)
+  const vehicleDetail = job.vehicle ? [job.vehicle.color, job.vehicle.plate].filter(Boolean).join(' · ') : ''
 
   const move = async (next: BookingStatus, reason?: string) => {
     setBusy(true)
@@ -98,102 +110,101 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
     else void move(action.next)
   }
 
+  const sharingProblem = locationSharing === 'denied' || locationSharing === 'error'
+
   return (
     <div className="job-screen safe-top">
       <LiveRegion message={liveText} />
       <RealtimeNotice />
-      <header className="job-header">
-        <button type="button" className="job-header__back" aria-label="Back to dashboard" onClick={onBack}><ChevronLeft size={22} aria-hidden="true" /></button>
-        <div><small>ACTIVE JOB</small><h1>{job.service.name}</h1></div>
-        <strong className="job-header__price">{formatPrice(job.estimatedPrice)}</strong>
+      <header className="job-top">
+        <button type="button" className="ui-icon-btn ui-icon-btn--plain" aria-label="Back to dashboard" onClick={onBack}><ChevronLeft size={24} aria-hidden="true" /></button>
+        <div className="job-top__title">
+          <h1>{job.service.name}</h1>
+          {!sharingProblem && (
+            <p className="job-top__sharing">
+              <i className={locationSharing === 'sharing' ? 'is-live' : ''} aria-hidden="true" />
+              {locationSharing === 'sharing' ? `Sharing your location with ${customerName}` : 'Finding your location…'}
+            </p>
+          )}
+        </div>
+        <strong className="job-top__price">{formatPrice(job.estimatedPrice)}</strong>
       </header>
 
-      {locationSharing === 'denied' || locationSharing === 'error' ? (
-        <div className="job-banner job-banner--warn" role="alert">
+      {sharingProblem && (
+        <div className="ui-alert ui-alert--warning" role="alert">
           <AlertCircle size={17} aria-hidden="true" />
           <span>{locationSharing === 'denied'
             ? `Location is off, so ${customerName} can't see you coming. Turn on Location for AID in Settings.`
             : `Location is having trouble. ${customerName} may not see your latest position.`}</span>
         </div>
-      ) : (
-        <div className="job-banner">
-          <i className={locationSharing === 'sharing' ? 'is-live' : ''} aria-hidden="true" />
-          <span>{locationSharing === 'sharing' ? `Sharing your location with ${customerName}` : 'Finding your location…'}</span>
-        </div>
       )}
 
-      <section className="job-card" aria-label="Customer">
-        <div className="job-person">
-          <span className="job-person__avatar" aria-hidden="true">{(job.customer?.firstName || 'C').charAt(0).toUpperCase()}</span>
-          <div className="job-person__text">
+      <StepProgress label="Job progress" current={stepIndex} steps={STEPS} />
+
+      <section className="track-card" aria-label="Customer">
+        <div className="track-person">
+          <PersonAvatar name={job.customer?.name || job.customer?.firstName} />
+          <div className="track-person__text">
             <strong>{job.customer?.name || 'Customer'}</strong>
-            {customerRating && <small aria-label={customerRating.label}><Star size={13} className="track-star" aria-hidden="true" /> {customerRating.value} ({customerRating.count})</small>}
-            {job.vehicle && <small><Car size={13} aria-hidden="true" /> {job.vehicle.label}</small>}
-            {job.vehicle && (job.vehicle.color || job.vehicle.plate) && <small className="job-person__plate">{[job.vehicle.color, job.vehicle.plate].filter(Boolean).join(' · ')}</small>}
+            {customerRating
+              ? <span className="ui-meta"><span className="ui-rating" aria-label={customerRating.label}><Star size={13} aria-hidden="true" /> {customerRating.value} ({customerRating.count})</span></span>
+              : <span className="ui-meta">Customer</span>}
           </div>
-          <div className="job-person__actions">
+          <div className="track-person__actions">
             {showChatEntry(job.chat) && (
               <MessageButton name={customerFirst} unread={chatOpen ? 0 : job.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
             )}
             {job.customer?.phone && (
-              <a className="job-call" href={`tel:${job.customer.phone}`} aria-label={`Call ${customerName}`}><Phone size={19} aria-hidden="true" /></a>
+              <a className="ui-icon-btn" href={`tel:${job.customer.phone}`} aria-label={`Call ${customerName}`}><Phone size={19} aria-hidden="true" /></a>
             )}
           </div>
         </div>
+        {job.vehicle && (
+          <div className="track-vehicle" role="group" aria-label="Customer vehicle">
+            <Car size={18} aria-hidden="true" />
+            <span><small>Vehicle</small><strong>{job.vehicle.label}</strong></span>
+            {vehicleDetail && <span className="job-vehicle__detail">{vehicleDetail}</span>}
+          </div>
+        )}
         {job.notes && (
-          <div className="job-notes"><StickyNote size={15} aria-hidden="true" /><p>{job.notes}</p></div>
+          <figure className="job-note-quote">
+            <figcaption>Note from {customerFirst}</figcaption>
+            <blockquote>{job.notes}</blockquote>
+          </figure>
         )}
       </section>
 
-      <section className="job-card" aria-label="Route">
-        <div className={`job-stop${headingToDropoff ? ' is-done' : ''}`}>
-          <span className="job-stop__dot" aria-hidden="true"><MapPin size={14} /></span>
-          <div><small>{isTow ? 'PICK UP' : 'SERVICE LOCATION'}</small><strong>{job.location.address}</strong></div>
-        </div>
-        {job.dropoffLocation && (
-          <div className="job-stop">
-            <span className="job-stop__dot job-stop__dot--end" aria-hidden="true"><Flag size={13} /></span>
-            <div><small>DROP OFF</small><strong>{job.dropoffLocation.address}</strong></div>
-          </div>
-        )}
+      <section className="track-card" aria-label="Route">
+        <TripStops pickup={job.location.address} dropoff={job.dropoffLocation?.address} done={headingToDropoff} />
         {showDirections && (
-          <a className="job-directions" href={directions(target.lat, target.lng)} target="_blank" rel="noreferrer"
+          <a className={buttonClass('secondary', 'md', true)} href={directions(target.lat, target.lng)} target="_blank" rel="noreferrer"
             aria-label={headingToDropoff ? 'Directions to drop-off' : 'Directions to pickup'}>
             <Navigation size={18} aria-hidden="true" /> {headingToDropoff ? 'Directions to drop-off' : isTow ? 'Directions to pickup' : 'Directions'}
           </a>
         )}
       </section>
 
-      <ol className="job-steps" aria-label="Job progress">
-        {STEPS.map((step, index) => (
-          <li key={step.status} className={index < stepIndex ? 'is-done' : index === stepIndex ? 'is-current' : ''} aria-current={index === stepIndex ? 'step' : undefined}>
-            <span aria-hidden="true">{index < stepIndex ? <Check size={13} /> : index + 1}</span>{step.label}
-          </li>
-        ))}
-      </ol>
+      {job.status === 'in_progress' && (
+        <p className="ui-alert"><Info size={15} aria-hidden="true" /> Service has started, so this job can't be cancelled. If something's wrong, report an issue.</p>
+      )}
 
-      {error && <p className="job-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
-
-      <div className="job-actions">
-        {action && (
-          <>
-            <button type="button" className="aid-primary-button" disabled={busy} aria-busy={busy} onClick={primary}>
-              {busy && sheet === null
-                ? <><Loader2 size={18} className="animate-spin" aria-hidden="true" /> Updating…</>
-                : <>{action.next === 'in_progress' && <Wrench size={18} aria-hidden="true" />}{action.next === 'completed' && <Check size={18} aria-hidden="true" />}{action.label}</>}
-            </button>
-            <p className="job-actions__hint">{action.hint}</p>
-          </>
-        )}
-        {job.status === 'in_progress' && (
-          <p className="job-note"><Info size={15} aria-hidden="true" /> Service has started, so this job can't be cancelled. If something's wrong, report an issue.</p>
-        )}
-        <div className="job-actions__row">
-          {canCancel && <button type="button" className="job-cancel" disabled={busy} onClick={() => setSheet('cancel')}>Cancel job</button>}
-          {REPORTABLE.has(job.status) && <button type="button" className="job-report" disabled={busy} onClick={() => setSheet('report')}>Report an issue</button>}
-        </div>
+      <List label="Job options" className="track-more">
+        {REPORTABLE.has(job.status) && <ListRow icon={<Flag size={18} />} title="Report an issue" hasPopup disabled={busy} onClick={() => setSheet('report')} />}
         <SafetyActions audience="driver" />
-      </div>
+        {canCancel && <ListRow icon={<XCircle size={18} />} title="Cancel job" tone="danger" hasPopup chevron={false} disabled={busy} onClick={() => setSheet('cancel')} />}
+      </List>
+
+      {(action || error) && (
+        <StickyActionBar label="Next step" hint={action?.hint}>
+          {error && <p className="ui-alert ui-alert--danger" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
+          {action && (
+            <Button size="lg" block className="job-primary" loading={busy && sheet === null} loadingLabel="Updating…" disabled={busy} onClick={primary}
+              icon={action.next === 'in_progress' ? <Wrench size={18} aria-hidden="true" /> : action.next === 'completed' ? <Check size={18} aria-hidden="true" /> : undefined}>
+              {action.label}
+            </Button>
+          )}
+        </StickyActionBar>
+      )}
 
       {sheet === 'complete' && (
         <ConfirmSheet
