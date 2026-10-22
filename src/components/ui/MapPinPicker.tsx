@@ -12,6 +12,8 @@ export interface MapPinPickerProps {
   lat: number
   lng: number
   onChange: (coords: { lat: number; lng: number }) => void
+  /** Map height (default 220 px); the request flow's location step fills its map area. */
+  height?: number | string
 }
 
 // Component to recenter map when coords change externally
@@ -81,16 +83,16 @@ function DraggableMarker({
   )
 }
 
-export default function MapPinPicker({ lat, lng, onChange }: MapPinPickerProps) {
+export default function MapPinPicker({ lat, lng, onChange, height = 220 }: MapPinPickerProps) {
   const center: LatLngExpression = [lat, lng]
 
   return (
-    <div className="pin-map">
+    <div className="pin-map" style={height === '100%' ? { height: '100%', display: 'flex', flexDirection: 'column' } : undefined}>
       <MapContainer
         center={center}
         zoom={16}
         scrollWheelZoom={false}
-        style={{ height: 220, width: '100%' }}
+        style={height === '100%' ? { flex: 1, width: '100%' } : { height, width: '100%' }}
         attributionControl={false}
       >
         <TileLayer

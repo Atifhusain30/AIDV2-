@@ -8,7 +8,12 @@ import { searchAddressSuggestions } from '../../services/locationService'
 
 vi.mock('../../services/api', () => ({ apiService: { listServices: vi.fn(), quoteBooking: vi.fn() } }))
 vi.mock('../../services/bookingService', () => ({ requestAndStartBooking: vi.fn() }))
-vi.mock('../../services/locationService', () => ({ searchAddressSuggestions: vi.fn() }))
+vi.mock('../../services/locationService', () => ({
+  searchAddressSuggestions: vi.fn(),
+  default: { getCurrentLocationSelection: vi.fn(), reverseGeocodeLabel: vi.fn() },
+}))
+// The map (Leaflet) isn't exercised in jsdom; the location step's text and buttons are.
+vi.mock('../ui/MapPinPicker', () => ({ default: () => null }))
 
 const CATALOG = [
   { id: 'battery_jump', name: "Won't start", description: 'Battery jump-start', basePrice: 69, estimatedTime: 30, available: true, requiresDropoff: false },
@@ -22,6 +27,7 @@ const HERE = { lat: 33.01, lng: -97.02 }
 function open(selectedService: string | null, extra: Record<string, unknown> = {}) {
   useAppStore.setState({
     activeModal: 'services',
+    modalStep: 1,
     currentScreen: 'home',
     serviceFormData: { selectedService: selectedService as never, problemDescription: '', vehicleType: null, dropoff: null },
     userLocationLabel: '500 Elm St, Denton, TX',
@@ -36,6 +42,12 @@ function open(selectedService: string | null, extra: Record<string, unknown> = {
   return screen.getByRole('dialog')
 }
 
+/** Step 1 → 2: confirm the (already known) location. */
+async function confirmLocation(sheet: HTMLElement) {
+  fireEvent.click(await within(sheet).findByRole('button', { name: /^confirm location/i }))
+  return within(sheet).findByRole('heading', { name: 'Tell us more' })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(apiService.listServices).mockResolvedValue({ success: true, data: CATALOG as never })
@@ -44,15 +56,17 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
-describe('request sheet', () => {
-  it('requests a service at the confirmed location for the server price', async () => {
+describe('request flow (Location → Details → Driver → Complete)', () => {
+  it('confirms the location, then requests the service there for the server price', async () => {
     const sheet = open('battery_jump')
-    expect(within(sheet).getByRole('heading', { name: "Won't start" })).toBeTruthy()
-    const request = await within(sheet).findByRole('button', { name: /request · \$69/i })
-    expect(within(sheet).getByText('500 Elm St, Denton, TX')).toBeTruthy()
+    expect(within(sheet).getByRole('heading', { level: 2, name: "Won't start" })).toBeTruthy()
+    expect(await within(sheet).findByRole('heading', { name: 'Confirm your location' })).toBeTruthy()
+    expect(within(sheet).getByText('500 Elm St, Denton, TX', { selector: '.request-confirm__text' })).toBeTruthy()
+    await confirmLocation(sheet)
+    expect(useAppStore.getState().userLocationLabel).toBe('500 Elm St, Denton, TX')
     expect(within(sheet).getByText(/2020 Honda Civic/)).toBeTruthy()
-    fireEvent.change(within(sheet).getByLabelText(/anything the driver should know/i), { target: { value: 'Parked behind the gas station' } })
-    fireEvent.click(request)
+    fireEvent.change(within(sheet).getByLabelText(/note for the driver/i), { target: { value: 'Parked behind the gas station' } })
+    fireEvent.click(await within(sheet).findByRole('button', { name: /find a driver · \$69/i }))
 
     await waitFor(() => expect(bookingService.requestAndStartBooking).toHaveBeenCalledWith(expect.objectContaining({
       service: expect.objectContaining({ id: 'battery_jump', basePrice: 69 }),
@@ -65,12 +79,31 @@ describe('request sheet', () => {
     expect(useAppStore.getState().activeModal).toBeNull()
   })
 
-  it('asks for a location before requesting when none is confirmed', async () => {
+  it('shows the stepper: Location current first, then Location done and Details current', async () => {
+    const sheet = open('flat_tire')
+    const steps = within(sheet).getByRole('list', { name: 'Request steps' })
+    expect(steps.querySelector('[aria-current="step"]')?.textContent).toMatch(/Location/)
+    await confirmLocation(sheet)
+    expect(steps.querySelector('[aria-current="step"]')?.textContent).toMatch(/Details/)
+    expect(steps.querySelector('li.is-done')?.textContent).toMatch(/Location/)
+  })
+
+  it('needs a real location: Confirm stays off, and Search address opens the location search and comes back', async () => {
     const sheet = open('flat_tire', { userLocationLabel: '', userCoords: null })
-    fireEvent.click(await within(sheet).findByRole('button', { name: /set your location/i }))
+    const confirm = await within(sheet).findByRole('button', { name: /^confirm location/i }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(within(sheet).getByRole('button', { name: /search address/i }))
     expect(useAppStore.getState().activeModal).toBe('locationConfirm')
     expect(useAppStore.getState().pendingReturnModal).toBe('services')
     expect(bookingService.requestAndStartBooking).not.toHaveBeenCalled()
+  })
+
+  it('Edit opens the location search and returns to the location step', async () => {
+    const sheet = open('flat_tire')
+    fireEvent.click(await within(sheet).findByRole('button', { name: /edit location/i }))
+    expect(useAppStore.getState().activeModal).toBe('locationConfirm')
+    expect(useAppStore.getState().pendingReturnModal).toBe('services')
+    expect(useAppStore.getState().pendingReturnModalStep).toBe(1)
   })
 
   it('lets the customer pick a service, showing only services offered now', async () => {
@@ -78,19 +111,41 @@ describe('request sheet', () => {
     const picker = await within(sheet).findByRole('list', { name: /services/i })
     expect(within(picker).queryByText('Detailing')).toBeNull()
     fireEvent.click(within(picker).getByRole('button', { name: /flat tire/i }))
-    expect(await within(sheet).findByRole('button', { name: /request · \$79/i })).toBeTruthy()
+    await confirmLocation(sheet)
+    expect(await within(sheet).findByRole('button', { name: /find a driver · \$79/i })).toBeTruthy()
+  })
+
+  it('flat tire asks "Spare tire available?" and folds the answer into the note, clearly labelled', async () => {
+    const sheet = open('flat_tire')
+    await confirmLocation(sheet)
+    fireEvent.click(within(within(sheet).getByRole('radiogroup', { name: 'Spare tire available?' })).getByRole('radio', { name: 'Yes' }))
+    fireEvent.change(within(sheet).getByLabelText(/note for the driver/i), { target: { value: 'Hazards on' } })
+    fireEvent.click(await within(sheet).findByRole('button', { name: /find a driver · \$79/i }))
+    await waitFor(() => expect(bookingService.requestAndStartBooking).toHaveBeenCalledWith(expect.objectContaining({
+      notes: 'Spare tire available: Yes\nHazards on',
+    })))
+  })
+
+  it('says the price honestly: an estimate from the server, nothing about charging (payments are not live)', async () => {
+    const sheet = open('flat_tire')
+    await confirmLocation(sheet)
+    const footer = (await within(sheet).findByRole('button', { name: /find a driver · \$79/i })).closest('.ui-sheet__footer') as HTMLElement
+    expect(footer.textContent).toMatch(/\$79 estimated price/)
+    expect(footer.textContent).toMatch(/Free to cancel until your driver arrives/)
+    expect(footer.textContent).not.toMatch(/charg/i)
   })
 
   it('requires a real drop-off address for towing and shows the exact distance price', async () => {
     vi.mocked(searchAddressSuggestions).mockResolvedValue([{ id: 's1', label: "Joe's Garage, 12 Oak St", lat: 33.05, lng: -97.1 }])
     const sheet = open('towing')
-    const waiting = await within(sheet).findByRole('button', { name: /request · from \$95/i }) as HTMLButtonElement
+    await confirmLocation(sheet)
+    const waiting = await within(sheet).findByRole('button', { name: /find a driver · from \$95/i }) as HTMLButtonElement
     expect(waiting.disabled).toBe(true)
     expect(within(sheet).getByText(/\$95 includes the first 5 miles, then \$4\.50 per mile/i)).toBeTruthy()
 
     fireEvent.change(within(sheet).getByLabelText(/tow to/i), { target: { value: 'Joe' } })
     fireEvent.click(await within(sheet).findByRole('option', { name: /joe's garage/i }, { timeout: 2000 }))
-    const request = await within(sheet).findByRole('button', { name: /request · \$162\.50/i }) as HTMLButtonElement
+    const request = await within(sheet).findByRole('button', { name: /find a driver · \$162\.50/i }) as HTMLButtonElement
     expect(apiService.quoteBooking).toHaveBeenCalledWith({
       serviceType: 'towing',
       location: { address: '500 Elm St, Denton, TX', ...HERE },
@@ -106,26 +161,26 @@ describe('request sheet', () => {
 
   it('blocks a tow the server cannot price, with the reason', async () => {
     vi.mocked(apiService.quoteBooking).mockResolvedValueOnce({ success: false, error: "Tows longer than 100 miles aren't available in the app yet" })
-    const sheet = open('towing', { serviceFormData: { selectedService: 'towing', problemDescription: '', vehicleType: null, dropoff: { address: 'Houston', lat: 29.76, lng: -95.37 } } })
+    const sheet = open('towing', { modalStep: 2, serviceFormData: { selectedService: 'towing', problemDescription: '', vehicleType: null, dropoff: { address: 'Houston', lat: 29.76, lng: -95.37 } } })
     expect((await within(sheet).findByRole('alert')).textContent).toMatch(/longer than 100 miles/)
-    expect((within(sheet).getByRole('button', { name: /request · from \$95/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect((within(sheet).getByRole('button', { name: /find a driver · from \$95/i }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('prefills the tow destination when requesting again', async () => {
-    const sheet = open('towing', { serviceFormData: { selectedService: 'towing', problemDescription: '', vehicleType: null, dropoff: { address: 'Home, 9 Pine Rd', lat: 33.2, lng: -97.3 } } })
+    const sheet = open('towing', { modalStep: 2, serviceFormData: { selectedService: 'towing', problemDescription: '', vehicleType: null, dropoff: { address: 'Home, 9 Pine Rd', lat: 33.2, lng: -97.3 } } })
     expect(await within(sheet).findByText('Home, 9 Pine Rd')).toBeTruthy()
-    expect((await within(sheet).findByRole('button', { name: /request · \$162\.50/i }) as HTMLButtonElement).disabled).toBe(false)
+    expect((await within(sheet).findByRole('button', { name: /find a driver · \$162\.50/i }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('shows server errors inline instead of an alert', async () => {
     vi.mocked(bookingService.requestAndStartBooking).mockRejectedValueOnce(new Error('A valid service location is required'))
-    const sheet = open('battery_jump')
-    fireEvent.click(await within(sheet).findByRole('button', { name: /request · \$69/i }))
+    const sheet = open('battery_jump', { modalStep: 2 })
+    fireEvent.click(await within(sheet).findByRole('button', { name: /find a driver · \$69/i }))
     expect((await within(sheet).findByRole('alert')).textContent).toMatch(/valid service location/)
     expect(useAppStore.getState().activeModal).toBe('services')
   })
 
-  it('E4: with a request already in progress, opening the sheet goes to that request', async () => {
+  it('E4: with a request already in progress, opening the flow goes to that request', async () => {
     useAppStore.setState({
       activeRequestRedirect: false, activeModal: 'services', currentScreen: 'home',
       serviceFormData: { selectedService: 'battery_jump', problemDescription: '', vehicleType: null, dropoff: null },
@@ -142,37 +197,37 @@ describe('request sheet', () => {
   it('E4: when the server says one is already active, the customer is taken to it, not shown an error', async () => {
     useAppStore.setState({ activeRequestRedirect: false })
     vi.mocked(bookingService.requestAndStartBooking).mockResolvedValueOnce({ booking: { id: 'booking-other-device' }, alreadyActive: true } as never)
-    const sheet = open('battery_jump', { activeBooking: null })
-    fireEvent.click(await within(sheet).findByRole('button', { name: /request · \$69/i }))
+    const sheet = open('battery_jump', { activeBooking: null, modalStep: 2 })
+    fireEvent.click(await within(sheet).findByRole('button', { name: /find a driver · \$69/i }))
     await waitFor(() => expect(useAppStore.getState().currentScreen).toBe('chat'))
     expect(useAppStore.getState().activeRequestRedirect).toBe(true)
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('F1: uses the one bottom-sheet style with the request button pinned in its footer', async () => {
-    const sheet = open('flat_tire')
-    expect(sheet.className).toContain('ui-sheet')
-    const request = await within(sheet).findByRole('button', { name: /request · \$79/i })
+  it('F1: one dialog; the primary button is pinned in its footer; sentence-case labels', async () => {
+    const sheet = open('flat_tire', { modalStep: 2 })
+    expect(sheet.className).toContain('request-flow')
+    const request = await within(sheet).findByRole('button', { name: /find a driver · \$79/i })
     expect(request.closest('.ui-sheet__footer')).toBeTruthy()
-    // Sentence-case labels, no shouty micro-labels.
-    expect(within(sheet).getByText('Help at')).toBeTruthy()
-    expect(within(sheet).queryByText('HELP AT')).toBeNull()
+    expect(within(sheet).getByText('Your vehicle')).toBeTruthy()
+    expect(within(sheet).queryByText('YOUR VEHICLE')).toBeNull()
   })
 
-  it('F1: with more than one saved vehicle, the vehicle is picked right in the sheet', async () => {
+  it('F1: with more than one saved vehicle, the vehicle is picked right in Details', async () => {
     const sheet = open('flat_tire', {
+      modalStep: 2,
       vehicles: [
         { id: 'veh-1', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123' },
         { id: 'veh-2', make: 'Toyota', model: 'Camry', year: 2018, color: 'Grey', plate: 'XYZ789' },
       ] as never,
     })
-    const group = await within(sheet).findByRole('radiogroup', { name: 'Vehicle' })
+    const group = await within(sheet).findByRole('radiogroup', { name: 'Your vehicle' })
     expect((within(group).getByRole('radio', { name: /2020 Honda Civic/ }) as HTMLInputElement).checked).toBe(true)
     fireEvent.click(within(group).getByRole('radio', { name: /2018 Toyota Camry/ }))
     expect(useAppStore.getState().activeVehicleId).toBe('veh-2')
   })
 
-  it('F1: from Home it takes two taps — the problem, then Request — with location and vehicle already filled in', async () => {
+  it('F1: from Home it takes three taps — the problem, Confirm location, Find a driver — with location and vehicle already filled in', async () => {
     const { default: HomeScreen } = await import('../../screens/HomeScreen')
     useAppStore.setState({
       activeModal: null, currentScreen: 'home', activeBooking: null, bookingHistory: [],
@@ -183,7 +238,8 @@ describe('request sheet', () => {
     render(<HomeScreen />)
     fireEvent.click(screen.getByRole('button', { name: /flat tire/i })) // tap 1
     const sheet = await screen.findByRole('dialog', { name: 'Flat tire' })
-    fireEvent.click(await within(sheet).findByRole('button', { name: /request · \$79/i })) // tap 2
+    fireEvent.click(await within(sheet).findByRole('button', { name: /^confirm location/i })) // tap 2
+    fireEvent.click(await within(sheet).findByRole('button', { name: /find a driver · \$79/i })) // tap 3
     await waitFor(() => expect(bookingService.requestAndStartBooking).toHaveBeenCalledWith(expect.objectContaining({
       service: expect.objectContaining({ id: 'flat_tire' }), locationLabel: '500 Elm St, Denton, TX',
     })))
@@ -201,11 +257,11 @@ describe('request sheet', () => {
 
   it('does not allow requesting without real prices', async () => {
     vi.mocked(apiService.listServices).mockResolvedValueOnce({ success: false, error: 'Unable to reach AID.' })
-    const sheet = open('battery_jump')
+    const sheet = open('battery_jump', { modalStep: 2 })
     expect((await within(sheet).findByRole('alert')).textContent).toMatch(/unable to reach aid/i)
-    expect(within(sheet).queryByRole('button', { name: /request ·/i })).toBeNull()
+    expect(within(sheet).queryByRole('button', { name: /find a driver/i })).toBeNull()
     vi.mocked(apiService.listServices).mockResolvedValueOnce({ success: true, data: CATALOG as never })
     fireEvent.click(within(sheet).getByRole('button', { name: /try again/i }))
-    expect(await within(sheet).findByRole('button', { name: /request · \$69/i })).toBeTruthy()
+    expect(await within(sheet).findByRole('button', { name: /find a driver · \$69/i })).toBeTruthy()
   })
 })
