@@ -156,8 +156,8 @@ interface AppState {
   setServicesModalOpen: (open: boolean) => void
   
   // Navigation
-  currentScreen: 'home' | 'history' | 'chat' | 'profile'
-  setCurrentScreen: (screen: 'home' | 'history' | 'chat' | 'profile') => void
+  currentScreen: 'home' | 'history' | 'chat' | 'garage' | 'profile'
+  setCurrentScreen: (screen: 'home' | 'history' | 'chat' | 'garage' | 'profile') => void
   
   // Booking Detail Modal (UI-only, not persisted)
   selectedBookingId: string | null

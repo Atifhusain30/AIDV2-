@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import HomeScreen from './HomeScreen'
 import { useAppStore } from '../store/useAppStore'
 
@@ -18,31 +18,42 @@ beforeEach(() => {
 
 afterEach(() => cleanup())
 
-describe('consumer roadside home', () => {
-  it('makes location, service selection, and saved vehicle acceleration obvious', () => {
+describe('consumer roadside home (owner reference)', () => {
+  it('leads with the headline, a short subline and only true trust chips', () => {
     render(<HomeScreen />)
-
-    expect(screen.getByRole('button', { name: /Confirm your location/i })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'How can we help?' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Won't start/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Flat tire/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Need a tow/i })).toBeTruthy()
-    expect(screen.getByText('Add a vehicle to request faster')).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Roadside help when you need it.' })).toBeTruthy()
+    const chips = screen.getByRole('list', { name: 'Why AID' })
+    expect(within(chips).getAllByRole('listitem').map((item) => item.textContent?.trim())).toEqual(['Verified drivers', 'Live tracking'])
+    // Operating hours aren't set yet (launch checklist A8), so no 24/7 promise.
+    expect(screen.queryByText(/24\/7/)).toBeNull()
   })
 
-  it('preselects the matching service when a shortcut is chosen', () => {
+  it('has the AID logo and a profile button that opens Account', () => {
     render(<HomeScreen />)
-    fireEvent.click(screen.getByRole('button', { name: /Won't start/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open account' }))
+    expect(useAppStore.getState().currentScreen).toBe('profile')
+  })
 
+  it('shows six service tiles in a 3×2 grid, each with an icon, title and one-line subtitle', () => {
+    render(<HomeScreen />)
+    const grid = screen.getByRole('group', { name: 'Roadside services' })
+    const tiles = within(grid).getAllByRole('button')
+    expect(tiles).toHaveLength(6)
+    expect(tiles.map((tile) => tile.querySelector('strong')?.textContent)).toEqual(['Flat tire', 'Jump start', 'Tow', 'Locked out', 'Fuel delivery', 'EV charge'])
+    for (const tile of tiles) expect(tile.querySelector('small')?.textContent?.length).toBeGreaterThan(0)
+  })
+
+  it('a tile starts the request for that service', () => {
+    render(<HomeScreen />)
+    fireEvent.click(screen.getByRole('button', { name: /Jump start/i }))
     expect(useAppStore.getState().serviceFormData.selectedService).toBe('battery_jump')
     expect(useAppStore.getState().activeModal).toBe('services')
   })
 
-  it('opens the same request sheet for towing and EV charging', () => {
+  it('opens the same request flow for towing and EV charging', () => {
     render(<HomeScreen />)
-    fireEvent.click(screen.getByRole('button', { name: /Need a tow/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Tow/ }))
     expect(useAppStore.getState().serviceFormData.selectedService).toBe('towing')
-    expect(useAppStore.getState().activeModal).toBe('services')
     cleanup()
     useAppStore.setState({ activeModal: null })
     render(<HomeScreen />)
@@ -51,16 +62,15 @@ describe('consumer roadside home', () => {
     expect(useAppStore.getState().activeModal).toBe('services')
   })
 
-  it('marks detailing and window tint as coming soon instead of faking a booking', () => {
+  it('keeps Home simple: no garage list, no coming-soon tiles, no upsell', () => {
     render(<HomeScreen />)
-    for (const name of [/detailing/i, /window tint/i]) {
-      const card = screen.getByRole('button', { name })
-      expect(card.hasAttribute('disabled')).toBe(true)
-      expect(card.textContent).toMatch(/coming soon/i)
-    }
+    expect(screen.queryByRole('heading', { name: 'Your garage' })).toBeNull()
+    expect(screen.queryByText(/coming soon/i)).toBeNull()
+    expect(screen.queryByText(/AID Pro/i)).toBeNull()
+    expect(screen.queryByText(/drivers nearby|avg\.? arrival/i)).toBeNull()
   })
 
-  it('"Not sure what you need?" opens the sheet with no service preselected', () => {
+  it('"Not sure what you need?" opens the flow with no service preselected', () => {
     useAppStore.setState({ serviceFormData: { selectedService: 'towing', problemDescription: '', vehicleType: null } })
     render(<HomeScreen />)
     fireEvent.click(screen.getByRole('button', { name: /not sure what you need/i }))
@@ -68,7 +78,7 @@ describe('consumer roadside home', () => {
     expect(useAppStore.getState().activeModal).toBe('services')
   })
 
-  it('"Request again" reopens the sheet for the same service instead of creating a local booking', () => {
+  it('"Request again" reopens the flow for the same service instead of creating a local booking', () => {
     useAppStore.setState({
       bookingHistory: [{
         id: 'old-1', status: 'completed', createdAt: new Date(), service: { id: 'towing', name: 'Towing', description: '', basePrice: 125, estimatedTime: 60 },
@@ -97,22 +107,14 @@ describe('consumer roadside home', () => {
     render(<HomeScreen />)
     const track = screen.getByRole('button', { name: /track active request/i })
     expect(track.textContent).toMatch(/Flat tire/)
-    expect(screen.queryByRole('heading', { name: 'How can we help?' })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Won't start/i })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Roadside help when you need it.' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Roadside services' })).toBeNull()
     fireEvent.click(track)
     expect(useAppStore.getState().currentScreen).toBe('chat')
   })
 
-  it('vehicle care is a compact grid (nothing scrolls sideways off-screen)', () => {
+  it('keeps a quiet safety link that opens safety info', () => {
     render(<HomeScreen />)
-    const care = screen.getByRole('group', { name: 'Vehicle care' })
-    expect(care.className).not.toMatch(/care-row/)
-    expect(care.querySelectorAll('button')).toHaveLength(3)
-  })
-
-  it('does not promise 24/7 help and opens safety info instead', () => {
-    render(<HomeScreen />)
-    expect(screen.queryByText(/24\/7/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Safety/ }))
     expect(screen.getByRole('dialog', { name: 'Safety' })).toBeTruthy()
   })

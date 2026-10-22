@@ -44,6 +44,7 @@ import DriverLoginScreen from './screens/driver/DriverLoginScreen'
 const HistoryScreen = lazyWithRetry(() => import('./screens/HistoryScreen'))
 const UpdatesScreen = lazyWithRetry(() => import('./screens/UpdatesScreen'))
 const ProfileScreen = lazyWithRetry(() => import('./screens/ProfileScreen'))
+const GarageScreen = lazyWithRetry(() => import('./screens/GarageScreen'))
 const HelpSupportScreen = lazyWithRetry(() => import('./screens/HelpSupportScreen'))
 const PasswordRecoveryScreen = lazyWithRetry(() => import('./components/auth/PasswordRecoveryScreen'))
 const RatingSheet = lazyWithRetry(() => import('./components/rating/RatingSheet'))
@@ -62,7 +63,7 @@ const screenFallback = <SkeletonRows count={4} />
 type AppMode = 'select' | 'customer' | 'driver'
 type DriverView = 'home' | 'onboarding' | 'job' | 'settings' | 'vehicle' | 'help'
 
-const CUSTOMER_TITLES: Record<string, string> = { home: 'Home', history: 'Activity', chat: 'Updates', profile: 'Account' }
+const CUSTOMER_TITLES: Record<string, string> = { home: 'Home', history: 'Activity', chat: 'Updates', garage: 'Garage', profile: 'Account' }
 const DRIVER_TITLES: Record<DriverView, string> = {
   home: 'Driver home', onboarding: 'Verification', job: 'Active job', settings: 'Settings', vehicle: 'Vehicle & equipment', help: 'Help & Support',
 }
@@ -151,6 +152,8 @@ function CustomerApp() {
         return <HistoryScreen />
       case 'chat':
         return <UpdatesScreen />
+      case 'garage':
+        return <GarageScreen />
       case 'profile':
         return <ProfileScreen />
       default:

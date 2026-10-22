@@ -72,23 +72,18 @@ describe('account garage states (F5)', () => {
     render(<ProfileScreen />)
     expect((await screen.findByRole('alert')).textContent).toMatch(/Couldn't load your garage/)
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }))
-    const use = await screen.findByRole('button', { name: /2020 Honda Civic/ })
-    expect(use.getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByText('Default')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /2020 Honda Civic/ })).toBeTruthy()
   })
 
-  it('keeps the garage one clean list: Remove appears only in Edit mode, and Add vehicle is a row', async () => {
+  it('shows a garage summary (vehicles + Add vehicle); Edit opens the Garage tab', async () => {
     vi.mocked(apiService.listVehicles).mockResolvedValue({ success: true, data: [{ id: 'v1', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123', createdAt: '' }] })
     signIn()
     render(<ProfileScreen />)
-    await screen.findByRole('button', { name: /2020 Honda Civic/ })
-    expect(screen.queryByRole('button', { name: 'Remove Honda Civic' })).toBeNull()
+    const civic = await screen.findByRole('button', { name: /2020 Honda Civic/ })
+    expect(civic.textContent).toContain('Blue · ABC123')
     expect(screen.getByRole('button', { name: 'Add vehicle' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Edit garage' }))
-    expect(screen.getByRole('button', { name: 'Remove Honda Civic' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Add vehicle' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Done editing garage' }))
-    expect(screen.queryByRole('button', { name: 'Remove Honda Civic' })).toBeNull()
+    expect(useAppStore.getState().currentScreen).toBe('garage')
   })
 
   it('offers to add the first vehicle when the garage is empty', async () => {

@@ -1,12 +1,13 @@
 import { motion } from 'framer-motion'
-import { Clock3, Home as House, UserRound } from 'lucide-react'
+import { Car, Clock3, Home as House, UserRound } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 
-// Home = request help (same behaviour as before). "Help & Support" lives only under Account,
-// so no tab is called "Help" (Uber / DoorDash / Lyft all lead with Home).
+// Owner reference: Home · Activity · Garage · Account. Home = request help; Garage = saved vehicles;
+// "Help & Support" lives under Account, so no tab is called "Help".
 const navItems = [
   { id: 'home', icon: House, label: 'Home' },
   { id: 'history', icon: Clock3, label: 'Activity' },
+  { id: 'garage', icon: Car, label: 'Garage' },
   { id: 'profile', icon: UserRound, label: 'Account' },
 ] as const
 
