@@ -21,7 +21,8 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 ## Phase 1 — Broken core flows (Critical)
 | # | Item | Status |
 |---|---|---|
-| 1.1 | Driver onboarding: collect all 4 docs with expiration dates, call submit, show review status/reasons (`DriverOnboardingScreen`, `services/documents.ts`) | ❌ app can't upload a license today |
+| 1.1 | Driver onboarding: collect all 4 docs with expiration dates, call submit, show review status/reasons (`DriverOnboardingScreen`, `services/documents.ts`) | ✅ `04ba223` |
+| 1.1b | Admin review panel (separate site, `admin/`): queue, search, document review with reasons, verify/suspend/reinstate, history | ✅ `704eb9c`, redesigned `7e3bb83` |
 | 1.2 | Towing & EV use a hard-coded Dallas location; drop-off coordinates never set (`TowingModal`, `EVChargingModal`, `useAppStore` `userLocation`) | ❌ |
 | 1.3 | Detailing & Window Tint show "Booked!" without creating a booking | ❌ wire to API or mark "Coming soon" |
 | 1.4 | "Request again"/Rebook creates a local-only phantom booking (`rebookFromHistory`) | ❌ |
@@ -38,7 +39,9 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 2.4 | Admin accounts require MFA (TOTP) | ❌ |
 | 2.5 | Payment: pre-authorize at booking (manual capture), capture on completion; customer confirmation of completion | ❌ |
 | 2.6 | Stripe webhook: dedupe event ids, verify amount/booking, handle refunds/disputes, 500 on DB errors; reuse/cancel stale intents | ⚠️ |
-| 2.7 | Verification: atomic readiness check; rejecting an approved doc of a verified driver must suspend/recompute | ⚠️ |
+| 2.7 | Verification: atomic readiness check; rejecting an approved doc of a verified driver must suspend/recompute | ⚠️ revoke → offline fixed `7e3bb83`; atomic check open |
+| 2.7b | Drivers can always go offline (even after credentials lapse) | ✅ `04ba223` |
+| 2.7c | Sign-out and wrong-portal rejection affect only this device (password change still global) | ✅ `7e3bb83` |
 | 2.8 | Account deletion: keep (anonymize) paid bookings for records; handle auth-delete failure; let suspended users delete; sweep storage prefix | ⚠️ |
 | 2.9 | Auth settings for production: email confirmation, secure password change, stronger password rules + leaked-password check | 🔒 Supabase dashboard |
 | 2.10 | Input validation gaps (UUID params, drop-off address length, lat/lng ranges); status route ignores credential expiry | ⚠️ |
