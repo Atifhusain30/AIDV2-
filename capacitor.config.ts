@@ -12,7 +12,7 @@ const config: CapacitorConfig = {
   ios: {
     // iOS-specific configuration
     contentInset: 'automatic',
-    backgroundColor: '#0d0914',
+    backgroundColor: '#0b0b0f',
     preferredContentMode: 'mobile',
     scrollEnabled: true,
     limitsNavigationsToAppBoundDomains: false,
@@ -24,7 +24,7 @@ const config: CapacitorConfig = {
     StatusBar: {
       // Light icons remain legible against the app's dark native chrome.
       style: 'light',
-      backgroundColor: '#0d0914'
+      backgroundColor: '#0b0b0f'
     },
     // Keyboard configuration
     Keyboard: {
@@ -36,7 +36,7 @@ const config: CapacitorConfig = {
     SplashScreen: {
       launchShowDuration: 2000,
       launchAutoHide: true,
-      backgroundColor: '#0d0914',
+      backgroundColor: '#0b0b0f',
       androidSplashResourceName: 'splash',
       showSpinner: false,
       splashFullScreen: true,

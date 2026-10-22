@@ -37,6 +37,54 @@ describe('one colour system (F2)', () => {
   })
 })
 
+/**
+ * Owner rule (redesign, 2026-10-22): no glow. Flat near-black, solid violet primary — no coloured
+ * blurred shadows, no gradients with colour in them (neutral black fades over a map are fine).
+ */
+const COLOR = /#[0-9a-f]{3,8}\b|rgba?\([^)]*\)/gi
+function chromatic(color: string): boolean {
+  let r: number, g: number, b: number
+  if (color.startsWith('#')) {
+    const hex = color.slice(1)
+    const full = hex.length <= 4 ? hex.split('').map((c) => c + c).join('') : hex
+    ;[r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16))
+  } else {
+    ;[r, g, b] = color.replace(/rgba?\(/, '').split(',').slice(0, 3).map((v) => parseFloat(v))
+  }
+  return Math.max(r, g, b) - Math.min(r, g, b) > 12
+}
+/** Every `box-shadow` with a blur and every gradient whose colours aren't neutral grey/black. */
+function glowViolations(text: string): string[] {
+  const hits: string[] = []
+  for (const match of text.matchAll(/box-shadow:\s*([^;}]+)/g)) {
+    for (const layer of match[1].split(/,(?![^(]*\))/)) {
+      const lengths = layer.replace(COLOR, '').match(/-?[\d.]+px|\b0\b/g) ?? []
+      const blur = parseFloat(lengths[2] ?? '0')
+      const spread = parseFloat(lengths[3] ?? '0')
+      const colours = layer.match(COLOR) ?? []
+      // A blurred colour is a glow; a wide coloured spread is a halo. A thin (≤2px) solid ring is fine.
+      if (!/inset/.test(layer) && (blur > 0 || spread > 2) && colours.some(chromatic)) hits.push(`box-shadow ${layer.trim()}`)
+    }
+  }
+  for (const match of text.matchAll(/(?:linear|radial|conic)-gradient\(((?:[^()]|\([^()]*\))*)\)/g)) {
+    if ((match[1].match(COLOR) ?? []).some(chromatic)) hits.push(`gradient ${match[0].slice(0, 80)}`)
+  }
+  return hits
+}
+
+describe('no glow (owner correction)', () => {
+  it('the detector catches glow and allows flat shadows', () => {
+    expect(glowViolations('.a { box-shadow: 0 4px 14px rgba(124,58,237,.55); }')).toHaveLength(1)
+    expect(glowViolations('.a { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }')).toHaveLength(1)
+    expect(glowViolations('.a { box-shadow: 0 6px 18px rgba(0, 0, 0, .45); background: linear-gradient(to bottom, transparent, rgba(11, 11, 15, .55)); }')).toEqual([])
+    expect(glowViolations('.a { box-shadow: inset 2px 0 0 #7c3aed; }')).toEqual([])
+  })
+
+  it('app stylesheets have no coloured glows, halos or gradient fills', () => {
+    for (const [name, text] of Object.entries(css)) expect(glowViolations(text), name).toEqual([])
+  })
+})
+
 describe('one icon set, one stroke weight', () => {
   const admin = ['AdminApp.tsx', 'Reports.tsx', 'FilterTabs.tsx', 'ui.tsx', 'TwoStep.tsx'].map((file) => [`admin/src/${file}`, read(`admin/src/${file}`)] as const)
   const all = [...Object.entries(tsx), ...admin]

@@ -9,6 +9,12 @@ import OfflineBanner from './OfflineBanner'
 import PersonAvatar, { initials } from './PersonAvatar'
 import StepProgress from './StepProgress'
 import StickyActionBar from './StickyActionBar'
+import FlowStepper from './FlowStepper'
+import SegmentedControl from './SegmentedControl'
+import StatusPill from './StatusPill'
+import VehicleCard from './VehicleCard'
+import DriverCard from './DriverCard'
+import ProgressRing from './ProgressRing'
 import { reportServerReachable, resetConnectivityForTests } from '../../lib/connectivity'
 
 afterEach(() => { cleanup(); resetConnectivityForTests() })
@@ -88,6 +94,63 @@ describe('design system primitives', () => {
   it('StepProgress names the current step and its position', () => {
     render(<StepProgress label="Job progress" current={1} steps={[{ id: 'a', label: 'Accepted' }, { id: 'b', label: 'On the way' }, { id: 'c', label: 'Arrived' }]} />)
     expect(screen.getByRole('group', { name: 'Job progress' }).textContent).toContain('On the way · Step 2 of 3')
+  })
+
+  it('FlowStepper: four named steps, done steps checked, the current one marked for screen readers', () => {
+    render(<FlowStepper current={1} />)
+    const steps = screen.getByRole('list', { name: 'Request steps' })
+    const items = steps.querySelectorAll('li')
+    expect([...items].map((item) => item.textContent?.replace(/\(.*\)/, '').trim())).toEqual(['Location', 'Details', 'Driver', 'Complete'])
+    expect(items[0].className).toContain('is-done')
+    expect(items[1].getAttribute('aria-current')).toBe('step')
+    expect(items[2].className).not.toMatch(/is-done|is-current/)
+  })
+
+  it('SegmentedControl: a radio group (Yes / No) with 44px+ options and no answer until one is picked', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<SegmentedControl label="Spare tire available?" value={null} options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} onChange={onChange} />)
+    const group = screen.getByRole('radiogroup', { name: 'Spare tire available?' })
+    const yes = screen.getByRole('radio', { name: 'Yes' })
+    expect(group.querySelectorAll('[aria-checked="true"]')).toHaveLength(0)
+    fireEvent.click(yes)
+    expect(onChange).toHaveBeenCalledWith('yes')
+    rerender(<SegmentedControl label="Spare tire available?" value="yes" options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} onChange={onChange} />)
+    expect(screen.getByRole('radio', { name: 'Yes' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('StatusPill: one pill per meaning (green done, red cancelled, violet live)', () => {
+    render(<><StatusPill tone="success">Completed</StatusPill><StatusPill tone="danger">Cancelled</StatusPill><StatusPill tone="brand">Live</StatusPill></>)
+    expect(screen.getByText('Completed').className).toContain('ui-pill--success')
+    expect(screen.getByText('Cancelled').className).toContain('ui-pill--danger')
+    expect(screen.getByText('Live').className).toContain('ui-pill--brand')
+  })
+
+  it('VehicleCard: the real vehicle, colour · plate, and a chevron only when tappable', () => {
+    const onClick = vi.fn()
+    const vehicle = { id: 'v', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123' }
+    const { rerender } = render(<VehicleCard vehicle={vehicle as never} label="Your vehicle" onClick={onClick} />)
+    const card = screen.getByRole('button', { name: /Your vehicle.*2020 Honda Civic.*Blue · ABC123/ })
+    fireEvent.click(card)
+    expect(onClick).toHaveBeenCalled()
+    rerender(<VehicleCard vehicle={vehicle as never} label="Your vehicle" />)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByText('2020 Honda Civic')).toBeTruthy()
+  })
+
+  it('DriverCard: initials avatar, real rating only from 3 ratings up, vehicle and plate badge', () => {
+    const { rerender } = render(<DriverCard name="Preview D." rating={{ rating: 5, ratingCount: 328 }} vehicle="White Ford F-550" plate="TOW 77" />)
+    expect(screen.getByRole('group', { name: 'Your driver' }).textContent).toMatch(/Preview D\..*5\.0.*\(328\).*White Ford F-550.*TOW 77/)
+    expect(screen.getByLabelText('Rated 5.0 out of 5 from 328 ratings')).toBeTruthy()
+    rerender(<DriverCard name="Dana S." rating={{ rating: 5, ratingCount: 2 }} vehicle="" />)
+    expect(screen.getByRole('group', { name: 'Your driver' }).textContent).toMatch(/New on AID/)
+    expect(screen.queryByText(/5\.0/)).toBeNull()
+  })
+
+  it('ProgressRing: a progressbar with the real value and a text label', () => {
+    render(<ProgressRing value={0.5} label="Service progress">Changing tire</ProgressRing>)
+    const ring = screen.getByRole('progressbar', { name: 'Service progress' })
+    expect(ring.getAttribute('aria-valuenow')).toBe('50')
+    expect(ring.textContent).toContain('Changing tire')
   })
 
   it('StickyActionBar keeps the primary action and its hint together', () => {
