@@ -81,6 +81,15 @@ describe('E6: role comes from the server', () => {
     expect(useAppStore.getState()).toMatchObject({ ownerId: 'u1', ownerRole: 'customer' })
   })
 
+  it('loads the garage with the account, so Home shows the saved vehicle without visiting Account first', async () => {
+    const { apiService } = await import('./services/api')
+    vi.mocked(apiService.listVehicles).mockResolvedValueOnce({ success: true, data: [{ id: 'v9', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'SIM 123', createdAt: '' }] })
+    mocks.restore.mockResolvedValue({ success: true, data: { user: serverCustomer, token: 'tok-1' } })
+    render(<App />)
+    await screen.findByRole('navigation', { name: 'Customer navigation' })
+    await waitFor(() => expect(useAppStore.getState().vehicles.map((vehicle) => vehicle.id)).toEqual(['v9']))
+  })
+
   it('opens nothing when the server cannot confirm the account at app start', async () => {
     useAuthStore.setState({ isAuthenticated: false, user: null, token: null, error: null })
     mocks.restore.mockResolvedValue({ success: false, error: 'Unable to reach AID to confirm your account. Check your connection and try again.' })

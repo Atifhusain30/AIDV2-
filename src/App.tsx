@@ -414,9 +414,12 @@ function App() {
       }
 
       markHistoryLoading()
-      const [history, active] = await Promise.all([apiService.listBookings(), apiService.getActiveBooking()])
+      // The garage loads with the rest, so Home shows the saved vehicle (and a request is two taps)
+      // without first visiting Account — found on the iPhone simulator.
+      const [history, active, garage] = await Promise.all([apiService.listBookings(), apiService.getActiveBooking(), apiService.listVehicles()])
       if (cancelled) return
       const store = useAppStore.getState()
+      if (garage.success && garage.data) store.setVehicles(garage.data)
       const previous = store.activeBooking
       // F5: Activity shows a skeleton until this answers, then the list or an error with Try again.
       if (history.success && history.data) store.clearBookings()
