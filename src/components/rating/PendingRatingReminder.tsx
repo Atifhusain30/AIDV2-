@@ -7,7 +7,10 @@
 import { useEffect, useState } from 'react'
 import { apiService } from '../../services/api'
 import { markRatingReminded, pickReminder, type PendingRating } from '../../lib/ratings'
-import RatingSheet from './RatingSheet'
+import ChunkBoundary from '../ui/ChunkBoundary'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
+
+const RatingSheet = lazyWithRetry(() => import('./RatingSheet'))
 
 interface Props {
   userId: string | null | undefined
@@ -38,5 +41,5 @@ export default function PendingRatingReminder({ userId, busyBookingId, delayMs =
   }, [userId])
 
   if (!reminder) return null
-  return <RatingSheet pending={reminder} context="reminder" onRated={() => setReminder(null)} onSkip={() => setReminder(null)} />
+  return <ChunkBoundary><RatingSheet pending={reminder} context="reminder" onRated={() => setReminder(null)} onSkip={() => setReminder(null)} /></ChunkBoundary>
 }

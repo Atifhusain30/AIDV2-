@@ -15,8 +15,9 @@ import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
 import { ratingSummary } from '../../lib/ratings'
 import { showChatEntry, type BookingChat } from '../../lib/chat'
-import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
+import ChunkBoundary from '../../components/ui/ChunkBoundary'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
 import LiveRegion from '../../components/ui/LiveRegion'
 import Button, { buttonClass } from '../../components/ui/Button'
@@ -27,6 +28,9 @@ import { EmptyState } from '../../components/ui/States'
 import { List, ListRow } from '../../components/ui/ListRow'
 import { TripStops } from '../../components/tracking/TrackLayout'
 import { useAnnounceOnChange, useAnnouncer } from '../../lib/announce'
+
+// F6: chat downloads only when it's opened.
+const JobChat = lazyWithRetry(() => import('../../components/chat/JobChat'))
 
 interface DriverJobScreenProps {
   onBack: () => void
@@ -229,10 +233,12 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
       )}
       {sheet === 'report' && <ReportIssueSheet bookingId={job.id} audience="driver" onClose={() => setSheet(null)} />}
       {chatOpen && (
-        <JobChat
-          bookingId={job.id} audience="driver" otherName={customerFirst} serviceName={job.service.name}
-          initialChat={job.chat} onClose={() => setChatOpen(false)} onChatChange={updateChat}
-        />
+        <ChunkBoundary>
+          <JobChat
+            bookingId={job.id} audience="driver" otherName={customerFirst} serviceName={job.service.name}
+            initialChat={job.chat} onClose={() => setChatOpen(false)} onChatChange={updateChat}
+          />
+        </ChunkBoundary>
       )}
     </div>
   )

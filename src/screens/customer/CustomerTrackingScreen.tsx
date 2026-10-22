@@ -16,8 +16,9 @@ import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
 import { jobCountLabel, ratingSummary } from '../../lib/ratings'
 import { showChatEntry, type BookingChat } from '../../lib/chat'
-import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
+import ChunkBoundary from '../../components/ui/ChunkBoundary'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
 import LiveRegion from '../../components/ui/LiveRegion'
 import PersonAvatar from '../../components/ui/PersonAvatar'
@@ -25,6 +26,9 @@ import StepProgress from '../../components/ui/StepProgress'
 import { List, ListRow } from '../../components/ui/ListRow'
 import { TrackLayout, TripStops } from '../../components/tracking/TrackLayout'
 import { useAnnounceOnChange, useAnnouncer, useEtaAnnouncement } from '../../lib/announce'
+
+// F6: chat downloads only when it's opened.
+const JobChat = lazyWithRetry(() => import('../../components/chat/JobChat'))
 
 const STEPS: { id: BookingStatus; label: string }[] = [
   { id: 'accepted', label: 'Accepted' },
@@ -209,10 +213,12 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
       )}
       {sheet === 'report' && <ReportIssueSheet bookingId={booking.id} audience="customer" onClose={() => setSheet(null)} />}
       {chatOpen && (
-        <JobChat
-          bookingId={booking.id} audience="customer" otherName={firstName} serviceName={booking.service.name}
-          initialChat={booking.chat} onClose={() => setChatOpen(false)} onChatChange={updateChat}
-        />
+        <ChunkBoundary>
+          <JobChat
+            bookingId={booking.id} audience="customer" otherName={firstName} serviceName={booking.service.name}
+            initialChat={booking.chat} onClose={() => setChatOpen(false)} onChatChange={updateChat}
+          />
+        </ChunkBoundary>
       )}
     </TrackLayout>
   )

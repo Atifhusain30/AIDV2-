@@ -29,7 +29,6 @@ import type { Booking } from './types'
 import type { PendingRating } from './lib/ratings'
 
 vi.mock('./lib/notifications', () => ({ initNotifications: vi.fn(), registerNotificationTapHandler: vi.fn() }))
-vi.mock('./lib/leafletFix', () => ({ applyLeafletIconFix: vi.fn() }))
 vi.mock('./components/tracking/LiveDriverMap', () => ({ default: () => null }))
 vi.mock('./services/api', () => {
   const ok = (data: unknown) => vi.fn(async () => ({ success: true, data }))

@@ -28,11 +28,12 @@ describe('ReceiptModal secure checkout', () => {
     useAppStore.setState({ receiptBookingId: booking.id, bookingHistory: [booking] })
   })
 
-  it('opens the Stripe-hosted checkout from an unpaid receipt', () => {
+  it('opens the Stripe-hosted checkout from an unpaid receipt', async () => {
     render(<ReceiptModal />)
     expect(screen.queryByText('Visa •••• 4242')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Pay securely' }))
-    expect(screen.getByTestId('stripe-checkout')).toBeTruthy()
+    // F6: Stripe's checkout is lazy-loaded, so it appears once its code has loaded.
+    expect(await screen.findByTestId('stripe-checkout')).toBeTruthy()
   })
 })
 

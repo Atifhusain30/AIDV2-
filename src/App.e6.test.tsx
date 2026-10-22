@@ -28,7 +28,6 @@ vi.mock('./lib/notifications', () => ({
   initNotifications: vi.fn(), registerNotificationTapHandler: vi.fn(), clearAllNotifications: vi.fn(async () => {}),
   notifyBookingStatus: vi.fn(),
 }))
-vi.mock('./lib/leafletFix', () => ({ applyLeafletIconFix: vi.fn() }))
 vi.mock('./services/location', () => ({ stopWatchLocation: vi.fn(async () => {}), watchLocation: vi.fn() }))
 vi.mock('./services/api', () => {
   const activeBooking = {

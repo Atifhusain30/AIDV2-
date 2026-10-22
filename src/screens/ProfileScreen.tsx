@@ -19,7 +19,11 @@ import PersonAvatar from '../components/ui/PersonAvatar'
 import SectionHeader from '../components/ui/SectionHeader'
 import { SkeletonRows } from '../components/ui/Skeleton'
 import { ErrorState } from '../components/ui/States'
-import HelpSupportScreen from './HelpSupportScreen'
+import ChunkBoundary from '../components/ui/ChunkBoundary'
+import { lazyWithRetry } from '../lib/lazyWithRetry'
+
+// F6: Help & Support downloads only when it's opened.
+const HelpSupportScreen = lazyWithRetry(() => import('./HelpSupportScreen'))
 
 const emptyVehicle = { make: '', model: '', year: '', color: '', plate: '' }
 
@@ -133,7 +137,7 @@ export default function ProfileScreen() {
     void signOut('deleted')
   }
 
-  if (showHelp) return <HelpSupportScreen audience="customer" onBack={() => setShowHelp(false)} />
+  if (showHelp) return <ChunkBoundary fallback={<SkeletonRows count={4} />}><HelpSupportScreen audience="customer" onBack={() => setShowHelp(false)} /></ChunkBoundary>
 
   const garageBody = vehicles.length === 0 && garage === 'loading'
     ? <SkeletonRows count={1} label="Loading your vehicles" />

@@ -6,11 +6,15 @@ import {
 import { adminApi } from './api'
 import Dialog from '../../src/components/ui/Dialog'
 import FilterTabs, { tabId } from './FilterTabs'
-import ReportsInbox from './Reports'
+import ChunkBoundary from '../../src/components/ui/ChunkBoundary'
+import { lazyWithRetry } from '../../src/lib/lazyWithRetry'
 import { Brand, EmptyState, LoadError, SkeletonDetail, SkeletonTable } from './ui'
 import TwoStep from './TwoStep'
 import type { MfaState } from './api'
 import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverRatings, DriverSummary, QueueFilter, ReportCounts, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
+
+// F6: the reports inbox downloads when it's opened (the driver queue is the landing view).
+const ReportsInbox = lazyWithRetry(() => import('./Reports'))
 
 // ---------- Copy & rules ----------
 
@@ -677,7 +681,9 @@ function Dashboard({ admin, onSignOut }: { admin: AdminProfile; onSignOut: () =>
 
       <main className="content">
         {section === 'reports' ? (
-          <ReportsInbox notify={setToast} onCounts={setReportCounts} />
+          <ChunkBoundary fallback={<SkeletonTable label="Loading reports" />}>
+            <ReportsInbox notify={setToast} onCounts={setReportCounts} />
+          </ChunkBoundary>
         ) : selected ? (
           <DriverReview
             driverId={selected}

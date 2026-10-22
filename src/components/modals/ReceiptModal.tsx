@@ -8,15 +8,20 @@ import { useEffect, useState } from 'react'
 import { CalendarDays, Car, Check, CreditCard, MapPin, Star } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { useAuthStore } from '../../store/useAuthStore'
-import PaymentCheckout from '../payment/PaymentCheckout'
-import RatingSheet from '../rating/RatingSheet'
 import BottomSheet from '../ui/BottomSheet'
+import ChunkBoundary from '../ui/ChunkBoundary'
+import { SkeletonRows } from '../ui/Skeleton'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
 import Button from '../ui/Button'
 import { InfoRow, List } from '../ui/ListRow'
 import PersonAvatar from '../ui/PersonAvatar'
 import { formatPrice } from '../../lib/money'
 import { apiService } from '../../services/api'
 import { markRatingSkipped, shouldAutoAsk, type PendingRating } from '../../lib/ratings'
+
+// F6: Stripe and the rating sheet download only when they're opened.
+const PaymentCheckout = lazyWithRetry(() => import('../payment/PaymentCheckout'))
+const RatingSheet = lazyWithRetry(() => import('../rating/RatingSheet'))
 
 export default function ReceiptModal() {
   const {
@@ -72,18 +77,20 @@ export default function ReceiptModal() {
 
   if (showCheckout) {
     return (
-      <PaymentCheckout
-        amount={grandTotal}
-        bookingId={booking.id}
-        serviceName={booking.service.name}
-        onSuccess={(paymentId) => {
-          updateBookingInHistory(booking.id, { payment: { intentId: paymentId, status: 'processing', amount: grandTotal } })
-          setPaymentError(null)
-          setShowCheckout(false)
-        }}
-        onCancel={() => setShowCheckout(false)}
-        onError={setPaymentError}
-      />
+      <ChunkBoundary fallback={<SkeletonRows count={2} label="Loading payment" />}>
+        <PaymentCheckout
+          amount={grandTotal}
+          bookingId={booking.id}
+          serviceName={booking.service.name}
+          onSuccess={(paymentId) => {
+            updateBookingInHistory(booking.id, { payment: { intentId: paymentId, status: 'processing', amount: grandTotal } })
+            setPaymentError(null)
+            setShowCheckout(false)
+          }}
+          onCancel={() => setShowCheckout(false)}
+          onError={setPaymentError}
+        />
+      </ChunkBoundary>
     )
   }
 
@@ -145,12 +152,14 @@ export default function ReceiptModal() {
         {paymentError && <p className="ui-alert ui-alert--danger" role="alert">{paymentError}</p>}
       </BottomSheet>
       {ratingOpen && pendingRating && (
-        <RatingSheet
-          pending={pendingRating}
-          context="after_job"
-          onRated={() => { setRated(true); setRatingOpen(false) }}
-          onSkip={() => { if (userId) markRatingSkipped(userId, pendingRating.bookingId); setRatingOpen(false) }}
-        />
+        <ChunkBoundary>
+          <RatingSheet
+            pending={pendingRating}
+            context="after_job"
+            onRated={() => { setRated(true); setRatingOpen(false) }}
+            onSkip={() => { if (userId) markRatingSkipped(userId, pendingRating.bookingId); setRatingOpen(false) }}
+          />
+        </ChunkBoundary>
       )}
     </>
   )

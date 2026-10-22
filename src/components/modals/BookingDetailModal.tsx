@@ -10,8 +10,9 @@ import { useAppStore } from '../../store/useAppStore'
 import type { BookingStatus } from '../../types'
 import { jobCountLabel, ratingSummary } from '../../lib/ratings'
 import { endedChatReadable } from '../../lib/chat'
-import JobChat from '../chat/JobChat'
 import BottomSheet from '../ui/BottomSheet'
+import ChunkBoundary from '../ui/ChunkBoundary'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
 import Button from '../ui/Button'
 import { InfoRow, List } from '../ui/ListRow'
 import PersonAvatar from '../ui/PersonAvatar'
@@ -19,6 +20,9 @@ import StepProgress from '../ui/StepProgress'
 import { EmptyState } from '../ui/States'
 import { TripStops } from '../tracking/TrackLayout'
 import { chargeLabel, dayLabel, serviceIcon, statusLabels, statusTone, timeLabel } from '../../lib/serviceDisplay'
+
+// F6: chat downloads only when it's opened.
+const JobChat = lazyWithRetry(() => import('../chat/JobChat'))
 
 const mapsUrl = (lat: number, lng: number) => `https://www.google.com/maps?q=${lat},${lng}`
 const fullDate = (value: Date | string) => `${new Date(value).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} at ${timeLabel(value)}`
@@ -131,10 +135,12 @@ export default function BookingDetailModal() {
       )}
 
       {chatOpen && (
-        <JobChat
-          bookingId={booking.id} audience="customer" otherName={driver?.firstName || 'Your driver'} serviceName={booking.service.name}
-          initialChat={{ state: 'read_only', unread: 0, blockedByMe: false, readOnlyUntil: null }} onClose={() => setChatOpen(false)}
-        />
+        <ChunkBoundary>
+          <JobChat
+            bookingId={booking.id} audience="customer" otherName={driver?.firstName || 'Your driver'} serviceName={booking.service.name}
+            initialChat={{ state: 'read_only', unread: 0, blockedByMe: false, readOnlyUntil: null }} onClose={() => setChatOpen(false)}
+          />
+        </ChunkBoundary>
       )}
     </BottomSheet>
   )

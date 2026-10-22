@@ -149,7 +149,8 @@ describe('Help & Support (B18)', () => {
     expect(screen.queryByRole('heading', { name: 'Support' })).toBeNull()
     expect(screen.getByRole('heading', { name: 'Help & safety' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Help & Support/ }))
-    expect(screen.getByRole('heading', { name: 'Help & Support' })).toBeTruthy()
+    // F6: Help & Support is lazy-loaded, so it appears once its code has loaded.
+    expect(await screen.findByRole('heading', { name: 'Help & Support' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.getByRole('heading', { name: 'Account' })).toBeTruthy()
   })

@@ -4,7 +4,7 @@
  * Typed text alone has no coordinates, so Confirm stays off until one of those is chosen.
  */
 
-import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { MapPin, Navigation, ExternalLink, Loader2, AlertCircle, Check, Info, Search, Move } from 'lucide-react'
 import { useAppStore, GeoCoords } from '../../store/useAppStore'
 import locationService, { AddressSuggestion } from '../../services/locationService'
@@ -12,9 +12,11 @@ import BottomSheet from '../ui/BottomSheet'
 import Button from '../ui/Button'
 import { ListRow } from '../ui/ListRow'
 import { Skeleton } from '../ui/Skeleton'
+import ChunkBoundary from '../ui/ChunkBoundary'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
 
-// Lazy load MapPinPicker to avoid SSR issues with Leaflet
-const MapPinPicker = lazy(() => import('../ui/MapPinPicker'))
+// Leaflet (the map) downloads only when the pin map is shown (F6).
+const MapPinPicker = lazyWithRetry(() => import('../ui/MapPinPicker'))
 
 const LOOKING_UP = 'Looking up address...'
 const UPDATING = 'Updating address...'
@@ -242,9 +244,9 @@ export default function LocationConfirmModal() {
       {selectedCoords && (
         <div className="location-map">
           <p className="location-map__hint"><Move size={15} aria-hidden="true" /> Drag the pin to your exact spot</p>
-          <Suspense fallback={<Skeleton height={200} radius={16} width="100%" />}>
+          <ChunkBoundary fallback={<Skeleton height={200} radius={16} width="100%" />}>
             <MapPinPicker lat={selectedCoords.lat} lng={selectedCoords.lng} onChange={handlePinMove} />
-          </Suspense>
+          </ChunkBoundary>
           {isUpdatingPin && <p className="location-search__status">Updating the address…</p>}
         </div>
       )}

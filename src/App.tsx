@@ -7,7 +7,9 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowRight, Briefcase, Clock3, LifeBuoy, Link2Off as LinkIcon, MapPinned, ShieldCheck } from 'lucide-react'
 import Button from './components/ui/Button'
-import DriverSettingsScreen from './screens/driver/DriverSettingsScreen'
+import ChunkBoundary from './components/ui/ChunkBoundary'
+import { SkeletonRows } from './components/ui/Skeleton'
+import { lazyWithRetry } from './lib/lazyWithRetry'
 import { useAppStore } from './store/useAppStore'
 import { useAuthStore } from './store/useAuthStore'
 import { useDriverStore } from './store/useDriverStore'
@@ -19,7 +21,6 @@ import EndedBookingNotice from './components/tracking/EndedBookingNotice'
 import { registerNotificationTapHandler } from './lib/notifications'
 import { syncAlertsIfAllowed } from './lib/alertsPrompt'
 import AlertsExplainer from './components/AlertsExplainer'
-import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
 import { settleStaleActiveBooking } from './services/bookingService'
 import type { Booking, Driver } from './types'
@@ -28,31 +29,34 @@ import { Capacitor } from '@capacitor/core'
 import { supabase } from './auth/supabase'
 import { installSessionWatch, signOut } from './auth/signOut'
 import { completeRecoveryFromUrl } from './auth/recovery'
-import PasswordRecoveryScreen from './components/auth/PasswordRecoveryScreen'
-import RatingSheet from './components/rating/RatingSheet'
 import PendingRatingReminder from './components/rating/PendingRatingReminder'
 import { markRatingSkipped, type PendingRating } from './lib/ratings'
 import { applyHistoryResult, markHistoryLoading } from './lib/bookingHistory'
 
-// Customer Screens
+// Customer Screens — Home and sign-in load with the app; everything else on demand (F6).
 import HomeScreen from './screens/HomeScreen'
-import HistoryScreen from './screens/HistoryScreen'
-import UpdatesScreen from './screens/UpdatesScreen'
-import ProfileScreen from './screens/ProfileScreen'
-import HelpSupportScreen from './screens/HelpSupportScreen'
 import { CustomerLoginScreen } from './screens/customer'
 import BottomNav from './components/ui/BottomNav'
 import OfflineBanner from './components/ui/OfflineBanner'
 import AidBrand from './components/brand/AidBrand'
+import DriverLoginScreen from './screens/driver/DriverLoginScreen'
 
-// Driver Screens
-import { 
-  DriverLoginScreen, 
-  DriverHomeScreen, 
-  DriverOnboardingScreen,
-  DriverJobScreen,
-  DriverVehicleScreen,
-} from './screens/driver'
+const HistoryScreen = lazyWithRetry(() => import('./screens/HistoryScreen'))
+const UpdatesScreen = lazyWithRetry(() => import('./screens/UpdatesScreen'))
+const ProfileScreen = lazyWithRetry(() => import('./screens/ProfileScreen'))
+const HelpSupportScreen = lazyWithRetry(() => import('./screens/HelpSupportScreen'))
+const PasswordRecoveryScreen = lazyWithRetry(() => import('./components/auth/PasswordRecoveryScreen'))
+const RatingSheet = lazyWithRetry(() => import('./components/rating/RatingSheet'))
+
+// Driver Screens — never downloaded by a customer (F6).
+const DriverHomeScreen = lazyWithRetry(() => import('./screens/driver/DriverHomeScreen'))
+const DriverOnboardingScreen = lazyWithRetry(() => import('./screens/driver/DriverOnboardingScreen'))
+const DriverJobScreen = lazyWithRetry(() => import('./screens/driver/DriverJobScreen'))
+const DriverVehicleScreen = lazyWithRetry(() => import('./screens/driver/DriverVehicleScreen'))
+const DriverSettingsScreen = lazyWithRetry(() => import('./screens/driver/DriverSettingsScreen'))
+
+/** Shown for the moment a screen's code is loading (shapes only — F5). */
+const screenFallback = <SkeletonRows count={4} />
 
 // App modes
 type AppMode = 'select' | 'customer' | 'driver'
@@ -170,7 +174,7 @@ function CustomerApp() {
             transition={{ duration: 0.25, ease: 'easeOut' }}
             className={`customer-main relative z-10 safe-top min-h-screen${immersive ? ' customer-main--immersive' : ''}`}
           >
-            {renderScreen()}
+            <ChunkBoundary fallback={screenFallback}>{renderScreen()}</ChunkBoundary>
           </motion.main>
         </AnimatePresence>
 
@@ -239,12 +243,14 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <DriverHomeScreen
-            onOpenOnboarding={() => setCurrentView('onboarding')}
-            onOpenVehicle={() => openVehicle('home')}
-            onOpenSettings={() => setCurrentView('settings')}
-            onOpenActiveJob={() => setCurrentView('job')}
-          />
+          <ChunkBoundary fallback={screenFallback}>
+            <DriverHomeScreen
+              onOpenOnboarding={() => setCurrentView('onboarding')}
+              onOpenVehicle={() => openVehicle('home')}
+              onOpenSettings={() => setCurrentView('settings')}
+              onOpenActiveJob={() => setCurrentView('job')}
+            />
+          </ChunkBoundary>
         </motion.main>
       )}
 
@@ -255,11 +261,13 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <DriverOnboardingScreen
-            onComplete={() => setCurrentView('home')}
-            onSkip={() => setCurrentView('home')}
-            onOpenVehicle={() => openVehicle('onboarding')}
-          />
+          <ChunkBoundary fallback={screenFallback}>
+            <DriverOnboardingScreen
+              onComplete={() => setCurrentView('home')}
+              onSkip={() => setCurrentView('home')}
+              onOpenVehicle={() => openVehicle('onboarding')}
+            />
+          </ChunkBoundary>
         </motion.main>
       )}
 
@@ -270,11 +278,13 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <DriverVehicleScreen
-            backLabel={vehicleReturn === 'onboarding' ? 'Back to verification' : vehicleReturn === 'settings' ? 'Back to settings' : 'Back to work'}
-            onBack={() => setCurrentView(vehicleReturn)}
-            onSaved={() => setCurrentView(vehicleReturn)}
-          />
+          <ChunkBoundary fallback={screenFallback}>
+            <DriverVehicleScreen
+              backLabel={vehicleReturn === 'onboarding' ? 'Back to verification' : vehicleReturn === 'settings' ? 'Back to settings' : 'Back to work'}
+              onBack={() => setCurrentView(vehicleReturn)}
+              onSaved={() => setCurrentView(vehicleReturn)}
+            />
+          </ChunkBoundary>
         </motion.main>
       )}
 
@@ -285,16 +295,20 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <DriverJobScreen
-            onBack={() => setCurrentView('home')}
-            onCompleted={(job) => void askToRate(job)}
-          />
+          <ChunkBoundary fallback={screenFallback}>
+            <DriverJobScreen
+              onBack={() => setCurrentView('home')}
+              onCompleted={(job) => void askToRate(job)}
+            />
+          </ChunkBoundary>
         </motion.main>
       )}
 
       {currentView === 'help' && (
         <motion.main key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="driver-help">
-          <HelpSupportScreen audience="driver" onBack={() => setCurrentView('settings')} />
+          <ChunkBoundary fallback={screenFallback}>
+            <HelpSupportScreen audience="driver" onBack={() => setCurrentView('settings')} />
+          </ChunkBoundary>
         </motion.main>
       )}
 
@@ -306,25 +320,29 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
           exit={{ opacity: 0 }}
           className="ui-screen driver-settings safe-top"
         >
-          <DriverSettingsScreen
-            onBack={() => setCurrentView('home')}
-            onOpenDocuments={() => setCurrentView('onboarding')}
-            onOpenVehicle={() => openVehicle('settings')}
-            onOpenHelp={() => setCurrentView('help')}
-            onLogout={onLogout}
-          />
+          <ChunkBoundary fallback={screenFallback}>
+            <DriverSettingsScreen
+              onBack={() => setCurrentView('home')}
+              onOpenDocuments={() => setCurrentView('onboarding')}
+              onOpenVehicle={() => openVehicle('settings')}
+              onOpenHelp={() => setCurrentView('help')}
+              onLogout={onLogout}
+            />
+          </ChunkBoundary>
         </motion.main>
       )}
     </AnimatePresence>
     {/* Mounted once per app open so the reminder runs once (never re-triggered by the sheet below). */}
     <PendingRatingReminder userId={user?.id} />
     {rateCustomer && (
-      <RatingSheet
-        pending={rateCustomer}
-        context="after_job"
-        onRated={() => setRateCustomer(null)}
-        onSkip={() => { if (user) markRatingSkipped(user.id, rateCustomer.bookingId); setRateCustomer(null) }}
-      />
+      <ChunkBoundary>
+        <RatingSheet
+          pending={rateCustomer}
+          context="after_job"
+          onRated={() => setRateCustomer(null)}
+          onSkip={() => { if (user) markRatingSkipped(user.id, rateCustomer.bookingId); setRateCustomer(null) }}
+        />
+      </ChunkBoundary>
     )}
     </>
   )
@@ -339,9 +357,6 @@ function App() {
 
   // Initialize app features on startup
   useEffect(() => {
-    // Fix Leaflet marker icons for bundler compatibility
-    applyLeafletIconFix()
-    
     // Register handler for notification taps. Permission is requested later,
     // after the user takes an action that benefits from booking updates.
     // Use getState() to avoid stale closure issues
@@ -440,7 +455,11 @@ function App() {
   const handleLogout = () => { void signOut('user') }
 
   if (isRecoveringPassword) {
-    return <PasswordRecoveryScreen onComplete={() => { setIsRecoveringPassword(false); setAppMode('customer') }} />
+    return (
+      <ChunkBoundary fallback={screenFallback}>
+        <PasswordRecoveryScreen onComplete={() => { setIsRecoveringPassword(false); setAppMode('customer') }} />
+      </ChunkBoundary>
+    )
   }
 
   if (recoveryError) {

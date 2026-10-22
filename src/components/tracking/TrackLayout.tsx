@@ -5,11 +5,13 @@
  * indicator, and the tab bar is hidden while a request is live (Back to Home is top-left).
  */
 
-import { lazy, Suspense, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { ChevronLeft, Flag, MapPin } from 'lucide-react'
 import { Skeleton } from '../ui/Skeleton'
+import ChunkBoundary from '../ui/ChunkBoundary'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
 
-const LiveDriverMap = lazy(() => import('./LiveDriverMap'))
+const LiveDriverMap = lazyWithRetry(() => import('./LiveDriverMap'))
 
 type Point = { lat: number; lng: number }
 
@@ -46,9 +48,9 @@ export function TrackLayout({ label, pickup, driver, stale = false, showConnecto
         <p className="sr-only">{hasPickup ? mapSummary : 'Map unavailable.'}</p>
         {hasPickup ? (
           <div className="track-v2__canvas" aria-hidden="true">
-            <Suspense fallback={<Skeleton width="100%" height="100%" radius={0} />}>
+            <ChunkBoundary fallback={<Skeleton width="100%" height="100%" radius={0} />}>
               <LiveDriverMap pickup={pickup} driver={driver} stale={stale} showConnector={showConnector} />
-            </Suspense>
+            </ChunkBoundary>
           </div>
         ) : <div className="track-v2__nomap">Map unavailable</div>}
         <div className="track-v2__top">

@@ -13,10 +13,6 @@ vi.mock('./lib/notifications', () => ({
   getNotificationPermission: vi.fn(async () => 'prompt'),
 }))
 
-vi.mock('./lib/leafletFix', () => ({
-  applyLeafletIconFix: vi.fn(),
-}))
-
 vi.mock('./services/api', () => ({
   apiService: {
     getProfile: vi.fn(),
