@@ -33,7 +33,7 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | B6 | Detailing / Window Tint: "Coming soon" or real scheduling | 🤝 | ✅ Coming soon (revisit after launch) |
 | B7 | "Request again" creates a real booking | 🛠 | ✅ |
 | B8 | Driver sees nearby requests, accepts (no double-booking) | 🛠 | 🟡 backend ✅, UI polish |
-| B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | ⬜ |
+| B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | ⬜ **next** |
 | B10 | Job lifecycle: en route → arrived → in progress → completed; cancel rules | 🛠 | 🟡 |
 | B11 | Real-time status updates on every screen | 🛠 | ⬜ |
 | B12 | Real chat customer↔driver + report/block | 🛠 | ⬜ |
