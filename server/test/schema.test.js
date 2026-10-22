@@ -4,7 +4,10 @@ const { Pool } = require('pg');
 const path = require('node:path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-test('remote database has the AID marketplace schema', { timeout: 30000 }, async () => {
+// Needs the real database (server/.env locally). CI has no credentials, so it is skipped there.
+const noDatabase = !process.env.DATABASE_URL && 'DATABASE_URL not set (e.g. CI) — live schema check skipped';
+
+test('remote database has the AID marketplace schema', { timeout: 30000, skip: noDatabase }, async () => {
   assert.ok(process.env.DATABASE_URL, 'DATABASE_URL is required');
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 1 });
   try {
