@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowRight, Briefcase, Clock3, LifeBuoy, Link2Off as LinkIcon, MapPinned, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Briefcase, LifeBuoy, Link2Off as LinkIcon, MapPinned, ShieldCheck, Tag } from 'lucide-react'
 import Button from './components/ui/Button'
 import ChunkBoundary from './components/ui/ChunkBoundary'
 import { SkeletonRows } from './components/ui/Skeleton'
@@ -74,7 +74,7 @@ function useDocumentTitle(title: string | null) {
 }
 
 // Intro screen to select customer or driver
-function AppModeSelector({
+export function AppModeSelector({
   onSelectCustomer,
   onSelectDriver,
 }: {
@@ -96,8 +96,8 @@ function AppModeSelector({
           <p>Request roadside help and follow your driver live — or earn by helping drivers get moving again.</p>
           <ul className="welcome__trust" aria-label="Service benefits">
             <li><ShieldCheck size={16} aria-hidden="true" /> Verified drivers</li>
-            <li><Clock3 size={16} aria-hidden="true" /> Clear arrival times</li>
-            <li><MapPinned size={16} aria-hidden="true" /> Live progress</li>
+            <li><MapPinned size={16} aria-hidden="true" /> Live tracking</li>
+            <li><Tag size={16} aria-hidden="true" /> Price before you request</li>
           </ul>
         </div>
 

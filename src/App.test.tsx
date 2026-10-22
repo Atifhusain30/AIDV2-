@@ -45,6 +45,9 @@ describe('first-run flow', () => {
     expect(screen.getByRole('heading', { name: 'Help, right when it matters.' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Get roadside help/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Drive with AID/i })).toBeTruthy()
+    // Only claims that are true today (ETAs are approximate; hours aren't set, so no "24/7").
+    const benefits = screen.getByRole('list', { name: 'Service benefits' })
+    expect([...benefits.querySelectorAll('li')].map((item) => item.textContent?.trim())).toEqual(['Verified drivers', 'Live tracking', 'Price before you request'])
   })
 
   it('takes customers directly to the usable sign-in screen', () => {
