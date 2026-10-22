@@ -16,6 +16,8 @@ import EndedBookingNotice from './components/tracking/EndedBookingNotice'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
 import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
+import { driverVehicleSummary } from './lib/driverVehicle'
+import type { Driver } from './types'
 import { App as CapacitorApp } from '@capacitor/app'
 import { supabase } from './auth/supabase'
 import { completeRecoveryFromUrl } from './auth/recovery'
@@ -35,12 +37,13 @@ import {
   DriverLoginScreen, 
   DriverHomeScreen, 
   DriverOnboardingScreen,
-  DriverJobScreen 
+  DriverJobScreen,
+  DriverVehicleScreen,
 } from './screens/driver'
 
 // App modes
 type AppMode = 'select' | 'customer' | 'driver'
-type DriverView = 'home' | 'onboarding' | 'job' | 'settings'
+type DriverView = 'home' | 'onboarding' | 'job' | 'settings' | 'vehicle'
 
 // Intro screen to select customer or driver
 function AppModeSelector({
@@ -170,6 +173,9 @@ function CustomerApp() {
 // Driver App Component
 function DriverApp({ onLogout }: { onLogout: () => void }) {
   const [currentView, setCurrentView] = useState<DriverView>('home')
+  // The vehicle screen returns to wherever it was opened from (home, onboarding or settings).
+  const [vehicleReturn, setVehicleReturn] = useState<DriverView>('home')
+  const openVehicle = (from: DriverView) => { setVehicleReturn(from); setCurrentView('vehicle') }
   // Share GPS with the customer on every driver screen while a job is active.
   useJobLocationSharing()
   // Notice a customer cancellation (or any server-side change) to the active job.
@@ -204,6 +210,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
         >
           <DriverHomeScreen
             onOpenOnboarding={() => setCurrentView('onboarding')}
+            onOpenVehicle={() => openVehicle('home')}
             onOpenSettings={() => setCurrentView('settings')}
             onOpenActiveJob={() => setCurrentView('job')}
           />
@@ -220,6 +227,22 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
           <DriverOnboardingScreen
             onComplete={() => setCurrentView('home')}
             onSkip={() => setCurrentView('home')}
+            onOpenVehicle={() => openVehicle('onboarding')}
+          />
+        </motion.div>
+      )}
+
+      {currentView === 'vehicle' && (
+        <motion.div
+          key="vehicle"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <DriverVehicleScreen
+            backLabel={vehicleReturn === 'onboarding' ? 'Back to verification' : vehicleReturn === 'settings' ? 'Back to settings' : 'Back to work'}
+            onBack={() => setCurrentView(vehicleReturn)}
+            onSaved={() => setCurrentView(vehicleReturn)}
           />
         </motion.div>
       )}
@@ -260,6 +283,14 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
             >
               <span className="text-white">Documents</span>
               <p className="text-gray-500 text-sm">Manage your verification documents</p>
+            </button>
+
+            <button
+              onClick={() => openVehicle('settings')}
+              className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
+            >
+              <span className="text-white">Vehicle & equipment</span>
+              <p className="text-gray-500 text-sm">{driverVehicleSummary((user as Driver | null)?.vehicle) || 'Add the vehicle customers will look for'}</p>
             </button>
             
             <button
@@ -370,6 +401,7 @@ function App() {
             rating: profile.rating,
             totalJobs: profile.totalJobs,
             specializations: profile.specializations,
+            vehicle: profile.driverVehicle ?? null,
           })
           useDriverStore.setState({ isOnline: profile.isOnline })
         } else {

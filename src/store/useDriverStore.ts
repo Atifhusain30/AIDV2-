@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand'
-import type { ServiceRequest, Booking, Location, DriverDocument, DriverDocumentType, DriverVerification } from '../types'
+import type { ServiceRequest, Booking, Location, DriverDocument, DriverDocumentType, DriverVerification, DriverVehicle } from '../types'
 import type { PickedFile } from '@capawesome/capacitor-file-picker'
 import { useAuthStore } from './useAuthStore'
 import { apiService } from '../services/api'
@@ -49,6 +49,9 @@ interface DriverStore {
   fetchVerification: () => Promise<DriverVerification | null>
   uploadVerificationDocument: (file: PickedFile, type: DriverDocumentType, expiresOn?: string) => Promise<void>
   submitVerification: () => Promise<void>
+
+  /** Save the service vehicle and update the signed-in driver's profile. `field` names a server-rejected field. */
+  saveVehicle: (vehicle: DriverVehicle) => Promise<{ ok: true } | { ok: false; error: string; field?: string }>
   
   // Reset
   reset: () => void
@@ -251,6 +254,17 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
     const result = await documentService.submitVerification()
     await get().fetchVerification()
     syncDriverProfile({ status: result.status, credentialsValidUntil: get().verification?.credentialsValidUntil ?? null })
+  },
+
+  saveVehicle: async (vehicle) => {
+    const { user, updateUser } = useAuthStore.getState()
+    if (!user || user.role !== 'driver') return { ok: false, error: 'Driver session required' }
+    const result = await apiService.updateDriverVehicle(vehicle)
+    if (!result.success || !result.data) return { ok: false, error: result.error || 'Unable to save your vehicle. Try again.', field: result.field }
+    updateUser({ vehicle: result.data })
+    // A saved vehicle clears the "add your vehicle" message from a blocked go-online attempt.
+    set({ error: null })
+    return { ok: true }
   },
 
   // Reset store

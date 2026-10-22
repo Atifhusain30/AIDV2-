@@ -22,14 +22,16 @@ import type { Driver } from '../../types'
 import { driverEligibility, ELIGIBILITY_COPY } from '../../lib/driverEligibility'
 import { formatCalendarDate } from '../../lib/dates'
 import { formatPrice } from '../../lib/money'
+import { driverVehicleSummary, vehicleComplete, VEHICLE_REQUIRED_COPY } from '../../lib/driverVehicle'
 
 interface DriverHomeScreenProps {
   onOpenOnboarding: () => void
+  onOpenVehicle: () => void
   onOpenSettings: () => void
   onOpenActiveJob: () => void
 }
 
-export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onOpenActiveJob }: DriverHomeScreenProps) {
+export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOpenSettings, onOpenActiveJob }: DriverHomeScreenProps) {
   const user = useAuthStore((state) => state.user) as Driver | null
   const {
     isOnline,
@@ -48,22 +50,32 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
 
   const eligibility = driverEligibility(user)
   const isVerified = eligibility === 'eligible'
-  const blocker = eligibility === 'eligible' ? null : ELIGIBILITY_COPY[eligibility]
+  const hasVehicle = vehicleComplete(user?.vehicle)
+  // Mirrors the server: verified + current credentials + complete vehicle details to go online or accept.
+  const canWork = isVerified && hasVehicle
+  const vehicleBlocker = {
+    title: VEHICLE_REQUIRED_COPY.title,
+    detail: user?.vehicle ? VEHICLE_REQUIRED_COPY.incompleteDetail : VEHICLE_REQUIRED_COPY.detail,
+    action: user?.vehicle ? 'Finish vehicle' : VEHICLE_REQUIRED_COPY.action,
+  }
+  const blocker = eligibility !== 'eligible' ? ELIGIBILITY_COPY[eligibility] : hasVehicle ? null : vehicleBlocker
+  const openBlocker = eligibility !== 'eligible' ? onOpenOnboarding : onOpenVehicle
+  const vehicleSummary = driverVehicleSummary(user?.vehicle)
 
   useEffect(() => {
     if (user?.id) fetchActiveBooking(user.id)
   }, [fetchActiveBooking, user?.id])
 
   useEffect(() => {
-    if (!isOnline) return
+    if (!isOnline || !canWork) return
     fetchIncomingRequests()
     const timer = window.setInterval(fetchIncomingRequests, 30000)
     return () => window.clearInterval(timer)
-  }, [fetchIncomingRequests, isOnline])
+  }, [fetchIncomingRequests, isOnline, canWork])
 
-  // Going offline is always allowed; going online requires eligibility.
+  // Going offline is always allowed; going online requires eligibility and vehicle details.
   const toggleAvailability = () => {
-    if (!isOnline && !isVerified) return
+    if (!isOnline && !canWork) return
     void setOnlineStatus(!isOnline)
   }
 
@@ -95,12 +107,12 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
             <p>{blocker ? `${blocker.title}. ${blocker.detail}` : isOnline ? 'Stay ready for nearby roadside calls.' : 'Go online when you are ready to help.'}</p>
           </div>
         </div>
-        {isOnline || isVerified ? (
+        {isOnline || canWork ? (
           <button type="button" className="availability-card__button" onClick={toggleAvailability} disabled={isLoading}>
             {isOnline ? 'Go offline' : 'Go online'}
           </button>
         ) : (
-          <button type="button" className="availability-card__button" onClick={onOpenOnboarding}>
+          <button type="button" className="availability-card__button" onClick={openBlocker}>
             {blocker?.action}
           </button>
         )}
@@ -134,9 +146,9 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
           {isOnline && <span className="driver-live-label"><i /> LIVE</span>}
         </div>
 
-        {!isVerified ? (
-          <button type="button" className="readiness-prompt" onClick={onOpenOnboarding}>
-            <span><FileCheck2 size={22} /></span>
+        {!canWork ? (
+          <button type="button" className="readiness-prompt" onClick={openBlocker}>
+            <span>{isVerified ? <Truck size={22} /> : <FileCheck2 size={22} />}</span>
             <div><strong>{blocker?.title}</strong><p>{blocker?.detail}</p></div>
             <ChevronRight size={19} />
           </button>
@@ -177,7 +189,12 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
         <div className="driver-section__heading"><div><span>ACCOUNT STATUS</span><h2 id="readiness-title">Driver readiness</h2></div></div>
         <button type="button" className="driver-readiness" onClick={onOpenOnboarding}>
           <span className={isVerified ? 'is-ready' : ''}>{isVerified ? <ShieldCheck size={21} /> : <FileCheck2 size={21} />}</span>
-          <div><strong>{isVerified ? 'Ready to take requests' : blocker?.title}</strong><p>{isVerified ? `Documents approved${user?.credentialsValidUntil ? ` through ${formatCalendarDate(user.credentialsValidUntil)}` : ''}.` : blocker?.detail}</p></div>
+          <div><strong>{canWork ? 'Ready to take requests' : isVerified ? 'Documents verified' : blocker?.title}</strong><p>{isVerified ? `Documents approved${user?.credentialsValidUntil ? ` through ${formatCalendarDate(user.credentialsValidUntil)}` : ''}.` : blocker?.detail}</p></div>
+          <ChevronRight size={19} />
+        </button>
+        <button type="button" className="driver-readiness driver-readiness--vehicle" onClick={onOpenVehicle}>
+          <span className={hasVehicle ? 'is-ready' : ''}><Truck size={21} /></span>
+          <div><strong>{hasVehicle ? 'Vehicle & equipment' : vehicleBlocker.title}</strong><p>{hasVehicle ? vehicleSummary : vehicleBlocker.detail}</p></div>
           <ChevronRight size={19} />
         </button>
       </section>

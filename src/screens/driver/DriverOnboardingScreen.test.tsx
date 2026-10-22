@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import DriverOnboardingScreen from './DriverOnboardingScreen'
 import { useDriverStore } from '../../store/useDriverStore'
+import { useAuthStore } from '../../store/useAuthStore'
 import type { DriverDocument, DriverVerification } from '../../types'
 
 const picked = { data: 'iVBORw0KGgo=', mimeType: 'image/png', name: 'card.png', size: 8 }
@@ -47,18 +48,33 @@ afterEach(() => cleanup())
 
 describe('driver verification onboarding', () => {
   it('lists all four required documents and blocks submission until they are uploaded', () => {
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     expect(actions.fetchVerification).toHaveBeenCalled()
     for (const label of ["Driver's license", 'Government ID', 'Commercial auto insurance', 'Vehicle registration']) {
       expect(screen.getByRole('button', { name: new RegExp(label, 'i') })).toBeTruthy()
     }
-    expect(screen.getAllByText('Needed')).toHaveLength(4)
+    expect(within(screen.getByRole('region', { name: 'Documents' })).getAllByText('Needed')).toHaveLength(4)
     expect((screen.getByRole('button', { name: /submit for review/i }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(/4 documents still needed/i)).toBeTruthy()
   })
 
+  it('offers the vehicle step after documents and shows the saved vehicle', () => {
+    const openVehicle = vi.fn()
+    useAuthStore.setState({ user: { id: 'driver-1', role: 'driver', vehicle: null } as never })
+    const { unmount } = render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={openVehicle} />)
+    const step = screen.getByRole('button', { name: 'Service vehicle: Needed' })
+    fireEvent.click(step)
+    expect(openVehicle).toHaveBeenCalledTimes(1)
+    unmount()
+
+    useAuthStore.setState({ user: { id: 'driver-1', role: 'driver', vehicle: { make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'wheel_lift' } } as never })
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Service vehicle: Added' })).toBeTruthy()
+    expect(screen.getByText('2021 White Ford F-550 · TOW-77 (TX) · Wheel-lift tow truck')).toBeTruthy()
+  })
+
   it('requires an expiration date before uploading an expiring document', async () => {
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /commercial auto insurance/i }))
     const dialog = screen.getByRole('dialog', { name: /commercial auto insurance/i })
 
@@ -73,7 +89,7 @@ describe('driver verification onboarding', () => {
   })
 
   it('uploads a government ID without asking for an expiration date', async () => {
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /government id/i }))
     const dialog = screen.getByRole('dialog', { name: /government id/i })
     expect(within(dialog).queryByLabelText(/expiration date/i)).toBeNull()
@@ -83,7 +99,7 @@ describe('driver verification onboarding', () => {
 
   it('shows the upload error from the server inside the sheet', async () => {
     actions.uploadVerificationDocument.mockRejectedValueOnce(new Error('The uploaded file content is not a valid JPG, PNG, HEIC, or PDF'))
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /government id/i }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /choose photo/i }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/not a valid JPG/)
@@ -96,7 +112,7 @@ describe('driver verification onboarding', () => {
       documents: [doc('drivers_license', { status: 'approved' }), doc('identification', { status: 'approved' }), doc('insurance', { status: 'rejected', reviewNotes: 'Personal policy only' }), doc('vehicle_registration', { status: 'approved' })],
       readiness: { missing: [], rejected: ['insurance'], unapproved: [], expired: [], canSubmit: false, canVerify: false, credentialsValidUntil: null },
     }))
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     expect(screen.getByText('Insurance must cover business use.')).toBeTruthy()
     expect(screen.getByText('Personal policy only')).toBeTruthy()
     expect(screen.getByText('Needs replacement')).toBeTruthy()
@@ -108,7 +124,7 @@ describe('driver verification onboarding', () => {
       documents: ALL.map((type) => doc(type)),
       readiness: { missing: [], rejected: [], unapproved: [...ALL], expired: [], canSubmit: true, canVerify: false, credentialsValidUntil: null },
     }))
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     expect(screen.getAllByText('Uploaded')).toHaveLength(4)
     const submit = screen.getByRole('button', { name: /submit for review/i }) as HTMLButtonElement
     expect(submit.disabled).toBe(false)
@@ -118,7 +134,7 @@ describe('driver verification onboarding', () => {
 
   it('explains the under-review state without offering to resubmit', () => {
     setVerification(verification({ status: 'under_review', documents: ALL.map((type) => doc(type)), readiness: { missing: [], rejected: [], unapproved: [...ALL], expired: [], canSubmit: true, canVerify: false, credentialsValidUntil: null } }))
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     expect(screen.getByRole('heading', { name: /under review/i })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /submit for review/i })).toBeNull()
     expect(screen.getAllByText('In review')).toHaveLength(4)
@@ -126,7 +142,7 @@ describe('driver verification onboarding', () => {
 
   it('tells a verified driver when their eligibility ends', () => {
     setVerification(verification({ status: 'verified', credentialsValidUntil: '2098-06-30', documents: ALL.map((type) => doc(type, { status: 'approved' })), readiness: { missing: [], rejected: [], unapproved: [], expired: [], canSubmit: true, canVerify: true, credentialsValidUntil: '2098-06-30' } }))
-    render(<DriverOnboardingScreen onComplete={vi.fn()} />)
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     expect(screen.getByRole('heading', { name: /you're verified/i })).toBeTruthy()
     expect(screen.getByText(/Jun 30, 2098/)).toBeTruthy()
   })

@@ -84,7 +84,8 @@ export interface Driver extends UserBase {
   totalJobs: number
   specializations: ServiceType[]
   currentLocation?: Location
-  vehicleInfo?: DriverVehicle
+  /** Required (complete) before the driver can go online or accept work. */
+  vehicle?: DriverVehicle | null
 }
 
 // Driver Document (DL, ID, etc.)
@@ -125,13 +126,19 @@ export interface DriverVerification {
   documents: DriverDocument[]
 }
 
-// Driver's Vehicle Info
+// Driver's own service vehicle (driver_profiles.vehicle_*), saved via PATCH /api/drivers/me/vehicle.
+export type DriverEquipmentType = 'flatbed' | 'wheel_lift' | 'light_duty'
+
 export interface DriverVehicle {
   make: string
   model: string
-  year: number
+  /** Null for vehicles saved before year/state/equipment were collected. */
+  year: number | null
   color: string
-  licensePlate: string
+  plate: string
+  /** Two-letter US state code, '' if not added yet. */
+  plateState: string
+  equipmentType: DriverEquipmentType | ''
 }
 
 // Mechanic (legacy, alias for Driver)
@@ -344,6 +351,10 @@ export interface ApiResponse<T> {
   data?: T
   error?: string
   message?: string
+  /** Server validation: which input field was rejected. */
+  field?: string
+  /** Server machine-readable reason, e.g. 'vehicle_required'. */
+  code?: string
 }
 
 // Geolocation Position

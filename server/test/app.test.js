@@ -3,13 +3,19 @@ const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createApp } = require('../app');
 
+const TOW_TRUCK = Object.freeze({ make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'flatbed' });
+
 function buildHarness(stripe = null, accountAdmin = null) {
   const users = {
     customerToken: { id: 'customer-1', role: 'customer', status: 'active', firstName: 'Casey', lastName: 'Customer' },
     otherCustomerToken: { id: 'customer-2', role: 'customer', status: 'active', firstName: 'Olive', lastName: 'Other' },
     adminToken: { id: 'admin-1', role: 'admin', status: 'active', firstName: 'Ada', lastName: 'Admin' },
-    driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true },
-    offlineDriverToken: { id: 'driver-3', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: false },
+    driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true, driverVehicle: TOW_TRUCK },
+    offlineDriverToken: { id: 'driver-3', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: false, driverVehicle: TOW_TRUCK },
+    // Verified and current, but no vehicle on file yet (new driver) / a vehicle saved before D5 (no equipment).
+    noVehicleDriverToken: { id: 'driver-4', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: false, driverVehicle: null },
+    legacyVehicleDriverToken: { id: 'driver-5', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true,
+      driverVehicle: { make: 'Ford', model: 'F-550', year: null, color: 'White', plate: 'TOW-77', plateState: '', equipmentType: '' } },
     pendingDriverToken: { id: 'driver-2', role: 'driver', status: 'active', verificationStatus: 'pending' },
   };
 
@@ -77,6 +83,11 @@ function buildHarness(stripe = null, accountAdmin = null) {
     async prepareAccountDeletion(userId) {
       return { userId, storagePaths: [] };
     },
+    async updateDriverOnlineStatus(driverId, isOnline) {
+      this.onlineChanges.push({ driverId, isOnline });
+      return { profile_id: driverId, is_online: isOnline };
+    },
+    onlineChanges: [],
     async updateDriverVehicle(driverId, vehicle) {
       this.savedDriverVehicle = { driverId, ...vehicle };
       return vehicle;
@@ -406,12 +417,65 @@ test('drivers save their service vehicle with cleaned fields', async () => {
   const { app, repository } = buildHarness();
   const bad = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer driverToken').send({ make: '', model: 'F-550' });
   assert.equal(bad.status, 400);
+  assert.equal(bad.body.field, 'make');
+  // Pending drivers can add their vehicle during onboarding, before they are verified.
   const ok = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer pendingDriverToken')
-    .send({ make: '  Ford ', model: 'F-550 Flatbed', color: 'White', plate: ' tow-77 ', extra: 'x' });
+    .send({ make: '  Ford ', model: 'F-550 Flatbed', year: 2021, color: 'White', plate: ' tow-77 ', plateState: 'tx', equipmentType: 'flatbed', extra: 'x' });
   assert.equal(ok.status, 200);
-  assert.deepEqual(repository.savedDriverVehicle, { driverId: 'driver-2', make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'TOW-77' });
+  assert.deepEqual(repository.savedDriverVehicle, {
+    driverId: 'driver-2', make: 'Ford', model: 'F-550 Flatbed', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'flatbed',
+  });
   const customer = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer customerToken').send({ make: 'Ford', model: 'F-550' });
   assert.equal(customer.status, 403);
+});
+
+test('driver vehicle validation names the field that needs fixing', async () => {
+  const { app, repository } = buildHarness();
+  const valid = { make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'wheel_lift' };
+  const cases = [
+    [{ year: 1975 }, 'year'], [{ year: 2999 }, 'year'], [{ year: '20x1' }, 'year'], [{ year: undefined }, 'year'],
+    [{ color: ' ' }, 'color'], [{ plate: '' }, 'plate'], [{ plate: 'A' }, 'plate'], [{ plate: 'TOO-LONG-PLATE' }, 'plate'], [{ plate: 'AB#12' }, 'plate'],
+    [{ plateState: 'ZZ' }, 'plateState'], [{ plateState: '' }, 'plateState'], [{ equipmentType: 'helicopter' }, 'equipmentType'], [{ equipmentType: undefined }, 'equipmentType'],
+  ];
+  for (const [patch, field] of cases) {
+    const response = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer driverToken').send({ ...valid, ...patch });
+    assert.equal(response.status, 400, JSON.stringify(patch));
+    assert.equal(response.body.field, field, JSON.stringify(patch));
+    assert.ok(response.body.error);
+  }
+  assert.equal(repository.savedDriverVehicle, undefined, 'nothing is saved when validation fails');
+  // A 4-digit year sent as text is accepted (form inputs), as are spaced plates.
+  const ok = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer driverToken').send({ ...valid, year: '2021', plate: 'abc 1234' });
+  assert.equal(ok.status, 200);
+  assert.equal(repository.savedDriverVehicle.year, 2021);
+  assert.equal(repository.savedDriverVehicle.plate, 'ABC 1234');
+});
+
+test('drivers without complete vehicle details cannot go online, see or accept work — but can always go offline', async () => {
+  const { app, bookings, repository } = buildHarness();
+  bookings.set('open-1', { id: 'open-1', status: 'searching', customerId: 'customer-1' });
+  const online = await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer noVehicleDriverToken').send({ isOnline: true });
+  assert.equal(online.status, 403);
+  assert.equal(online.body.code, 'vehicle_required');
+  assert.match(online.body.error, /vehicle/i);
+  // A driver whose vehicle predates equipment types (already online) is held back too.
+  for (const token of ['noVehicleDriverToken', 'legacyVehicleDriverToken']) {
+    const list = await request(app).get('/api/drivers/requests').set('Authorization', `Bearer ${token}`);
+    const accept = await request(app).post('/api/bookings/open-1/accept').set('Authorization', `Bearer ${token}`);
+    assert.equal(list.body.code, 'vehicle_required', token);
+    assert.equal(accept.status, 403, token);
+    assert.equal(accept.body.code, 'vehicle_required', token);
+  }
+  assert.equal(bookings.get('open-1').status, 'searching');
+  for (const token of ['noVehicleDriverToken', 'legacyVehicleDriverToken']) {
+    const offline = await request(app).patch('/api/drivers/me/online').set('Authorization', `Bearer ${token}`).send({ isOnline: false });
+    assert.equal(offline.status, 200, token);
+  }
+  const ready = await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer offlineDriverToken').send({ isOnline: true });
+  assert.equal(ready.status, 200);
+  assert.deepEqual(repository.onlineChanges, [
+    { driverId: 'driver-4', isOnline: false }, { driverId: 'driver-5', isOnline: false }, { driverId: 'driver-3', isOnline: true },
+  ]);
 });
 
 test('driver location must be real coordinates', async () => {

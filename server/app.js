@@ -7,6 +7,7 @@ const {
 } = require('./verification');
 const { quoteService, PricingError, TOWING } = require('./pricing');
 const { checkRequest, checkTransition, REPORTABLE, ISSUE_CATEGORIES } = require('./lifecycle');
+const { cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE } = require('./driverVehicle');
 
 const DOCUMENT_TYPES = new Set(REQUIRED_DOCUMENT_TYPES);
 const publicDocument = ({ storagePath: _storagePath, ...document }) => document;
@@ -117,6 +118,11 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     if (!credentialsCurrent(req.auth.profile)) {
       return res.status(403).json({ error: 'Your license, insurance, or registration has expired. Upload a current document to keep driving.' });
     }
+    next();
+  }
+  // Customers need the vehicle, plate and equipment to find the driver; required to go online or take work.
+  function requireDriverVehicle(req, res, next) {
+    if (!driverVehicleComplete(req.auth.profile.driverVehicle)) return res.status(403).json({ error: VEHICLE_REQUIRED_MESSAGE, code: 'vehicle_required' });
     next();
   }
   function requireOnlineDriver(req, res, next) {
@@ -278,11 +284,13 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  app.get('/api/drivers/requests', authenticate, requireVerifiedDriver, requireOnlineDriver, async (_req, res, next) => {
+  app.get('/api/drivers/requests', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (_req, res, next) => {
     try { res.json(await repository.listAvailableBookings()); } catch (error) { next(error); }
   });
-  // Going offline is always allowed (e.g. after credentials lapse); going online requires eligibility.
-  const requireEligibleToGoOnline = (req, res, next) => (req.body.isOnline === false ? next() : requireVerifiedDriver(req, res, next));
+  // Going offline is always allowed (e.g. after credentials lapse or with no vehicle on file);
+  // going online requires verification, current credentials and complete vehicle details.
+  const requireEligibleToGoOnline = (req, res, next) => (req.body.isOnline === false ? next()
+    : requireVerifiedDriver(req, res, () => requireDriverVehicle(req, res, next)));
   app.patch('/api/drivers/me/online', authenticate, requireRole('driver'), requireEligibleToGoOnline, async (req, res, next) => {
     try {
       if (typeof req.body.isOnline !== 'boolean') return res.status(400).json({ error: 'isOnline must be a boolean' });
@@ -290,7 +298,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       res.json({ isOnline: req.body.isOnline });
     } catch (error) { next(error); }
   });
-  app.post('/api/bookings/:bookingId/accept', authenticate, requireVerifiedDriver, requireOnlineDriver, async (req, res, next) => {
+  app.post('/api/bookings/:bookingId/accept', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
     try {
       // One job at a time (also enforced atomically in acceptBooking); this gives the clearer message.
       const current = await repository.getActiveBooking(req.auth.identity.id, 'driver');
@@ -310,16 +318,12 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  // The vehicle customers should look for when the driver arrives.
+  // The vehicle customers should look for when the driver arrives, plus the equipment it carries.
   app.patch('/api/drivers/me/vehicle', authenticate, requireRole('driver'), async (req, res, next) => {
     try {
-      const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
-      const vehicle = {
-        make: text(req.body.make, 40), model: text(req.body.model, 60),
-        color: text(req.body.color, 30), plate: text(req.body.plate, 12).toUpperCase(),
-      };
-      if (!vehicle.make || !vehicle.model) return res.status(400).json({ error: 'Vehicle make and model are required' });
-      res.json(await repository.updateDriverVehicle(req.auth.identity.id, vehicle));
+      const result = cleanDriverVehicle(req.body);
+      if (!result.ok) return res.status(400).json({ error: result.error, field: result.field });
+      res.json(await repository.updateDriverVehicle(req.auth.identity.id, result.vehicle));
     } catch (error) { next(error); }
   });
 

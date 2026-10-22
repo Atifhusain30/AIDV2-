@@ -5,15 +5,19 @@
  */
 
 import { useEffect, useId, useState } from 'react'
-import { AlertCircle, ArrowLeft, Camera, CheckCircle2, ChevronRight, Clock3, FileText, Loader2, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Camera, CheckCircle2, ChevronRight, Clock3, FileText, Loader2, ShieldAlert, ShieldCheck, Truck, X } from 'lucide-react'
+import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
 import { documentService, DOCUMENT_REQUIREMENTS, REQUIRED_DOCUMENT_TYPES } from '../../services/documents'
-import type { DriverDocument, DriverDocumentType, DriverVerification } from '../../types'
+import type { Driver, DriverDocument, DriverDocumentType, DriverVerification } from '../../types'
+import { driverVehicleSummary, equipmentLabel, vehicleComplete } from '../../lib/driverVehicle'
 import { formatCalendarDate } from '../../lib/dates'
 
 interface DriverOnboardingScreenProps {
   onComplete: () => void
   onSkip?: () => void
+  /** Opens the vehicle & equipment screen (the step after documents). */
+  onOpenVehicle: () => void
 }
 
 type ChipTone = 'neutral' | 'progress' | 'success' | 'danger'
@@ -142,8 +146,9 @@ function UploadSheet({ type, onClose }: { type: DriverDocumentType; onClose: () 
   )
 }
 
-export default function DriverOnboardingScreen({ onComplete }: DriverOnboardingScreenProps) {
+export default function DriverOnboardingScreen({ onComplete, onOpenVehicle }: DriverOnboardingScreenProps) {
   const { verification, fetchVerification, submitVerification } = useDriverStore()
+  const user = useAuthStore((state) => state.user) as Driver | null
   const [activeType, setActiveType] = useState<DriverDocumentType | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -158,6 +163,13 @@ export default function DriverOnboardingScreen({ onComplete }: DriverOnboardingS
       </div>
     )
   }
+
+  const vehicle = user?.vehicle ?? null
+  const vehicleSummary = driverVehicleSummary(vehicle)
+  const equipment = equipmentLabel(vehicle?.equipmentType)
+  const vehicleState: { label: string; tone: ChipTone } = vehicleComplete(vehicle)
+    ? { label: 'Added', tone: 'success' }
+    : vehicle ? { label: 'Incomplete', tone: 'danger' } : { label: 'Needed', tone: 'neutral' }
 
   const latest = documentService.latestDocumentsByType(verification.documents)
   const { readiness } = verification
@@ -207,6 +219,21 @@ export default function DriverOnboardingScreen({ onComplete }: DriverOnboardingS
             )
           })}
         </ul>
+      </section>
+
+      <section className="driver-section" aria-labelledby="vehicle-title">
+        <div className="driver-section__heading"><div><span>REQUIRED TO GO ONLINE</span><h2 id="vehicle-title">Service vehicle</h2></div></div>
+        <button type="button" className="verify-item" onClick={onOpenVehicle} aria-label={`Service vehicle: ${vehicleState.label}`}>
+          <span className={`verify-item__icon is-${vehicleState.tone}`} aria-hidden="true">
+            {vehicleState.tone === 'success' ? <CheckCircle2 size={20} /> : <Truck size={20} />}
+          </span>
+          <span className="verify-item__copy">
+            <strong>Vehicle & equipment</strong>
+            <small>{vehicleSummary ? `${vehicleSummary}${equipment ? ` · ${equipment}` : ''}` : 'Make, model, year, color, plate and equipment'}</small>
+          </span>
+          <span className={`verify-chip is-${vehicleState.tone}`}>{vehicleState.label}</span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
       </section>
 
       {canApply && (

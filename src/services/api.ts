@@ -1,4 +1,4 @@
-import type { Booking, ServiceRequest, Location, ApiResponse, Service, ServiceType, VerificationStatus } from '../types'
+import type { Booking, ServiceRequest, Location, ApiResponse, Service, ServiceType, VerificationStatus, DriverVehicle } from '../types'
 import type { UserVehicle } from '../store/useAppStore'
 import { supabase, managedAuth } from '../auth/supabase'
 
@@ -37,7 +37,14 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
     })
     const isJson = response.headers.get('content-type')?.includes('application/json')
     const data = isJson ? await response.json() : undefined
-    if (!response.ok) return { success: false, error: data?.error || data?.message || `Request failed (${response.status})` }
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data?.error || data?.message || `Request failed (${response.status})`,
+        ...(typeof data?.field === 'string' ? { field: data.field } : {}),
+        ...(typeof data?.code === 'string' ? { code: data.code } : {}),
+      }
+    }
     return { success: true, data: data as T }
   } catch (error) {
     console.error(`[AID API] ${endpoint}`, error)
@@ -61,6 +68,7 @@ export interface ApiProfile {
   rating?: number
   totalJobs?: number
   specializations?: ServiceType[]
+  driverVehicle?: DriverVehicle | null
 }
 
 export async function getProfile(): Promise<ApiResponse<ApiProfile>> {
@@ -183,6 +191,11 @@ export async function updateDriverOnlineStatus(_driverId: string | undefined, is
   return apiFetch('/drivers/me/online', { method: 'PATCH', body: JSON.stringify({ isOnline }) })
 }
 
+/** Save the driver's service vehicle; on a 400 the server names the failing `field`. */
+export async function updateDriverVehicle(vehicle: DriverVehicle): Promise<ApiResponse<DriverVehicle>> {
+  return apiFetch('/drivers/me/vehicle', { method: 'PATCH', body: JSON.stringify(vehicle) })
+}
+
 export async function createPaymentIntent(bookingId: string) {
   return apiFetch<{ id: string; clientSecret: string; amount: number; currency: string; status: string }>('/payments/create-intent', {
     method: 'POST', body: JSON.stringify({ bookingId }),
@@ -203,7 +216,7 @@ export const apiService = {
   customerLogin, customerRegister, driverLogin, driverRegister, logout, getAuthState,
   getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
   listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, reportBookingIssue, getActiveBooking, getDriverActiveBooking,
-  getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, createPaymentIntent,
+  getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, updateDriverVehicle, createPaymentIntent,
 }
 
 export { normalizeApiBaseUrl }

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { PostgresRepository } = require('../repository');
+const { PostgresRepository, mapProfile } = require('../repository');
 
 function poolWith(handler) {
   return { query: handler };
@@ -219,11 +219,24 @@ test('driver location updates record when the location was taken', async () => {
 
 test('drivers can save the vehicle customers should look for', async () => {
   let captured;
-  const repository = new PostgresRepository(poolWith(async (text, values) => { captured = { text, values }; return { rows: [{ vehicle_make: 'Ford', vehicle_model: 'F-550', vehicle_color: 'White', vehicle_plate: 'TOW-77' }] }; }));
-  const vehicle = await repository.updateDriverVehicle('driver-1', { make: 'Ford', model: 'F-550', color: 'White', plate: 'TOW-77' });
+  const repository = new PostgresRepository(poolWith(async (text, values) => {
+    captured = { text, values };
+    return { rows: [{ vehicle_make: 'Ford', vehicle_model: 'F-550', vehicle_year: 2021, vehicle_color: 'White', vehicle_plate: 'TOW-77', vehicle_plate_state: 'TX', vehicle_equipment_type: 'flatbed' }] };
+  }));
+  const vehicle = await repository.updateDriverVehicle('driver-1', { make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'flatbed' });
   assert.match(captured.text, /update public\.driver_profiles set vehicle_make/i);
-  assert.deepEqual(captured.values, ['driver-1', 'Ford', 'F-550', 'White', 'TOW-77']);
-  assert.deepEqual(vehicle, { make: 'Ford', model: 'F-550', color: 'White', plate: 'TOW-77' });
+  assert.deepEqual(captured.values, ['driver-1', 'Ford', 'F-550', 2021, 'White', 'TOW-77', 'TX', 'flatbed']);
+  assert.deepEqual(vehicle, { make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'flatbed' });
+});
+
+test('driver profile includes the full service vehicle, or null before it is added', async () => {
+  const base = { id: 'driver-1', role: 'driver', status: 'active', verification_status: 'verified', is_online: false };
+  const withVehicle = mapProfile({ ...base, vehicle_make: 'Ford', vehicle_model: 'F-550', vehicle_year: 2021, vehicle_color: 'White', vehicle_plate: 'TOW-77', vehicle_plate_state: 'TX', vehicle_equipment_type: 'wheel_lift' });
+  assert.deepEqual(withVehicle.driverVehicle, { make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'wheel_lift' });
+  // Vehicles saved before D5 have no year/state/equipment yet: returned as incomplete, not invented.
+  const legacy = mapProfile({ ...base, vehicle_make: 'Ford', vehicle_model: 'F-550', vehicle_year: null, vehicle_color: 'White', vehicle_plate: 'TOW-77', vehicle_plate_state: '', vehicle_equipment_type: '' });
+  assert.deepEqual(legacy.driverVehicle, { make: 'Ford', model: 'F-550', year: null, color: 'White', plate: 'TOW-77', plateState: '', equipmentType: '' });
+  assert.equal(mapProfile({ ...base, vehicle_make: '' }).driverVehicle, null);
 });
 
 test('customer gets an approximate ETA from the driver\'s last shared position while they head over', async () => {

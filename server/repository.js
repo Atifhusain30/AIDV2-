@@ -11,6 +11,15 @@ function dollars(cents) {
   return cents == null ? undefined : Number(cents) / 100;
 }
 
+// The driver's own service vehicle (driver_profiles.vehicle_*), as the driver sees and edits it.
+function mapDriverVehicle(row) {
+  if (!row || !row.vehicle_make) return null;
+  return {
+    make: row.vehicle_make, model: row.vehicle_model, year: row.vehicle_year ?? null, color: row.vehicle_color,
+    plate: row.vehicle_plate, plateState: row.vehicle_plate_state || '', equipmentType: row.vehicle_equipment_type || '',
+  };
+}
+
 function mapProfile(row) {
   if (!row) return null;
   return {
@@ -29,7 +38,7 @@ function mapProfile(row) {
       rating: Number(row.rating || 0),
       totalJobs: row.total_jobs || 0,
       specializations: row.specializations || [],
-      driverVehicle: row.vehicle_make ? { make: row.vehicle_make, model: row.vehicle_model, color: row.vehicle_color, plate: row.vehicle_plate } : null,
+      driverVehicle: mapDriverVehicle(row),
     } : {}),
   };
 }
@@ -197,7 +206,7 @@ class PostgresRepository {
   async getProfile(userId) {
     const result = await this.pool.query(`
       select p.*, dp.verification_status, dp.credentials_valid_until, dp.is_online, dp.rating, dp.total_jobs, dp.specializations,
-        dp.vehicle_make, dp.vehicle_model, dp.vehicle_color, dp.vehicle_plate
+        dp.vehicle_make, dp.vehicle_model, dp.vehicle_year, dp.vehicle_color, dp.vehicle_plate, dp.vehicle_plate_state, dp.vehicle_equipment_type
       from public.profiles p left join public.driver_profiles dp on dp.profile_id = p.id
       where p.id = $1
     `, [userId]);
@@ -588,11 +597,12 @@ class PostgresRepository {
 
   async updateDriverVehicle(driverId, vehicle) {
     const result = await this.pool.query(`
-      update public.driver_profiles set vehicle_make=$2, vehicle_model=$3, vehicle_color=$4, vehicle_plate=$5, updated_at=now()
-      where profile_id=$1 returning vehicle_make, vehicle_model, vehicle_color, vehicle_plate
-    `, [driverId, vehicle.make, vehicle.model, vehicle.color, vehicle.plate]);
-    const row = result.rows[0];
-    return row ? { make: row.vehicle_make, model: row.vehicle_model, color: row.vehicle_color, plate: row.vehicle_plate } : null;
+      update public.driver_profiles set vehicle_make=$2, vehicle_model=$3, vehicle_year=$4, vehicle_color=$5, vehicle_plate=$6,
+        vehicle_plate_state=$7, vehicle_equipment_type=$8, updated_at=now()
+      where profile_id=$1
+      returning vehicle_make, vehicle_model, vehicle_year, vehicle_color, vehicle_plate, vehicle_plate_state, vehicle_equipment_type
+    `, [driverId, vehicle.make, vehicle.model, vehicle.year, vehicle.color, vehicle.plate, vehicle.plateState, vehicle.equipmentType]);
+    return mapDriverVehicle(result.rows[0]);
   }
 
   async setPaymentIntent(bookingId, customerId, paymentIntentId) {
@@ -615,4 +625,4 @@ class PostgresRepository {
   }
 }
 
-module.exports = { PostgresRepository, mapProfile, mapVehicle, mapBooking, mapParticipantBooking, ACTIVE_STATUSES, CONTACT_STATUSES };
+module.exports = { PostgresRepository, mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, ACTIVE_STATUSES, CONTACT_STATUSES };

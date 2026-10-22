@@ -90,6 +90,20 @@ test('live Supabase customer → verified driver → document → completed book
     bookingId = booking.id;
     assert.equal(booking.estimatedPrice, 95); // short tow: hook-up fee covers the first 5 miles
 
+    // D5: a verified driver still needs vehicle + equipment details before going online; offline always works.
+    const blockedOnline = await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: true }) });
+    assert.equal(blockedOnline.status, 403);
+    assert.equal((await blockedOnline.json()).code, 'vehicle_required');
+    assert.equal((await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: false }) })).status, 200);
+    const badVehicle = await api('/drivers/me/vehicle', driver.token, { method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'F-550 Flatbed', year: 1970, color: 'White', plate: 'e2e-1', plateState: 'TX', equipmentType: 'flatbed' }) });
+    assert.equal(badVehicle.status, 400);
+    assert.equal((await badVehicle.json()).field, 'year');
+    const driverVehicleResponse = await api('/drivers/me/vehicle', driver.token, { method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'F-550 Flatbed', year: 2021, color: 'White', plate: 'e2e-1', plateState: 'tx', equipmentType: 'flatbed' }) });
+    assert.equal(driverVehicleResponse.status, 200);
+    const savedVehicle = { make: 'Ford', model: 'F-550 Flatbed', year: 2021, color: 'White', plate: 'E2E-1', plateState: 'TX', equipmentType: 'flatbed' };
+    assert.deepEqual(await driverVehicleResponse.json(), savedVehicle);
+    assert.deepEqual((await (await api('/me', driver.token)).json()).driverVehicle, savedVehicle, 'vehicle persists on the driver profile');
+
     assert.equal((await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: true }) })).status, 200);
     const requestsResponse = await api('/drivers/requests', driver.token);
     assert.equal(requestsResponse.status, 200);
@@ -107,8 +121,6 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(accepted.notes, 'Private E2E gate instructions');
     assert.ok(accepted.customer?.firstName !== undefined, 'driver sees the customer card after accepting');
 
-    const driverVehicleResponse = await api('/drivers/me/vehicle', driver.token, { method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'e2e-1' }) });
-    assert.equal(driverVehicleResponse.status, 200);
     assert.equal((await api(`/bookings/${bookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'en_route' }) })).status, 200);
     const locationResponse = await api(`/bookings/${bookingId}/driver-location`, driver.token, { method: 'PATCH', body: JSON.stringify({ location: { lat: 32.79, lng: -96.81 } }) });
     assert.equal(locationResponse.status, 200);

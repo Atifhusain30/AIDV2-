@@ -896,6 +896,7 @@ select:focus-visible {
 .readiness-prompt > span,
 .driver-readiness > span { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: rgba(245,180,66,.13); color: #efba5d; }
 .driver-readiness > span.is-ready { background: rgba(85,214,158,.13); color: #70dfa9; }
+.driver-readiness--vehicle { margin-top: 10px; }
 .readiness-prompt strong,
 .driver-readiness strong { display: block; font-size: .82rem; }
 .readiness-prompt p,
@@ -1089,6 +1090,30 @@ select:focus-visible {
 .verify-sheet__secondary { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 52px; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; color: var(--aid-ivory); font-weight: 700; }
 .verify-sheet__secondary:disabled { opacity: .5; }
 .verify-sheet__privacy { margin-top: 14px; color: #9a92a6; font-size: .8125rem; text-align: center; }
+
+/* Driver vehicle & equipment (D5) */
+.vehicle-form .verify-sheet__field > label { color: #cfc7da; font-size: .8125rem; font-weight: 650; }
+.vehicle-form__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; column-gap: 12px; }
+.vehicle-form__grid input, .vehicle-form__grid select { width: 100%; min-width: 0; }
+.vehicle-form__grid .verify-sheet__field { margin-top: 14px; }
+.vehicle-form__grid .verify-sheet__field:first-child, .vehicle-form__grid .verify-sheet__field:nth-child(2) { margin-top: 0; }
+.vehicle-form select { min-height: 50px; padding: 0 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px; background: #0c090f; color: var(--aid-ivory); font-size: 1rem; color-scheme: dark; }
+.vehicle-form input[aria-invalid="true"], .vehicle-form select[aria-invalid="true"] { border-color: rgba(255,107,95,.7); }
+.vehicle-form input:focus-visible, .vehicle-form select:focus-visible { outline: 2px solid var(--aid-signal-strong); outline-offset: 1px; }
+.vehicle-form input::placeholder { color: #6f6779; }
+.vehicle-form__error { color: #ff9a91; font-size: .78rem; line-height: 1.35; }
+.vehicle-form__equipment { min-width: 0; margin: 0; padding: 0; border: 0; }
+.vehicle-form__legend { display: block; margin-bottom: 12px; padding: 0; }
+.vehicle-form__legend span { color: #998ca8; font-size: .59rem; font-weight: 760; letter-spacing: .1em; }
+.vehicle-form__legend h2 { margin-top: 5px; font-size: 1.16rem; letter-spacing: -.035em; }
+.vehicle-form__equipment > .vehicle-form__error { display: block; margin-top: 10px; }
+.vehicle-option { position: relative; grid-template-columns: 1fr 24px; cursor: pointer; }
+.vehicle-option input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.vehicle-option:focus-within { outline: 2px solid var(--aid-signal-strong); outline-offset: 2px; }
+.vehicle-option.is-selected { border-color: rgba(139,92,246,.7); background: rgba(139,92,246,.09); }
+.vehicle-option__check { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid rgba(255,255,255,.2); border-radius: 50%; color: var(--aid-signal-ink); }
+.vehicle-option.is-selected .vehicle-option__check { border-color: var(--aid-signal); background: var(--aid-signal); }
+.vehicle-form__submit { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .availability-card__error { margin-top: 12px; color: #ff9a91; font-size: .8125rem; line-height: 1.4; }
 
 /* Request sheet (all on-demand services) */
