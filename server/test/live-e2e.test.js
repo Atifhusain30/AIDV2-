@@ -18,6 +18,7 @@ test('live Supabase customer → verified driver → document → completed book
   const createdIds = [];
   let bookingId;
   let secondBookingId;
+  let farBookingId;
 
   async function createUser(email, role) {
     const { data, error } = await supabase.auth.admin.createUser({
@@ -103,7 +104,8 @@ test('live Supabase customer → verified driver → document → completed book
     const setEquipment = async (equipmentType) => assert.equal((await api('/drivers/me/vehicle', driver.token, {
       method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'Transit', year: 2021, color: 'White', plate: 'e2e-1', plateState: 'TX', equipmentType }),
     })).status, 200, `save ${equipmentType}`);
-    const seesTow = async () => (await (await api('/drivers/requests', driver.token)).json()).some((item) => item.id === bookingId);
+    const NEAR = 'lat=32.7767&lng=-96.797'; // the driver is parked at the pickup
+    const seesTow = async () => (await (await api(`/drivers/requests?${NEAR}`, driver.token)).json()).requests.some((item) => item.id === bookingId);
     await setEquipment('light_duty');
     assert.equal((await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: true }) })).status, 200);
     assert.equal(await seesTow(), false, 'a light-duty vehicle is not offered tows');
@@ -131,11 +133,42 @@ test('live Supabase customer → verified driver → document → completed book
     assert.deepEqual(await driverVehicleResponse.json(), savedVehicle);
     assert.deepEqual((await (await api('/me', driver.token)).json()).driverVehicle, savedVehicle, 'vehicle persists on the driver profile');
 
+    assert.equal((await pool.query('select current_lat from public.driver_profiles where profile_id=$1', [driver.id])).rows[0].current_lat, null, 'going offline forgets the position');
     assert.equal((await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: true }) })).status, 200);
-    const requestsResponse = await api('/drivers/requests', driver.token);
+
+    // B8: nearby only. No position yet → "location required", never every open request.
+    const noPosition = await (await api('/drivers/requests', driver.token)).json();
+    assert.equal(noPosition.status, 'location_required');
+    assert.deepEqual(noPosition.requests, []);
+    assert.equal((await api(`/bookings/${bookingId}/accept`, driver.token, { method: 'POST' })).status, 409, 'accept needs a known position');
+    assert.equal((await api('/drivers/requests?lat=999&lng=-96.8', driver.token)).status, 400, 'absurd coordinates are refused');
+    // A far request (Austin, ~180 mi away) is hidden and can't be accepted; the near one is listed with its distance.
+    const farResponse = await api('/bookings', customer.token, { method: 'POST', body: JSON.stringify({ serviceType: 'battery_jump', location: { address: '1 Congress Ave, Austin', lat: 30.2672, lng: -97.7431 } }) });
+    assert.equal(farResponse.status, 201);
+    farBookingId = (await farResponse.json()).id;
+    const requestsResponse = await api(`/drivers/requests?lat=32.78&lng=-96.8`, driver.token);
     assert.equal(requestsResponse.status, 200);
-    const available = (await requestsResponse.json()).find((item) => item.id === bookingId);
+    const nearby = await requestsResponse.json();
+    assert.equal(nearby.status, 'ok');
+    assert.equal(nearby.radiusMiles, 25);
+    assert.ok(nearby.requests.every((item) => item.distanceMiles <= 25), 'nothing beyond the radius');
+    assert.deepEqual(nearby.requests.map((item) => item.distanceMiles), [...nearby.requests.map((item) => item.distanceMiles)].sort((a, b) => a - b), 'nearest first');
+    assert.equal(nearby.requests.some((item) => item.id === farBookingId), false, 'far request hidden');
+    const farAccept = await api(`/bookings/${farBookingId}/accept`, driver.token, { method: 'POST' });
+    assert.equal(farAccept.status, 403);
+    assert.equal((await farAccept.json()).code, 'out_of_range');
+    const fromAustin = await (await api('/drivers/requests?lat=30.27&lng=-97.74', driver.token)).json();
+    assert.ok(fromAustin.requests.some((item) => item.id === farBookingId), 'the same request is visible to a driver near it');
+    assert.equal(fromAustin.requests.some((item) => item.id === bookingId), false, 'and the Dallas one is not');
+    await pool.query('delete from public.bookings where id=$1', [farBookingId]);
+    const back = await (await api('/drivers/requests?lat=32.78&lng=-96.8', driver.token)).json();
+    const available = back.requests.find((item) => item.id === bookingId);
     assert.ok(available);
+    assert.ok(available.distanceMiles >= 0 && available.distanceMiles < 1, `near request shows its distance (${available.distanceMiles} mi)`);
+    assert.equal(available.pickup, undefined, 'exact pickup not sent');
+    const storedPosition = await pool.query('select current_lat, current_location_at from public.driver_profiles where profile_id=$1', [driver.id]);
+    assert.equal(storedPosition.rows[0].current_lat, 32.78);
+    assert.ok(Date.now() - new Date(storedPosition.rows[0].current_location_at).getTime() < 120000, 'position timestamp is fresh');
     assert.equal(available.location.address, 'Approximate pickup area');
     assert.equal(available.dropoffLocation, undefined);
     assert.equal(available.notes, undefined);
@@ -223,6 +256,7 @@ test('live Supabase customer → verified driver → document → completed book
     }
     if (bookingId) await pool.query('delete from public.bookings where id=$1', [bookingId]).catch(() => {});
     if (secondBookingId) await pool.query('delete from public.bookings where id=$1', [secondBookingId]).catch(() => {});
+    if (farBookingId) await pool.query('delete from public.bookings where id=$1', [farBookingId]).catch(() => {});
     for (const id of createdIds.reverse()) await supabase.auth.admin.deleteUser(id).catch(() => {});
     await pool.end();
   }

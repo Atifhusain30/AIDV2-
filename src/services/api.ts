@@ -156,16 +156,28 @@ export async function getDriverActiveBooking(_driverId?: string): Promise<ApiRes
   return getActiveBooking()
 }
 
-export async function getServiceRequests(): Promise<ApiResponse<ServiceRequest[]>> {
-  const result = await apiFetch<ServiceRequest[]>('/drivers/requests')
+/** Open requests near the driver (server-filtered by radius and equipment, nearest first). */
+export interface NearbyRequests {
+  status: 'ok' | 'location_required'
+  radiusMiles: number
+  requests: ServiceRequest[]
+}
+
+/** `position` is the driver's current location; without it the server uses its last fresh one. */
+export async function getServiceRequests(position?: { lat: number; lng: number }): Promise<ApiResponse<NearbyRequests>> {
+  const query = position ? `?lat=${encodeURIComponent(position.lat)}&lng=${encodeURIComponent(position.lng)}` : ''
+  const result = await apiFetch<NearbyRequests>(`/drivers/requests${query}`)
   if (!result.success || !result.data) return result
   return {
     ...result,
-    data: result.data.map((request) => ({
-      ...request,
-      createdAt: new Date(request.createdAt),
-      expiresAt: new Date(request.expiresAt),
-    })),
+    data: {
+      ...result.data,
+      requests: (result.data.requests || []).map((request) => ({
+        ...request,
+        createdAt: new Date(request.createdAt),
+        expiresAt: new Date(request.expiresAt),
+      })),
+    },
   }
 }
 

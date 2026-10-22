@@ -39,7 +39,8 @@ test('available-booking listings hide customer identity and precise pickup detai
     customer_name: 'Private Customer', customer_phone: '555-0100',
   }] })));
 
-  const [booking] = await repository.listAvailableBookings();
+  const [booking] = await repository.listAvailableBookings({ serviceTypes: ['towing'] }, { minLat: 32, maxLat: 33, minLng: -97, maxLng: -96 });
+  assert.deepEqual(booking.pickup, { lat: 32.77671, lng: -96.79701 }, 'exact pickup only for the API distance check (stripped before sending)');
   assert.equal(booking.customerName, undefined);
   assert.equal(booking.customerPhone, undefined);
   assert.equal(booking.customerId, undefined);
@@ -264,22 +265,43 @@ test('open requests and accepts are limited to what the driver equipment can per
   const calls = [];
   const repository = new PostgresRepository(poolWith(async (text, values) => {
     calls.push({ text, values });
-    return { rows: /select b\.id, b\.service_type/.test(text) ? [{ id: 'booking-9', service_type: 'towing', vehicle_is_electric: true }] : [] };
+    return { rows: /select b\.id, b\.service_type/.test(text) ? [{ id: 'booking-9', service_type: 'towing', vehicle_is_electric: true, location_lat: 32.7, location_lng: -96.8 }] : [] };
   }));
   const capability = { serviceTypes: ['battery_jump', 'towing'], electricTowing: false };
-  await repository.listAvailableBookings(capability);
+  const area = { minLat: 32, maxLat: 33, minLng: -97, maxLng: -96 };
+  await repository.listAvailableBookings(capability, area);
   assert.match(calls[0].text, /b\.service_type = any\(\$1::text\[\]\)/);
   assert.match(calls[0].text, /\$2::boolean or b\.service_type <> 'towing' or not coalesce\(v\.is_electric, false\)/);
-  assert.deepEqual(calls[0].values, [['battery_jump', 'towing'], false]);
+  assert.match(calls[0].text, /b\.location_lat between \$3 and \$4 and b\.location_lng between \$5 and \$6/);
+  assert.deepEqual(calls[0].values, [['battery_jump', 'towing'], false, 32, 33, -97, -96, 32.5, -96.5]);
 
-  await repository.listAvailableBookings();
-  assert.deepEqual(calls[1].values, [[], false], 'no capability means no requests');
+  await repository.listAvailableBookings(undefined, area);
+  assert.deepEqual(calls[1].values.slice(0, 2), [[], false], 'no capability means no requests');
+  assert.deepEqual(await repository.listAvailableBookings(capability), [], 'no area (driver position) means no requests');
+  assert.equal(calls.length, 2, 'and no query is run');
 
-  assert.deepEqual(await repository.getAvailableBooking('booking-9'), { id: 'booking-9', serviceType: 'towing', vehicleIsElectric: true });
+  assert.deepEqual(await repository.getAvailableBooking('booking-9'), { id: 'booking-9', serviceType: 'towing', vehicleIsElectric: true, pickup: { lat: 32.7, lng: -96.8 } });
   assert.match(calls[2].text, /b\.status='searching' and b\.driver_id is null/);
 
   assert.equal(await repository.acceptBooking('booking-9', 'driver-1', capability), null);
   assert.match(calls[3].text, /b\.service_type = any\(\$4::text\[\]\)/);
   assert.match(calls[3].text, /\$5::boolean or b\.service_type <> 'towing'\s+or not exists \(select 1 from public\.vehicles v where v\.id = b\.vehicle_id and v\.is_electric\)/);
   assert.deepEqual(calls[3].values.slice(3), [['battery_jump', 'towing'], false]);
+});
+
+test('driver position: stored with a timestamp, ignored when stale, forgotten when going offline', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => {
+    calls.push({ text, values });
+    return { rows: /select current_lat/.test(text) ? [{ current_lat: 32.7, current_lng: -96.8, current_location_at: new Date() }] : [{ id: 'x' }] };
+  }));
+  await repository.updateDriverPosition('driver-1', { lat: 32.7, lng: -96.8 });
+  assert.match(calls[0].text, /current_lat=\$2, current_lng=\$3, current_location_at=now\(\)/);
+  const position = await repository.getDriverPosition('driver-1', 10);
+  assert.deepEqual([position.lat, position.lng], [32.7, -96.8]);
+  assert.match(calls[1].text, /current_location_at > now\(\) - make_interval\(mins => \$2::int\)/);
+  assert.deepEqual(calls[1].values, ['driver-1', 10]);
+  await repository.updateDriverOnlineStatus('driver-1', false);
+  assert.match(calls[2].text, /current_lat = case when \$2 then current_lat end/);
+  assert.match(calls[2].text, /current_location_at = case when \$2 then current_location_at end/);
 });

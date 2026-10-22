@@ -11,6 +11,10 @@ const {
   cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE, SERVICE_EQUIPMENT, EQUIPMENT_MISMATCH_CODE,
   equipmentCapability, canPerformService,
 } = require('./driverVehicle');
+const {
+  radiusFromEnv, parsePosition, boundingBox, distanceTo, nearestWithin,
+  LOCATION_MAX_AGE_MINUTES, LOCATION_REQUIRED_CODE, OUT_OF_RANGE_CODE,
+} = require('./nearby');
 
 const DOCUMENT_TYPES = new Set(REQUIRED_DOCUMENT_TYPES);
 const publicDocument = ({ storagePath: _storagePath, ...document }) => document;
@@ -65,7 +69,7 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173' }) {
+function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv() }) {
   const app = express();
   app.disable('x-powered-by');
   const allowedOrigins = new Set((Array.isArray(corsOrigin) ? corsOrigin : String(corsOrigin).split(',')).map((origin) => origin.trim()).filter(Boolean));
@@ -288,9 +292,26 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  // Only requests this driver's equipment can perform (e.g. no tows for a light-duty vehicle).
+  // B8: only requests this driver's equipment can perform (e.g. no tows for a light-duty vehicle),
+  // within `requestRadiusMiles` of where the driver is now, nearest first, at most MAX_REQUESTS.
+  // The app sends its current position as ?lat=&lng= (stored as the driver's last position);
+  // otherwise the last position from the past LOCATION_MAX_AGE_MINUTES is used. With no position,
+  // the answer says so (status 'location_required') rather than listing requests from anywhere.
   app.get('/api/drivers/requests', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
-    try { res.json(await repository.listAvailableBookings(equipmentCapability(req.auth.profile.driverVehicle.equipmentType))); } catch (error) { next(error); }
+    try {
+      const driverId = req.auth.identity.id;
+      const sent = req.query.lat !== undefined || req.query.lng !== undefined;
+      if (sent) {
+        const position = parsePosition(req.query.lat, req.query.lng);
+        if (!position) return res.status(400).json({ error: 'Your location looks wrong. Check location access and try again.', code: 'invalid_location' });
+        await repository.updateDriverPosition(driverId, position);
+      }
+      const from = await repository.getDriverPosition(driverId, LOCATION_MAX_AGE_MINUTES);
+      if (!from) return res.json({ status: LOCATION_REQUIRED_CODE, radiusMiles: requestRadiusMiles, requests: [] });
+      const capability = equipmentCapability(req.auth.profile.driverVehicle.equipmentType);
+      const candidates = await repository.listAvailableBookings(capability, boundingBox(from, requestRadiusMiles));
+      res.json({ status: 'ok', radiusMiles: requestRadiusMiles, requests: nearestWithin(candidates, from, requestRadiusMiles) });
+    } catch (error) { next(error); }
   });
   // Going offline is always allowed (e.g. after credentials lapse or with no vehicle on file);
   // going online requires verification, current credentials and complete vehicle details.
@@ -313,6 +334,13 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (!open) return res.status(409).json({ error: 'Booking is no longer available' });
       const fit = canPerformService(equipmentType, open);
       if (!fit.ok) return res.status(403).json({ error: fit.error, code: EQUIPMENT_MISMATCH_CODE });
+      // Same radius as the request list, checked against the driver's last fresh position. Advisory
+      // (a position can't race the way a booking can); double booking is prevented in acceptBooking.
+      const from = await repository.getDriverPosition(req.auth.identity.id, LOCATION_MAX_AGE_MINUTES);
+      if (!from) return res.status(409).json({ error: 'Turn on location so AID can confirm you are near this job, then try again.', code: LOCATION_REQUIRED_CODE });
+      if (distanceTo(from, open.pickup) > requestRadiusMiles) {
+        return res.status(403).json({ error: `This job is more than ${requestRadiusMiles} miles from you.`, code: OUT_OF_RANGE_CODE });
+      }
       const booking = await repository.acceptBooking(req.params.bookingId, req.auth.identity.id, equipmentCapability(equipmentType));
       if (!booking) return res.status(409).json({ error: 'Booking is no longer available' });
       res.json(booking);

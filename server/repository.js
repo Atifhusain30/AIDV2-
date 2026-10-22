@@ -500,18 +500,26 @@ class PostgresRepository {
   /**
    * Open requests this driver's equipment can perform. `capability` comes from
    * equipmentCapability() in driverVehicle.js; without one, nothing is returned (fail closed).
+   * `area` is a lat/lng box around the driver (nearby.js boundingBox); candidates are returned
+   * roughly nearest first with their exact `pickup` so the API can compute the real distance,
+   * filter to the radius and cap the list. Without an area nothing is returned (fail closed).
    */
-  async listAvailableBookings({ serviceTypes = [], electricTowing = false } = {}) {
+  async listAvailableBookings({ serviceTypes = [], electricTowing = false } = {}, area = null) {
+    if (!area) return [];
+    const center = { lat: (area.minLat + area.maxLat) / 2, lng: (area.minLng + area.maxLng) / 2 };
     const result = await this.pool.query(`
       select b.*, concat_ws(' ', v.year, v.make, v.model) as vehicle_label, v.license_plate as vehicle_plate
       from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
       where b.status='searching' and b.driver_id is null
         and b.service_type = any($1::text[])
         and ($2::boolean or b.service_type <> 'towing' or not coalesce(v.is_electric, false))
-      order by b.created_at asc limit 50
-    `, [serviceTypes, electricTowing]);
+        and b.location_lat between $3 and $4 and b.location_lng between $5 and $6
+      order by power(b.location_lat - $7, 2) + power((b.location_lng - $8) * cos(radians($7)), 2), b.created_at asc
+      limit 500
+    `, [serviceTypes, electricTowing, area.minLat, area.maxLat, area.minLng, area.maxLng, center.lat, center.lng]);
     return result.rows.map((row) => {
       const booking = mapBooking(row);
+      booking.pickup = { lat: row.location_lat, lng: row.location_lng };
       booking.expiresAt = new Date(new Date(row.created_at).getTime() + 10 * 60 * 1000);
       delete booking.customerName;
       delete booking.customerPhone;
@@ -532,12 +540,31 @@ class PostgresRepository {
   // car is electric. Only for requests still open to any driver.
   async getAvailableBooking(bookingId) {
     const result = await this.pool.query(`
-      select b.id, b.service_type, coalesce(v.is_electric, false) as vehicle_is_electric
+      select b.id, b.service_type, b.location_lat, b.location_lng, coalesce(v.is_electric, false) as vehicle_is_electric
       from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
       where b.id=$1 and b.status='searching' and b.driver_id is null
     `, [bookingId]);
     const row = result.rows[0];
-    return row ? { id: row.id, serviceType: row.service_type, vehicleIsElectric: Boolean(row.vehicle_is_electric) } : null;
+    return row ? {
+      id: row.id, serviceType: row.service_type, vehicleIsElectric: Boolean(row.vehicle_is_electric),
+      pickup: { lat: row.location_lat, lng: row.location_lng },
+    } : null;
+  }
+
+  /** The driver's last reported position, if reported within `maxAgeMinutes`. */
+  async getDriverPosition(driverId, maxAgeMinutes) {
+    const result = await this.pool.query(`
+      select current_lat, current_lng, current_location_at from public.driver_profiles
+      where profile_id=$1 and current_lat is not null and current_lng is not null
+        and current_location_at > now() - make_interval(mins => $2::int)
+    `, [driverId, maxAgeMinutes]);
+    const row = result.rows[0];
+    return row ? { lat: row.current_lat, lng: row.current_lng, at: row.current_location_at } : null;
+  }
+
+  async updateDriverPosition(driverId, position) {
+    await this.pool.query('update public.driver_profiles set current_lat=$2, current_lng=$3, current_location_at=now() where profile_id=$1',
+      [driverId, position.lat, position.lng]);
   }
 
   // One job at a time: a driver with an unfinished job cannot accept another. The accept is
@@ -603,7 +630,12 @@ class PostgresRepository {
   }
 
   async updateDriverOnlineStatus(driverId, isOnline) {
-    const result = await this.pool.query('update public.driver_profiles set is_online=$2 where profile_id=$1 returning *', [driverId, isOnline]);
+    // Going offline forgets the driver's position: it's only kept while they're available for work.
+    const result = await this.pool.query(`
+      update public.driver_profiles set is_online=$2,
+        current_lat = case when $2 then current_lat end, current_lng = case when $2 then current_lng end,
+        current_location_at = case when $2 then current_location_at end
+      where profile_id=$1 returning *`, [driverId, isOnline]);
     return result.rows[0] || null;
   }
 
@@ -613,7 +645,7 @@ class PostgresRepository {
       where id=$1 and driver_id=$2 and status = any($5::text[]) returning id
     `, [bookingId, driverId, location.lat, location.lng, [...CONTACT_STATUSES]]);
     if (!result.rows[0]) return null;
-    await this.pool.query('update public.driver_profiles set current_lat=$2, current_lng=$3 where profile_id=$1', [driverId, location.lat, location.lng]);
+    await this.updateDriverPosition(driverId, location);
     return this.selectParticipantBooking(result.rows[0].id, 'driver');
   }
 

@@ -101,7 +101,7 @@ describe('first-run flow', () => {
       },
     })
     vi.mocked(apiService.getDriverActiveBooking).mockResolvedValue({ success: true, data: undefined })
-    vi.mocked(apiService.getServiceRequests).mockResolvedValue({ success: true, data: [] })
+    vi.mocked(apiService.getServiceRequests).mockResolvedValue({ success: true, data: { status: 'ok', radiusMiles: 25, requests: [] } })
     useAuthStore.setState({
       isAuthenticated: true,
       token: 'managed-token',

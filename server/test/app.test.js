@@ -7,6 +7,8 @@ const TOW_TRUCK = Object.freeze({ make: 'Ford', model: 'F-550', year: 2021, colo
 const WHEEL_LIFT = Object.freeze({ ...TOW_TRUCK, model: 'F-450', plate: 'LIFT-1', equipmentType: 'wheel_lift' });
 const SERVICE_VAN = Object.freeze({ ...TOW_TRUCK, model: 'Transit', plate: 'VAN-1', equipmentType: 'light_duty' });
 const serviceOf = (booking) => booking.service?.id || booking.serviceType;
+const DALLAS = Object.freeze({ lat: 32.7767, lng: -96.797 });
+const pickupOf = (booking) => (booking.location ? { lat: booking.location.lat, lng: booking.location.lng } : DALLAS);
 const fitsCapability = (booking, capability) => Boolean(capability) && capability.serviceTypes.includes(serviceOf(booking)) &&
   (capability.electricTowing || serviceOf(booking) !== 'towing' || !booking.vehicleIsElectric);
 
@@ -36,15 +38,30 @@ function buildHarness(stripe = null, accountAdmin = null) {
       bookings.set(booking.id, booking);
       return booking;
     },
-    // Mirrors the SQL equipment filter: allowed service types, and electric tows only with electricTowing.
-    async listAvailableBookings(capability) {
+    // Mirrors the SQL filter: allowed service types, electric tows only with electricTowing, inside the
+    // driver's lat/lng box; returns the exact pickup for the API's distance check. No area → nothing.
+    async listAvailableBookings(capability, area) {
       this.listedWith = capability;
-      return [...bookings.values()].filter((booking) => booking.status === 'searching' && !booking.driverId && fitsCapability(booking, capability));
+      this.listedArea = area;
+      if (!area) return [];
+      return [...bookings.values()]
+        .filter((booking) => booking.status === 'searching' && !booking.driverId && fitsCapability(booking, capability))
+        .map((booking) => ({ ...booking, pickup: pickupOf(booking) }))
+        .filter(({ pickup }) => pickup.lat >= area.minLat && pickup.lat <= area.maxLat && pickup.lng >= area.minLng && pickup.lng <= area.maxLng);
     },
     async getAvailableBooking(bookingId) {
       const booking = bookings.get(bookingId);
       if (!booking || booking.status !== 'searching' || booking.driverId) return null;
-      return { id: booking.id, serviceType: serviceOf(booking), vehicleIsElectric: Boolean(booking.vehicleIsElectric) };
+      return { id: booking.id, serviceType: serviceOf(booking), vehicleIsElectric: Boolean(booking.vehicleIsElectric), pickup: pickupOf(booking) };
+    },
+    // Online drivers start with a fresh position in downtown Dallas (tests move or clear it).
+    positions: new Map(Object.values(users).filter((user) => user.isOnline).map((user) => [user.id, { ...DALLAS, at: new Date() }])),
+    async getDriverPosition(driverId, maxAgeMinutes) {
+      const position = this.positions.get(driverId);
+      return position && Date.now() - position.at.getTime() <= maxAgeMinutes * 60000 ? position : null;
+    },
+    async updateDriverPosition(driverId, position) {
+      this.positions.set(driverId, { ...position, at: new Date() });
     },
     async acceptBooking(bookingId, driverId, capability) {
       const booking = bookings.get(bookingId);
@@ -662,7 +679,7 @@ test('each equipment type only sees the requests it can perform', async () => {
     seedEquipmentJobs(bookings);
     const list = await request(app).get('/api/drivers/requests').set('Authorization', `Bearer ${token}`);
     assert.equal(list.status, 200, token);
-    assert.deepEqual(list.body.map((job) => job.id), ids, token);
+    assert.deepEqual(list.body.requests.map((job) => job.id), ids, token);
     assert.ok(repository.listedWith.serviceTypes.length > 0, `${token} filters by a capability`);
   }
 });
@@ -714,4 +731,104 @@ test('service catalog lists which equipment can perform each service', async () 
   }
   assert.deepEqual(byId.detailing, []);
   assert.deepEqual(byId.window_tinting, []);
+});
+
+// B8: drivers only see open requests near where they are now, nearest first, with the distance.
+const at = (dLat, dLng = 0) => ({ address: 'x', lat: DALLAS.lat + dLat, lng: DALLAS.lng + dLng });
+function seedNearbyJobs(bookings) {
+  const open = (id, serviceType, location, extra = {}) => bookings.set(id, { id, status: 'searching', customerId: 'customer-1', serviceType, location, createdAt: new Date('2026-10-22T12:00:00Z'), ...extra });
+  open('mid', 'battery_jump', at(0.1)); // ≈ 8.6 road mi
+  open('far', 'battery_jump', at(1)); // ≈ 86 road mi
+  open('near', 'flat_tire', at(0.05)); // ≈ 4.3 road mi
+  open('edge-out', 'lockout', at(0.3)); // inside the lat/lng box, but ≈ 25.9 road mi
+  open('near-tow', 'towing', at(0.02)); // ≈ 1.7 road mi
+}
+
+test('request list: only requests within the radius, nearest first, with distance in miles', async () => {
+  const { app, bookings } = buildHarness();
+  seedNearbyJobs(bookings);
+  const list = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer driverToken');
+  assert.equal(list.status, 200);
+  assert.equal(list.body.status, 'ok');
+  assert.equal(list.body.radiusMiles, 25);
+  assert.deepEqual(list.body.requests.map((job) => job.id), ['near-tow', 'near', 'mid']);
+  assert.deepEqual(list.body.requests.map((job) => job.distanceMiles), [1.7, 4.3, 8.6]);
+  assert.ok(list.body.requests.every((job) => job.pickup === undefined), 'exact pickup is never sent with the list');
+});
+
+test('request list: equipment and distance filters combine', async () => {
+  const { app, bookings } = buildHarness();
+  seedNearbyJobs(bookings);
+  const list = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer lightDutyDriverToken');
+  assert.deepEqual(list.body.requests.map((job) => job.id), ['near', 'mid'], 'no tow for light duty, nothing beyond the radius');
+});
+
+test('request list: the position the app sends is used and remembered; the radius is configurable', async () => {
+  const { app, bookings, repository } = buildHarness();
+  seedNearbyJobs(bookings);
+  const fromFar = await request(app).get('/api/drivers/requests').query({ lat: DALLAS.lat + 1, lng: DALLAS.lng }).set('Authorization', 'Bearer driverToken');
+  assert.deepEqual(fromFar.body.requests.map((job) => [job.id, job.distanceMiles]), [['far', 0]]);
+  assert.equal(repository.positions.get('driver-1').lat, DALLAS.lat + 1);
+  const again = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer driverToken');
+  assert.deepEqual(again.body.requests.map((job) => job.id), ['far'], 'stored position is used without query');
+
+  const { createApp: create } = require('../app');
+  const narrow = create({ auth: { getUser: async () => ({ id: 'driver-1' }) }, repository, requestRadiusMiles: 5 });
+  repository.positions.set('driver-1', { ...DALLAS, at: new Date() });
+  const small = await request(narrow).get('/api/drivers/requests').set('Authorization', 'Bearer driverToken');
+  assert.equal(small.body.radiusMiles, 5);
+  assert.deepEqual(small.body.requests.map((job) => job.id), ['near-tow', 'near']);
+});
+
+test('request list: no fresh position means "location required", never every request', async () => {
+  const { app, bookings, repository } = buildHarness();
+  seedNearbyJobs(bookings);
+  repository.positions.delete('driver-1');
+  const none = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer driverToken');
+  assert.equal(none.status, 200);
+  assert.deepEqual(none.body, { status: 'location_required', radiusMiles: 25, requests: [] });
+  repository.positions.set('driver-1', { ...DALLAS, at: new Date(Date.now() - 11 * 60000) });
+  const stale = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer driverToken');
+  assert.equal(stale.body.status, 'location_required', 'a position older than 10 minutes is ignored');
+  assert.equal(repository.listedArea, undefined, 'nothing was listed');
+});
+
+test('request list: invalid coordinates are refused and not stored', async () => {
+  const { app, repository } = buildHarness();
+  for (const query of [{ lat: 200, lng: -96 }, { lat: 32, lng: -500 }, { lat: 'abc', lng: -96 }, { lat: 32.7 }, { lng: -96 }, { lat: 0, lng: 0 }, { lat: '', lng: '' }, { lat: 'Infinity', lng: 1 }]) {
+    const response = await request(app).get('/api/drivers/requests').query(query).set('Authorization', 'Bearer driverToken');
+    assert.equal(response.status, 400, JSON.stringify(query));
+    assert.equal(response.body.code, 'invalid_location');
+  }
+  assert.equal(repository.positions.get('driver-1').lat, DALLAS.lat, 'stored position unchanged');
+});
+
+test('accept: refused beyond the radius or without a position; nearby accept still works once', async () => {
+  const { app, bookings, repository } = buildHarness();
+  seedNearbyJobs(bookings);
+  const far = await request(app).post('/api/bookings/far/accept').set('Authorization', 'Bearer driverToken');
+  assert.equal(far.status, 403);
+  assert.equal(far.body.code, 'out_of_range');
+  assert.match(far.body.error, /more than 25 miles/);
+  assert.equal(bookings.get('far').status, 'searching');
+  repository.positions.delete('driver-6');
+  const noPosition = await request(app).post('/api/bookings/near/accept').set('Authorization', 'Bearer wheelLiftDriverToken');
+  assert.equal(noPosition.status, 409);
+  assert.equal(noPosition.body.code, 'location_required');
+  const [first, second] = await Promise.all([
+    request(app).post('/api/bookings/near/accept').set('Authorization', 'Bearer driverToken'),
+    request(app).post('/api/bookings/near/accept').set('Authorization', 'Bearer lightDutyDriverToken'),
+  ]);
+  assert.deepEqual([first.status, second.status].sort(), [200, 409], 'one driver wins, the other is told it is gone');
+});
+
+test('nearby helpers: radius env is clamped with a sane default', () => {
+  const { radiusFromEnv, parsePosition } = require('../nearby');
+  assert.equal(radiusFromEnv({}), 25);
+  assert.equal(radiusFromEnv({ DRIVER_REQUEST_RADIUS_MILES: '10' }), 10);
+  assert.equal(radiusFromEnv({ DRIVER_REQUEST_RADIUS_MILES: 'lots' }), 25);
+  assert.equal(radiusFromEnv({ DRIVER_REQUEST_RADIUS_MILES: '0' }), 1);
+  assert.equal(radiusFromEnv({ DRIVER_REQUEST_RADIUS_MILES: '5000' }), 100);
+  assert.deepEqual(parsePosition('32.5', '-96.1'), { lat: 32.5, lng: -96.1 });
+  assert.equal(parsePosition(null, 1), null);
 });

@@ -6,6 +6,7 @@ import {
   Clock3,
   DollarSign,
   FileCheck2,
+  LocateFixed,
   MapPin,
   Navigation,
   Power,
@@ -23,6 +24,7 @@ import { driverEligibility, ELIGIBILITY_COPY } from '../../lib/driverEligibility
 import { formatCalendarDate } from '../../lib/dates'
 import { formatPrice } from '../../lib/money'
 import { driverVehicleSummary, vehicleComplete, VEHICLE_REQUIRED_COPY } from '../../lib/driverVehicle'
+import { formatDistance, LOCATION_PROMPT_COPY } from '../../lib/nearbyRequests'
 
 interface DriverHomeScreenProps {
   onOpenOnboarding: () => void
@@ -46,7 +48,13 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
     declineRequest,
     jobEndedNotice,
     dismissJobEndedNotice,
+    nearbyStatus,
+    locationProblem,
+    requestRadiusMiles,
+    retryLocation,
   } = useDriverStore()
+  const radiusMiles = requestRadiusMiles ?? 25
+  const locationPrompt = LOCATION_PROMPT_COPY[locationProblem ?? 'denied']
 
   const eligibility = driverEligibility(user)
   const isVerified = eligibility === 'eligible'
@@ -154,8 +162,18 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
           </button>
         ) : !isOnline ? (
           <div className="driver-empty-state"><Power size={25} /><strong>Go online to receive work</strong><p>New roadside requests will appear here.</p></div>
+        ) : nearbyStatus === 'location_required' ? (
+          <button type="button" className="readiness-prompt" onClick={() => void retryLocation()} disabled={isLoading}>
+            <span><LocateFixed size={22} /></span>
+            <div><strong>{locationPrompt.title}</strong><p>{locationPrompt.detail(radiusMiles)}</p></div>
+            <span className="readiness-prompt__action">Try again</span>
+          </button>
         ) : incomingRequests.length === 0 ? (
-          <div className="driver-empty-state"><Clock3 size={25} /><strong>Waiting for a nearby request</strong><p>You are visible to customers in your service area.</p></div>
+          nearbyStatus === 'idle' ? (
+            <div className="driver-empty-state"><LocateFixed size={25} /><strong>Finding requests near you</strong><p>Checking your location.</p></div>
+          ) : (
+            <div className="driver-empty-state"><Clock3 size={25} /><strong>No requests near you right now</strong><p>New requests within {radiusMiles} miles of you will appear here.</p></div>
+          )
         ) : (
           <div className="request-list">
             {incomingRequests.map((request) => (
@@ -165,7 +183,10 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
                   <div><strong>{request.service.name}</strong><p>{request.customerName || 'Nearby customer'}</p></div>
                   <span className="request-card__price">{formatPrice(request.estimatedPrice)}</span>
                 </div>
-                <p className="request-card__location"><MapPin size={15} /> {request.location.address}</p>
+                <p className="request-card__location">
+                  <MapPin size={15} /> {request.location.address}
+                  {formatDistance(request.distanceMiles) && <span className="request-card__distance">{formatDistance(request.distanceMiles)}</span>}
+                </p>
                 <div className="request-card__actions">
                   <button type="button" onClick={() => declineRequest(request.id)}>Decline</button>
                   <button type="button" onClick={() => void handleAccept(request.id)}>Accept request</button>

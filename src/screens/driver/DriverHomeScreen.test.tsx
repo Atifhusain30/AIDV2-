@@ -134,7 +134,7 @@ describe('driver work layout', () => {
     }
     const message = "Towing needs a flatbed or wheel-lift tow truck. Your light-duty service vehicle can't take this job."
     vi.spyOn(apiService, 'getDriverActiveBooking').mockResolvedValue({ success: true, data: null })
-    const refresh = vi.spyOn(apiService, 'getServiceRequests').mockResolvedValue({ success: true, data: [] })
+    const refresh = vi.spyOn(apiService, 'getServiceRequests').mockResolvedValue({ success: true, data: { status: 'ok', radiusMiles: 25, requests: [] } })
     const accept = vi.spyOn(apiService, 'acceptServiceRequest').mockResolvedValue({ success: false, error: message, code: 'equipment_mismatch' } as never)
     useDriverStore.setState({ isOnline: true, incomingRequests: [tow as never] })
     const openJob = vi.fn()
@@ -147,5 +147,56 @@ describe('driver work layout', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /accept request/i })).toBeNull())
     expect(openJob).not.toHaveBeenCalled()
     vi.restoreAllMocks()
+  })
+
+  // B8: nearby requests.
+  const READY = { verificationStatus: 'verified', isVerified: true, credentialsValidUntil: '2099-01-01', vehicle: TOW_TRUCK }
+  const job = (id: string, name: string, distanceMiles: number) => ({
+    id, service: { id: 'battery_jump', name, description: '', basePrice: 69, estimatedTime: 30 }, status: 'searching',
+    location: { address: 'Approximate pickup area', lat: 32.78, lng: -96.8 }, estimatedPrice: 69, createdAt: new Date(), expiresAt: new Date(Date.now() + 600000), distanceMiles,
+  })
+  // A no-op refresh keeps the store state each test sets up.
+  const holdState = () => useDriverStore.setState({ fetchIncomingRequests: vi.fn(async () => {}), fetchActiveBooking: vi.fn(async () => {}) })
+
+  it('shows each request with its distance, in the order the server sent (nearest first)', () => {
+    setDriver(READY)
+    holdState()
+    useDriverStore.setState({ isOnline: true, nearbyStatus: 'ok', requestRadiusMiles: 25, incomingRequests: [job('a', "Won't start", 1.24), job('b', 'Flat tire', 12.6)] as never })
+    renderHome()
+    expect(screen.getByText('1.2 mi away')).toBeTruthy()
+    expect(screen.getByText('13 mi away')).toBeTruthy()
+    const names = screen.getAllByRole('article').map((card) => card.querySelector('strong')?.textContent)
+    expect(names).toEqual(["Won't start", 'Flat tire'])
+  })
+
+  it('says there are no requests nearby (with the radius) instead of a blank list', () => {
+    setDriver(READY)
+    holdState()
+    useDriverStore.setState({ isOnline: true, nearbyStatus: 'ok', requestRadiusMiles: 15, incomingRequests: [] })
+    renderHome()
+    expect(screen.getByText('No requests near you right now')).toBeTruthy()
+    expect(screen.getByText(/within 15 miles of you/)).toBeTruthy()
+  })
+
+  it('asks for location when the server cannot place the driver, and retries on tap', () => {
+    setDriver(READY)
+    holdState()
+    const retryLocation = vi.fn(async () => {})
+    useDriverStore.setState({ isOnline: true, nearbyStatus: 'location_required', locationProblem: 'denied', requestRadiusMiles: 25, incomingRequests: [], retryLocation })
+    renderHome()
+    expect(screen.getByText('Turn on location to see nearby requests')).toBeTruthy()
+    expect(screen.getByText(/Allow location for AID in your phone's Settings/)).toBeTruthy()
+    expect(screen.queryByText('No requests near you right now')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /turn on location/i }))
+    expect(retryLocation).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains a missing GPS signal differently from a denied permission', () => {
+    setDriver(READY)
+    holdState()
+    useDriverStore.setState({ isOnline: true, nearbyStatus: 'location_required', locationProblem: 'unavailable', incomingRequests: [] })
+    renderHome()
+    expect(screen.getByText("We couldn't find your location")).toBeTruthy()
+    expect(screen.getByText(/location services are on/)).toBeTruthy()
   })
 })

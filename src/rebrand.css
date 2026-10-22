@@ -912,6 +912,9 @@ select:focus-visible {
 .request-card__top p { margin-top: 3px; color: #92899a; font-size: .67rem; }
 .request-card__price { color: #c5afff; font-size: .98rem; font-weight: 800; }
 .request-card__location { display: flex; align-items: center; gap: 7px; margin: 13px 0; padding: 10px; border-radius: 11px; background: rgba(255,255,255,.04); color: #9b91a5; font-size: .7rem; }
+.request-card__distance { margin-left: auto; flex-shrink: 0; color: #c5afff; font-weight: 700; }
+.readiness-prompt__action { color: #efba5d; font-size: .7rem; font-weight: 760; }
+.readiness-prompt:disabled { opacity: .6; }
 .request-card__actions { display: grid; grid-template-columns: .8fr 1.2fr; gap: 8px; }
 .request-card__actions button { min-height: 44px; border-radius: 12px; background: rgba(255,255,255,.06); color: #aaa0b4; font-size: .73rem; font-weight: 730; }
 .request-card__actions button:last-child { background: var(--aid-signal); color: white; }

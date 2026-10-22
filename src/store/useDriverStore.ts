@@ -11,6 +11,7 @@ import { apiService } from '../services/api'
 import { documentService } from '../services/documents'
 import type { SharingStatus } from '../lib/jobLocationSharing'
 import { isJobOver } from '../lib/jobLifecycle'
+import { locateDriver, requestDriverLocationPermission, type LocationProblem, type NearbyStatus } from '../lib/nearbyRequests'
 
 interface DriverStore {
   // State
@@ -22,6 +23,12 @@ interface DriverStore {
   verification: DriverVerification | null
   /** GPS sharing state during an active job (shown on the job screen). */
   locationSharing: SharingStatus
+  /** Whether the server could place the driver for the nearby request list. */
+  nearbyStatus: NearbyStatus
+  /** Why the phone couldn't give a position on the last refresh (null when it did). */
+  locationProblem: LocationProblem | null
+  /** Server's service radius in miles (from the last request list). */
+  requestRadiusMiles: number | null
   isLoading: boolean
   error: string | null
 
@@ -30,6 +37,8 @@ interface DriverStore {
   setCurrentLocation: (location: Location) => void
   setLocationSharing: (status: SharingStatus) => void
   fetchIncomingRequests: () => Promise<void>
+  /** Ask for location permission again, then refresh the nearby list. */
+  retryLocation: () => Promise<void>
   acceptRequest: (requestId: string) => Promise<boolean>
   declineRequest: (requestId: string) => void
   /** `reason` is required by the server when cancelling (see DRIVER_CANCEL_REASONS). */
@@ -66,6 +75,9 @@ const initialState = {
   verification: null,
   locationSharing: 'off' as SharingStatus,
   jobEndedNotice: null,
+  nearbyStatus: 'idle' as NearbyStatus,
+  locationProblem: null,
+  requestRadiusMiles: null,
   isLoading: false,
   error: null
 }
@@ -96,8 +108,9 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
       set({ error: result.error })
       return
     }
-    set({ isOnline, error: null })
-    
+    // Offline: drop the list; the server also forgets the driver's position.
+    set(isOnline ? { isOnline, error: null } : { isOnline, error: null, incomingRequests: [], nearbyStatus: 'idle', locationProblem: null })
+
     // If going online, start fetching requests
     if (isOnline) {
       get().fetchIncomingRequests()
@@ -111,19 +124,34 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
 
   setLocationSharing: (locationSharing) => set({ locationSharing }),
 
-  // Fetch incoming service requests
+  // Fetch nearby requests: one coarse GPS fix per refresh, sent with the request (server filters by
+  // radius and sorts nearest first). If no fix, the server may still use the driver's last fresh
+  // position; otherwise it answers 'location_required' and the screen asks for location.
   fetchIncomingRequests: async () => {
     if (!get().isOnline) return
-    
+
     set({ isLoading: true })
-    
-    const result = await apiService.getServiceRequests()
-    
+    const fix = await locateDriver()
+    if (!get().isOnline) return set({ isLoading: false })
+    const result = await apiService.getServiceRequests(fix.ok ? { lat: fix.lat, lng: fix.lng } : undefined)
+
     if (result.success && result.data) {
-      set({ incomingRequests: result.data, isLoading: false })
+      const { status, radiusMiles, requests } = result.data
+      set({
+        incomingRequests: status === 'ok' ? requests : [],
+        nearbyStatus: status,
+        requestRadiusMiles: radiusMiles,
+        locationProblem: fix.ok ? null : fix.problem,
+        isLoading: false,
+      })
     } else {
       set({ isLoading: false, error: result.error })
     }
+  },
+
+  retryLocation: async () => {
+    await requestDriverLocationPermission()
+    await get().fetchIncomingRequests()
   },
 
   // Accept a service request

@@ -313,6 +313,8 @@ export interface ServiceRequest {
   notes?: string
   createdAt: Date
   expiresAt: Date // Request expires if not accepted
+  /** Estimated road miles from the driver's current location (server-computed). */
+  distanceMiles?: number
 }
 
 // Chat Message
