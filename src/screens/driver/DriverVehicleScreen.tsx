@@ -3,14 +3,15 @@
  * the driver is on the way; complete details are required before going online (server-enforced).
  */
 
-import { useId, useState, type FormEvent } from 'react'
+import { useEffect, useId, useState, type FormEvent } from 'react'
 import { AlertCircle, ArrowLeft, Check, Loader2, Truck } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
+import { apiService, type ServiceOption } from '../../services/api'
 import type { Driver } from '../../types'
 import {
   EQUIPMENT_OPTIONS, US_STATES, MIN_VEHICLE_YEAR, maxVehicleYear,
-  formToVehicle, validateDriverVehicle, vehicleComplete, vehicleToForm,
+  formToVehicle, servicesForEquipment, validateDriverVehicle, vehicleComplete, vehicleToForm,
   type DriverVehicleErrors, type DriverVehicleField, type DriverVehicleForm,
 } from '../../lib/driverVehicle'
 
@@ -34,6 +35,16 @@ export default function DriverVehicleScreen({ onBack, onSaved, backLabel = 'Back
   const id = useId()
   const isEditing = Boolean(saved?.make)
   const isIncomplete = isEditing && !vehicleComplete(saved)
+  // Server catalog says which services each equipment type takes; the line is hidden if it can't load.
+  const [services, setServices] = useState<ServiceOption[]>([])
+  useEffect(() => {
+    let active = true
+    void apiService.listServices().then((result) => {
+      if (active && result.success && result.data) setServices(result.data)
+    })
+    return () => { active = false }
+  }, [])
+  const equipmentServices = servicesForEquipment(services, form.equipmentType)
 
   const update = (field: DriverVehicleField, value: string) => {
     setForm((current) => ({ ...current, [field]: value }))
@@ -156,6 +167,9 @@ export default function DriverVehicleScreen({ onBack, onSaved, backLabel = 'Back
                 )
               })}
             </div>
+            {equipmentServices.length > 0 && (
+              <p className="vehicle-form__capability" aria-live="polite">Jobs you'll be offered: {equipmentServices.join(', ')}.</p>
+            )}
             {fieldError('equipmentType')}
           </fieldset>
         </section>

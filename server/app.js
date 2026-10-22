@@ -7,7 +7,10 @@ const {
 } = require('./verification');
 const { quoteService, PricingError, TOWING } = require('./pricing');
 const { checkRequest, checkTransition, REPORTABLE, ISSUE_CATEGORIES } = require('./lifecycle');
-const { cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE } = require('./driverVehicle');
+const {
+  cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE, SERVICE_EQUIPMENT, EQUIPMENT_MISMATCH_CODE,
+  equipmentCapability, canPerformService,
+} = require('./driverVehicle');
 
 const DOCUMENT_TYPES = new Set(REQUIRED_DOCUMENT_TYPES);
 const publicDocument = ({ storagePath: _storagePath, ...document }) => document;
@@ -43,7 +46,8 @@ const SERVICE_CATALOG = Object.freeze({
   detailing: { id: 'detailing', name: 'Detailing', description: 'Mobile vehicle detailing', basePrice: 150, estimatedTime: 120, available: false },
   window_tinting: { id: 'window_tinting', name: 'Window tinting', description: 'Professional mobile tinting', basePrice: 250, estimatedTime: 180, available: false },
 });
-const publicService = (service) => ({ available: true, requiresDropoff: false, ...service });
+// equipmentTypes: which driver equipment can perform the service (see SERVICE_EQUIPMENT).
+const publicService = (service) => ({ available: true, requiresDropoff: false, ...service, equipmentTypes: SERVICE_EQUIPMENT[service.id] || [] });
 const cleanLocation = (location) => ({ address: location.address.trim().slice(0, 300), lat: location.lat, lng: location.lng });
 
 
@@ -284,8 +288,9 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  app.get('/api/drivers/requests', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (_req, res, next) => {
-    try { res.json(await repository.listAvailableBookings()); } catch (error) { next(error); }
+  // Only requests this driver's equipment can perform (e.g. no tows for a light-duty vehicle).
+  app.get('/api/drivers/requests', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
+    try { res.json(await repository.listAvailableBookings(equipmentCapability(req.auth.profile.driverVehicle.equipmentType))); } catch (error) { next(error); }
   });
   // Going offline is always allowed (e.g. after credentials lapse or with no vehicle on file);
   // going online requires verification, current credentials and complete vehicle details.
@@ -303,7 +308,12 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       // One job at a time (also enforced atomically in acceptBooking); this gives the clearer message.
       const current = await repository.getActiveBooking(req.auth.identity.id, 'driver');
       if (current) return res.status(409).json({ error: 'Finish or cancel your current job before accepting another' });
-      const booking = await repository.acceptBooking(req.params.bookingId, req.auth.identity.id);
+      const equipmentType = req.auth.profile.driverVehicle.equipmentType;
+      const open = await repository.getAvailableBooking(req.params.bookingId);
+      if (!open) return res.status(409).json({ error: 'Booking is no longer available' });
+      const fit = canPerformService(equipmentType, open);
+      if (!fit.ok) return res.status(403).json({ error: fit.error, code: EQUIPMENT_MISMATCH_CODE });
+      const booking = await repository.acceptBooking(req.params.bookingId, req.auth.identity.id, equipmentCapability(equipmentType));
       if (!booking) return res.status(409).json({ error: 'Booking is no longer available' });
       res.json(booking);
     } catch (error) { next(error); }

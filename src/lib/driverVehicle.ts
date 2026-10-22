@@ -7,9 +7,26 @@ import type { DriverEquipmentType, DriverVehicle } from '../types'
 
 export const EQUIPMENT_OPTIONS: ReadonlyArray<{ id: DriverEquipmentType; label: string; detail: string }> = [
   { id: 'flatbed', label: 'Flatbed / rollback', detail: 'Tows any car, including AWD and EVs' },
-  { id: 'wheel_lift', label: 'Wheel-lift tow truck', detail: 'Tows most two-wheel-drive cars' },
+  { id: 'wheel_lift', label: 'Wheel-lift tow truck', detail: 'Tows most two-wheel-drive cars, but not electric cars' },
   { id: 'light_duty', label: 'Light-duty service vehicle', detail: 'Jump-starts, tires, lockouts and fuel — no towing' },
 ]
+
+/** The parts of a server catalog entry (GET /api/services) needed to say which jobs equipment takes. */
+export interface EquipmentServiceOption {
+  name: string
+  available: boolean
+  equipmentTypes?: readonly string[]
+}
+
+/**
+ * Names of the services a driver with this equipment is offered, taken from the server catalog
+ * (the server decides; see SERVICE_EQUIPMENT in server/driverVehicle.js). Unavailable services are left out.
+ */
+export function servicesForEquipment(services: readonly EquipmentServiceOption[], equipmentType: DriverEquipmentType | '' | null | undefined): string[] {
+  if (!equipmentType) return []
+  return services.filter((service) => service.available && service.equipmentTypes?.includes(equipmentType)).map((service) => service.name)
+}
+
 
 export const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA',

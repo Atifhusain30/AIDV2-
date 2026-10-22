@@ -31,8 +31,15 @@ function fillValid() {
   fireEvent.click(screen.getByLabelText(/flatbed/i))
 }
 
+const CATALOG = [
+  { id: 'battery_jump', name: "Won't start", description: '', basePrice: 69, estimatedTime: 30, available: true, requiresDropoff: false, equipmentTypes: ['flatbed', 'wheel_lift', 'light_duty'] },
+  { id: 'towing', name: 'Towing', description: '', basePrice: 95, estimatedTime: 60, available: true, requiresDropoff: true, equipmentTypes: ['flatbed', 'wheel_lift'] },
+  { id: 'detailing', name: 'Detailing', description: '', basePrice: 150, estimatedTime: 120, available: false, requiresDropoff: false, equipmentTypes: [] },
+] as never
+
 beforeEach(() => {
   vi.restoreAllMocks()
+  vi.spyOn(apiService, 'listServices').mockResolvedValue({ success: false, error: 'offline' })
   setDriver(null)
 })
 afterEach(() => cleanup())
@@ -123,5 +130,15 @@ describe('driver vehicle screen', () => {
     fillValid()
     fireEvent.click(screen.getByRole('button', { name: 'Add vehicle' }))
     await waitFor(() => expect(useDriverStore.getState().error).toBeNull())
+  })
+
+  it('says which jobs the chosen equipment will be offered, from the server catalog', async () => {
+    vi.spyOn(apiService, 'listServices').mockResolvedValue({ success: true, data: CATALOG })
+    render(<DriverVehicleScreen onBack={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.queryByText(/jobs you'll be offered/i)).toBeNull()
+    fireEvent.click(screen.getByLabelText(/light-duty/i))
+    expect((await screen.findByText(/jobs you'll be offered/i)).textContent).toBe("Jobs you'll be offered: Won't start.")
+    fireEvent.click(screen.getByLabelText(/flatbed/i))
+    expect(screen.getByText(/jobs you'll be offered/i).textContent).toBe("Jobs you'll be offered: Won't start, Towing.")
   })
 })

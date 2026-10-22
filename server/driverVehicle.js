@@ -59,4 +59,56 @@ function driverVehicleComplete(vehicle) {
 
 const VEHICLE_REQUIRED_MESSAGE = 'Add your vehicle and equipment details before going online.';
 
-module.exports = { EQUIPMENT_TYPES, US_STATES, MIN_YEAR, maxYear, cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE };
+// Which services each equipment type can perform (keyed by the service ids in SERVICE_CATALOG,
+// app.js). Towing needs a tow truck: a flatbed / rollback or a wheel-lift. Every equipment type
+// can do the on-the-spot services (a tow truck carries the same jump pack, jack and lockout kit as
+// a light-duty service vehicle). Services not listed here — including the scheduled services not
+// offered at launch — go to no one, so a new service must be added here before drivers see it.
+const ALL_EQUIPMENT = EQUIPMENT_TYPES;
+const TOW_TRUCKS = Object.freeze(['flatbed', 'wheel_lift']);
+const SERVICE_EQUIPMENT = Object.freeze({
+  battery_jump: ALL_EQUIPMENT,
+  flat_tire: ALL_EQUIPMENT,
+  lockout: ALL_EQUIPMENT,
+  fuel_delivery: ALL_EQUIPMENT,
+  ev_charging: ALL_EQUIPMENT,
+  oil_change: ALL_EQUIPMENT,
+  towing: TOW_TRUCKS,
+});
+// A car the customer marked as electric goes on a flatbed only: lifting an EV by two wheels and
+// rolling it on the others can damage its motors.
+const ELECTRIC_TOW_EQUIPMENT = Object.freeze(['flatbed']);
+
+const EQUIPMENT_NAMES = Object.freeze({ flatbed: 'flatbed / rollback', wheel_lift: 'wheel-lift tow truck', light_duty: 'light-duty service vehicle' });
+const EQUIPMENT_MISMATCH_CODE = 'equipment_mismatch';
+
+/** Service ids this equipment can perform, plus whether it may tow an electric vehicle. */
+function equipmentCapability(equipmentType) {
+  return {
+    serviceTypes: Object.keys(SERVICE_EQUIPMENT).filter((service) => SERVICE_EQUIPMENT[service].includes(equipmentType)),
+    electricTowing: ELECTRIC_TOW_EQUIPMENT.includes(equipmentType),
+  };
+}
+
+/**
+ * Can a driver with this equipment take this job? `job` is { serviceType, vehicleIsElectric }.
+ * Returns { ok: true } or { ok: false, error } with a message the driver can act on.
+ */
+function canPerformService(equipmentType, job) {
+  const serviceType = job && job.serviceType;
+  const allowed = Object.hasOwn(SERVICE_EQUIPMENT, serviceType || '') ? SERVICE_EQUIPMENT[serviceType] : null;
+  const yours = Object.hasOwn(EQUIPMENT_NAMES, equipmentType || '') ? `Your ${EQUIPMENT_NAMES[equipmentType]}` : 'Your equipment';
+  if (!allowed || !allowed.includes(equipmentType)) {
+    if (serviceType === 'towing') return { ok: false, error: `Towing needs a flatbed or wheel-lift tow truck. ${yours} can't take this job.` };
+    return { ok: false, error: `${yours} can't take this job.` };
+  }
+  if (serviceType === 'towing' && job.vehicleIsElectric && !ELECTRIC_TOW_EQUIPMENT.includes(equipmentType)) {
+    return { ok: false, error: `This is an electric vehicle, so it has to go on a flatbed. ${yours} can't take this job.` };
+  }
+  return { ok: true };
+}
+
+module.exports = {
+  EQUIPMENT_TYPES, US_STATES, MIN_YEAR, maxYear, cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE,
+  SERVICE_EQUIPMENT, ELECTRIC_TOW_EQUIPMENT, EQUIPMENT_MISMATCH_CODE, equipmentCapability, canPerformService,
+};

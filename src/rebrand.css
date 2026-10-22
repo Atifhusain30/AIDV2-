@@ -1107,6 +1107,7 @@ select:focus-visible {
 .vehicle-form__legend span { color: #998ca8; font-size: .59rem; font-weight: 760; letter-spacing: .1em; }
 .vehicle-form__legend h2 { margin-top: 5px; font-size: 1.16rem; letter-spacing: -.035em; }
 .vehicle-form__equipment > .vehicle-form__error { display: block; margin-top: 10px; }
+.vehicle-form__capability { margin-top: 10px; color: #b3a9c0; font-size: .78rem; line-height: 1.4; }
 .vehicle-option { position: relative; grid-template-columns: 1fr 24px; cursor: pointer; }
 .vehicle-option input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .vehicle-option:focus-within { outline: 2px solid var(--aid-signal-strong); outline-offset: 2px; }

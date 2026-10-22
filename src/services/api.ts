@@ -1,4 +1,4 @@
-import type { Booking, ServiceRequest, Location, ApiResponse, Service, ServiceType, VerificationStatus, DriverVehicle } from '../types'
+import type { Booking, ServiceRequest, Location, ApiResponse, Service, ServiceType, VerificationStatus, DriverVehicle, DriverEquipmentType } from '../types'
 import type { UserVehicle } from '../store/useAppStore'
 import { supabase, managedAuth } from '../auth/supabase'
 
@@ -105,6 +105,8 @@ export interface ServiceOption extends Service {
   requiresDropoff: boolean
   /** Distance pricing (towing): hook-up fee covers includedMiles, then perMile. */
   pricing?: { hookup: number; includedMiles: number; perMile: number; maxMiles: number }
+  /** Driver equipment that can perform this service (server-owned; empty = no driver takes it). */
+  equipmentTypes?: DriverEquipmentType[]
 }
 
 export async function listServices(): Promise<ApiResponse<ServiceOption[]>> {

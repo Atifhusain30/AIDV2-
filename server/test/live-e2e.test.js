@@ -98,6 +98,33 @@ test('live Supabase customer → verified driver → document → completed book
     const badVehicle = await api('/drivers/me/vehicle', driver.token, { method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'F-550 Flatbed', year: 1970, color: 'White', plate: 'e2e-1', plateState: 'TX', equipmentType: 'flatbed' }) });
     assert.equal(badVehicle.status, 400);
     assert.equal((await badVehicle.json()).field, 'year');
+
+    // Equipment decides which jobs a driver sees and can accept (the open request is a tow).
+    const setEquipment = async (equipmentType) => assert.equal((await api('/drivers/me/vehicle', driver.token, {
+      method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'Transit', year: 2021, color: 'White', plate: 'e2e-1', plateState: 'TX', equipmentType }),
+    })).status, 200, `save ${equipmentType}`);
+    const seesTow = async () => (await (await api('/drivers/requests', driver.token)).json()).some((item) => item.id === bookingId);
+    await setEquipment('light_duty');
+    assert.equal((await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: true }) })).status, 200);
+    assert.equal(await seesTow(), false, 'a light-duty vehicle is not offered tows');
+    const refusedTow = await api(`/bookings/${bookingId}/accept`, driver.token, { method: 'POST' });
+    assert.equal(refusedTow.status, 403);
+    const refusedBody = await refusedTow.json();
+    assert.equal(refusedBody.code, 'equipment_mismatch');
+    assert.equal(refusedBody.error, "Towing needs a flatbed or wheel-lift tow truck. Your light-duty service vehicle can't take this job.");
+    assert.deepEqual((await pool.query('select status, driver_id from public.bookings where id=$1', [bookingId])).rows[0], { status: 'searching', driver_id: null }, 'refused accept leaves the request open');
+    await setEquipment('wheel_lift');
+    assert.equal(await seesTow(), true, 'a wheel-lift sees a regular tow');
+    await pool.query('update public.vehicles set is_electric=true where id=$1', [vehicle.id]);
+    assert.equal(await seesTow(), false, 'electric cars are not offered to wheel-lifts');
+    const refusedEv = await api(`/bookings/${bookingId}/accept`, driver.token, { method: 'POST' });
+    assert.equal(refusedEv.status, 403);
+    assert.match((await refusedEv.json()).error, /electric vehicle, so it has to go on a flatbed/);
+    await setEquipment('flatbed');
+    assert.equal(await seesTow(), true, 'a flatbed sees the electric tow');
+    await pool.query('update public.vehicles set is_electric=false where id=$1', [vehicle.id]);
+    assert.equal((await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: false }) })).status, 200);
+
     const driverVehicleResponse = await api('/drivers/me/vehicle', driver.token, { method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'F-550 Flatbed', year: 2021, color: 'White', plate: 'e2e-1', plateState: 'tx', equipmentType: 'flatbed' }) });
     assert.equal(driverVehicleResponse.status, 200);
     const savedVehicle = { make: 'Ford', model: 'F-550 Flatbed', year: 2021, color: 'White', plate: 'E2E-1', plateState: 'TX', equipmentType: 'flatbed' };

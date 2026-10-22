@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import DriverHomeScreen from './DriverHomeScreen'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
+import { apiService } from '../../services/api'
 
 afterEach(() => cleanup())
 
@@ -123,5 +124,28 @@ describe('driver work layout', () => {
     renderHome()
     expect(screen.getByRole('alert').textContent).toMatch(/expired/)
   })
-})
 
+  it('shows why the server refused an accept and refreshes the list to compatible jobs only', async () => {
+    const lightDuty = { ...TOW_TRUCK, model: 'Transit', equipmentType: 'light_duty' }
+    setDriver({ verificationStatus: 'verified', isVerified: true, credentialsValidUntil: '2099-01-01', vehicle: lightDuty })
+    const tow = {
+      id: 'tow-1', service: { id: 'towing', name: 'Towing', description: '', basePrice: 95, estimatedTime: 60 }, status: 'searching',
+      location: { address: 'Approximate pickup area', lat: 32.78, lng: -96.8 }, estimatedPrice: 95, createdAt: new Date(), expiresAt: new Date(Date.now() + 600000),
+    }
+    const message = "Towing needs a flatbed or wheel-lift tow truck. Your light-duty service vehicle can't take this job."
+    vi.spyOn(apiService, 'getDriverActiveBooking').mockResolvedValue({ success: true, data: null })
+    const refresh = vi.spyOn(apiService, 'getServiceRequests').mockResolvedValue({ success: true, data: [] })
+    const accept = vi.spyOn(apiService, 'acceptServiceRequest').mockResolvedValue({ success: false, error: message, code: 'equipment_mismatch' } as never)
+    useDriverStore.setState({ isOnline: true, incomingRequests: [tow as never] })
+    const openJob = vi.fn()
+    render(<DriverHomeScreen onOpenOnboarding={vi.fn()} onOpenVehicle={vi.fn()} onOpenSettings={vi.fn()} onOpenActiveJob={openJob} />)
+    refresh.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: /accept request/i }))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(message))
+    expect(accept).toHaveBeenCalledWith('tow-1', 'driver-1')
+    expect(refresh).toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('button', { name: /accept request/i })).toBeNull())
+    expect(openJob).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+})

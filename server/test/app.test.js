@@ -4,6 +4,11 @@ const request = require('supertest');
 const { createApp } = require('../app');
 
 const TOW_TRUCK = Object.freeze({ make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'flatbed' });
+const WHEEL_LIFT = Object.freeze({ ...TOW_TRUCK, model: 'F-450', plate: 'LIFT-1', equipmentType: 'wheel_lift' });
+const SERVICE_VAN = Object.freeze({ ...TOW_TRUCK, model: 'Transit', plate: 'VAN-1', equipmentType: 'light_duty' });
+const serviceOf = (booking) => booking.service?.id || booking.serviceType;
+const fitsCapability = (booking, capability) => Boolean(capability) && capability.serviceTypes.includes(serviceOf(booking)) &&
+  (capability.electricTowing || serviceOf(booking) !== 'towing' || !booking.vehicleIsElectric);
 
 function buildHarness(stripe = null, accountAdmin = null) {
   const users = {
@@ -11,6 +16,8 @@ function buildHarness(stripe = null, accountAdmin = null) {
     otherCustomerToken: { id: 'customer-2', role: 'customer', status: 'active', firstName: 'Olive', lastName: 'Other' },
     adminToken: { id: 'admin-1', role: 'admin', status: 'active', firstName: 'Ada', lastName: 'Admin' },
     driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true, driverVehicle: TOW_TRUCK },
+    wheelLiftDriverToken: { id: 'driver-6', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true, driverVehicle: WHEEL_LIFT },
+    lightDutyDriverToken: { id: 'driver-7', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true, driverVehicle: SERVICE_VAN },
     offlineDriverToken: { id: 'driver-3', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: false, driverVehicle: TOW_TRUCK },
     // Verified and current, but no vehicle on file yet (new driver) / a vehicle saved before D5 (no equipment).
     noVehicleDriverToken: { id: 'driver-4', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: false, driverVehicle: null },
@@ -29,12 +36,19 @@ function buildHarness(stripe = null, accountAdmin = null) {
       bookings.set(booking.id, booking);
       return booking;
     },
-    async listAvailableBookings() {
-      return [...bookings.values()].filter((booking) => booking.status === 'searching');
+    // Mirrors the SQL equipment filter: allowed service types, and electric tows only with electricTowing.
+    async listAvailableBookings(capability) {
+      this.listedWith = capability;
+      return [...bookings.values()].filter((booking) => booking.status === 'searching' && !booking.driverId && fitsCapability(booking, capability));
     },
-    async acceptBooking(bookingId, driverId) {
+    async getAvailableBooking(bookingId) {
       const booking = bookings.get(bookingId);
       if (!booking || booking.status !== 'searching' || booking.driverId) return null;
+      return { id: booking.id, serviceType: serviceOf(booking), vehicleIsElectric: Boolean(booking.vehicleIsElectric) };
+    },
+    async acceptBooking(bookingId, driverId, capability) {
+      const booking = bookings.get(bookingId);
+      if (!booking || booking.status !== 'searching' || booking.driverId || !fitsCapability(booking, capability)) return null;
       const accepted = { ...booking, status: 'accepted', driverId };
       bookings.set(bookingId, accepted);
       return accepted;
@@ -272,7 +286,7 @@ test('unverified drivers cannot view dispatch requests', async () => {
 
 test('verified offline drivers cannot view or accept dispatch requests', async () => {
   const { app, bookings } = buildHarness();
-  bookings.set('available-1', { id: 'available-1', status: 'searching', customerId: 'customer-1' });
+  bookings.set('available-1', { id: 'available-1', status: 'searching', customerId: 'customer-1', serviceType: 'battery_jump' });
 
   const list = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer offlineDriverToken');
   const accept = await request(app).post('/api/bookings/available-1/accept').set('Authorization', 'Bearer offlineDriverToken');
@@ -453,7 +467,7 @@ test('driver vehicle validation names the field that needs fixing', async () => 
 
 test('drivers without complete vehicle details cannot go online, see or accept work — but can always go offline', async () => {
   const { app, bookings, repository } = buildHarness();
-  bookings.set('open-1', { id: 'open-1', status: 'searching', customerId: 'customer-1' });
+  bookings.set('open-1', { id: 'open-1', status: 'searching', customerId: 'customer-1', serviceType: 'battery_jump' });
   const online = await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer noVehicleDriverToken').send({ isOnline: true });
   assert.equal(online.status, 403);
   assert.equal(online.body.code, 'vehicle_required');
@@ -589,7 +603,7 @@ test('driver must give a reason to cancel, and can only cancel before service st
 test('a cancelled job frees the driver: one job at a time, and they can accept again after a cancel', async () => {
   const { app, bookings } = buildHarness();
   bookings.set('job-1', job('en_route'));
-  bookings.set('job-2', { id: 'job-2', status: 'searching', customerId: 'customer-2' });
+  bookings.set('job-2', { id: 'job-2', status: 'searching', customerId: 'customer-2', serviceType: 'battery_jump' });
   assert.equal((await request(app).post('/api/bookings/job-2/accept').set('Authorization', 'Bearer driverToken')).status, 409, 'busy driver cannot take a second job');
   assert.match((await request(app).post('/api/bookings/job-2/accept').set('Authorization', 'Bearer driverToken')).body.error, /current job/);
   assert.equal((await setStatus(app, 'customerToken', { status: 'cancelled' })).status, 200);
@@ -624,4 +638,80 @@ test('either party can report an issue on an active job, including after service
   assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer otherCustomerToken').send({ category: 'safety' })).status, 404);
   bookings.set('job-1', job('completed'));
   assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer driverToken').send({ category: 'safety' })).status, 409);
+});
+
+// D5 follow-up: a driver only sees and can accept work their equipment can perform.
+function seedEquipmentJobs(bookings) {
+  const open = (id, serviceType, extra = {}) => bookings.set(id, { id, status: 'searching', customerId: 'customer-1', serviceType, ...extra });
+  open('tow-gas', 'towing');
+  open('tow-ev', 'towing', { vehicleIsElectric: true });
+  open('jump', 'battery_jump');
+  open('tire', 'flat_tire');
+  open('charge', 'ev_charging', { vehicleIsElectric: true });
+  open('detail', 'detailing'); // scheduled service, not offered at launch: no equipment takes it
+}
+
+test('each equipment type only sees the requests it can perform', async () => {
+  const expected = {
+    driverToken: ['tow-gas', 'tow-ev', 'jump', 'tire', 'charge'], // flatbed
+    wheelLiftDriverToken: ['tow-gas', 'jump', 'tire', 'charge'], // wheel-lift: no electric tows
+    lightDutyDriverToken: ['jump', 'tire', 'charge'], // light-duty: no towing at all
+  };
+  for (const [token, ids] of Object.entries(expected)) {
+    const { app, bookings, repository } = buildHarness();
+    seedEquipmentJobs(bookings);
+    const list = await request(app).get('/api/drivers/requests').set('Authorization', `Bearer ${token}`);
+    assert.equal(list.status, 200, token);
+    assert.deepEqual(list.body.map((job) => job.id), ids, token);
+    assert.ok(repository.listedWith.serviceTypes.length > 0, `${token} filters by a capability`);
+  }
+});
+
+test('accepting a request the equipment cannot perform is refused with a clear message', async () => {
+  const refused = [
+    ['lightDutyDriverToken', 'tow-gas', /Towing needs a flatbed or wheel-lift tow truck\. Your light-duty service vehicle can't take this job\./],
+    ['lightDutyDriverToken', 'tow-ev', /Towing needs a flatbed or wheel-lift tow truck/],
+    ['wheelLiftDriverToken', 'tow-ev', /electric vehicle, so it has to go on a flatbed\. Your wheel-lift tow truck can't take this job\./],
+    ['driverToken', 'detail', /Your flatbed \/ rollback can't take this job\./],
+  ];
+  for (const [token, id, message] of refused) {
+    const { app, bookings } = buildHarness();
+    seedEquipmentJobs(bookings);
+    const accept = await request(app).post(`/api/bookings/${id}/accept`).set('Authorization', `Bearer ${token}`);
+    assert.equal(accept.status, 403, `${token} ${id}`);
+    assert.equal(accept.body.code, 'equipment_mismatch', `${token} ${id}`);
+    assert.match(accept.body.error, message, `${token} ${id}`);
+    assert.equal(bookings.get(id).status, 'searching', 'the request stays open for a driver who can do it');
+    assert.equal(bookings.get(id).driverId, undefined);
+  }
+  const allowed = [
+    ['driverToken', 'tow-ev'], ['driverToken', 'tow-gas'], ['wheelLiftDriverToken', 'tow-gas'],
+    ['lightDutyDriverToken', 'jump'], ['lightDutyDriverToken', 'charge'], ['wheelLiftDriverToken', 'tire'],
+  ];
+  for (const [token, id] of allowed) {
+    const { app, bookings } = buildHarness();
+    seedEquipmentJobs(bookings);
+    const accept = await request(app).post(`/api/bookings/${id}/accept`).set('Authorization', `Bearer ${token}`);
+    assert.equal(accept.status, 200, `${token} ${id}`);
+    assert.equal(accept.body.status, 'accepted');
+  }
+});
+
+test('accepting a request that is gone still says it is no longer available', async () => {
+  const { app } = buildHarness();
+  const accept = await request(app).post('/api/bookings/missing/accept').set('Authorization', 'Bearer lightDutyDriverToken');
+  assert.equal(accept.status, 409);
+  assert.equal(accept.body.error, 'Booking is no longer available');
+});
+
+test('service catalog lists which equipment can perform each service', async () => {
+  const { app } = buildHarness();
+  const response = await request(app).get('/api/services');
+  const byId = Object.fromEntries(response.body.map((service) => [service.id, service.equipmentTypes]));
+  assert.deepEqual(byId.towing, ['flatbed', 'wheel_lift']);
+  for (const id of ['battery_jump', 'flat_tire', 'lockout', 'fuel_delivery', 'ev_charging', 'oil_change']) {
+    assert.deepEqual(byId[id], ['flatbed', 'wheel_lift', 'light_duty'], id);
+  }
+  assert.deepEqual(byId.detailing, []);
+  assert.deepEqual(byId.window_tinting, []);
 });

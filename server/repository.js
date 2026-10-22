@@ -497,13 +497,19 @@ class PostgresRepository {
     return mapParticipantBooking(result.rows[0], role);
   }
 
-  async listAvailableBookings() {
+  /**
+   * Open requests this driver's equipment can perform. `capability` comes from
+   * equipmentCapability() in driverVehicle.js; without one, nothing is returned (fail closed).
+   */
+  async listAvailableBookings({ serviceTypes = [], electricTowing = false } = {}) {
     const result = await this.pool.query(`
       select b.*, concat_ws(' ', v.year, v.make, v.model) as vehicle_label, v.license_plate as vehicle_plate
       from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
       where b.status='searching' and b.driver_id is null
+        and b.service_type = any($1::text[])
+        and ($2::boolean or b.service_type <> 'towing' or not coalesce(v.is_electric, false))
       order by b.created_at asc limit 50
-    `);
+    `, [serviceTypes, electricTowing]);
     return result.rows.map((row) => {
       const booking = mapBooking(row);
       booking.expiresAt = new Date(new Date(row.created_at).getTime() + 10 * 60 * 1000);
@@ -522,21 +528,37 @@ class PostgresRepository {
     });
   }
 
+  // What an accept checks the driver's equipment against: the service and whether the customer's
+  // car is electric. Only for requests still open to any driver.
+  async getAvailableBooking(bookingId) {
+    const result = await this.pool.query(`
+      select b.id, b.service_type, coalesce(v.is_electric, false) as vehicle_is_electric
+      from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
+      where b.id=$1 and b.status='searching' and b.driver_id is null
+    `, [bookingId]);
+    const row = result.rows[0];
+    return row ? { id: row.id, serviceType: row.service_type, vehicleIsElectric: Boolean(row.vehicle_is_electric) } : null;
+  }
+
   // One job at a time: a driver with an unfinished job cannot accept another. The accept is
-  // recorded in the booking's audit trail in the same statement.
-  async acceptBooking(bookingId, driverId) {
+  // recorded in the booking's audit trail in the same statement. The equipment rules are repeated
+  // in the update itself (same as listAvailableBookings), so an incompatible accept can never land.
+  async acceptBooking(bookingId, driverId, { serviceTypes = [], electricTowing = false } = {}) {
     const result = await this.pool.query(`
       with upd as (
-        update public.bookings set driver_id=$2, status='accepted', accepted_at=now()
-        where id=$1 and status = 'searching' and driver_id is null
+        update public.bookings b set driver_id=$2, status='accepted', accepted_at=now()
+        where b.id=$1 and b.status = 'searching' and b.driver_id is null
           and not exists (select 1 from public.bookings o where o.driver_id=$2 and o.status = any($3::text[]))
-        returning id
+          and b.service_type = any($4::text[])
+          and ($5::boolean or b.service_type <> 'towing'
+            or not exists (select 1 from public.vehicles v where v.id = b.vehicle_id and v.is_electric))
+        returning b.id
       ), ev as (
         insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
         select id, $2, 'status_changed', 'searching', 'accepted', '{"role":"driver"}'::jsonb from upd
       )
       select id from upd
-    `, [bookingId, driverId, [...CONTACT_STATUSES]]);
+    `, [bookingId, driverId, [...CONTACT_STATUSES], serviceTypes, electricTowing]);
     return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, 'driver') : null;
   }
 

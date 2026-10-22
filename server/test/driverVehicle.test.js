@@ -39,3 +39,30 @@ test('equipment types and states are the fixed lists the database allows', () =>
   assert.equal(US_STATES.length, 51);
   assert.ok(US_STATES.includes('DC'));
 });
+
+const { SERVICE_EQUIPMENT, equipmentCapability, canPerformService } = require('../driverVehicle');
+
+test('capability map: towing needs a tow truck, every equipment type does the on-the-spot services', () => {
+  assert.deepEqual(equipmentCapability('flatbed'), {
+    serviceTypes: ['battery_jump', 'flat_tire', 'lockout', 'fuel_delivery', 'ev_charging', 'oil_change', 'towing'], electricTowing: true,
+  });
+  assert.deepEqual(equipmentCapability('wheel_lift'), {
+    serviceTypes: ['battery_jump', 'flat_tire', 'lockout', 'fuel_delivery', 'ev_charging', 'oil_change', 'towing'], electricTowing: false,
+  });
+  assert.deepEqual(equipmentCapability('light_duty'), {
+    serviceTypes: ['battery_jump', 'flat_tire', 'lockout', 'fuel_delivery', 'ev_charging', 'oil_change'], electricTowing: false,
+  });
+  assert.deepEqual(equipmentCapability(''), { serviceTypes: [], electricTowing: false }, 'no equipment, no work');
+  for (const types of Object.values(SERVICE_EQUIPMENT)) for (const type of types) assert.ok(EQUIPMENT_TYPES.includes(type));
+});
+
+test('canPerformService explains why a job does not fit', () => {
+  assert.deepEqual(canPerformService('flatbed', { serviceType: 'towing', vehicleIsElectric: true }), { ok: true });
+  assert.deepEqual(canPerformService('wheel_lift', { serviceType: 'towing', vehicleIsElectric: false }), { ok: true });
+  assert.deepEqual(canPerformService('light_duty', { serviceType: 'lockout' }), { ok: true });
+  assert.match(canPerformService('light_duty', { serviceType: 'towing' }).error, /^Towing needs a flatbed or wheel-lift tow truck\. Your light-duty service vehicle can't take this job\.$/);
+  assert.match(canPerformService('wheel_lift', { serviceType: 'towing', vehicleIsElectric: true }).error, /electric vehicle, so it has to go on a flatbed/);
+  assert.equal(canPerformService('flatbed', { serviceType: 'detailing' }).ok, false, 'services not in the map go to no one');
+  assert.equal(canPerformService('flatbed', { serviceType: 'constructor' }).ok, false);
+  assert.equal(canPerformService('helicopter', { serviceType: 'lockout' }).ok, false);
+});

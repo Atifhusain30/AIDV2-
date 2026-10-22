@@ -144,7 +144,10 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
       return true
     }
     
-    set({ isLoading: false, error: result.error })
+    // Refused (e.g. the equipment can't do this job, or another driver took it): show the server's
+    // message and refresh the list so it matches what the server will let this driver take.
+    set({ isLoading: false, error: result.error || 'Unable to accept this request.' })
+    await get().fetchIncomingRequests()
     return false
   },
 

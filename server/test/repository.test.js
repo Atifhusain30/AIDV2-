@@ -259,3 +259,27 @@ test('no ETA before the driver shares a location, after they arrive, or once the
     assert.equal(booking.driverEta, undefined, row.status);
   }
 });
+
+test('open requests and accepts are limited to what the driver equipment can perform', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => {
+    calls.push({ text, values });
+    return { rows: /select b\.id, b\.service_type/.test(text) ? [{ id: 'booking-9', service_type: 'towing', vehicle_is_electric: true }] : [] };
+  }));
+  const capability = { serviceTypes: ['battery_jump', 'towing'], electricTowing: false };
+  await repository.listAvailableBookings(capability);
+  assert.match(calls[0].text, /b\.service_type = any\(\$1::text\[\]\)/);
+  assert.match(calls[0].text, /\$2::boolean or b\.service_type <> 'towing' or not coalesce\(v\.is_electric, false\)/);
+  assert.deepEqual(calls[0].values, [['battery_jump', 'towing'], false]);
+
+  await repository.listAvailableBookings();
+  assert.deepEqual(calls[1].values, [[], false], 'no capability means no requests');
+
+  assert.deepEqual(await repository.getAvailableBooking('booking-9'), { id: 'booking-9', serviceType: 'towing', vehicleIsElectric: true });
+  assert.match(calls[2].text, /b\.status='searching' and b\.driver_id is null/);
+
+  assert.equal(await repository.acceptBooking('booking-9', 'driver-1', capability), null);
+  assert.match(calls[3].text, /b\.service_type = any\(\$4::text\[\]\)/);
+  assert.match(calls[3].text, /\$5::boolean or b\.service_type <> 'towing'\s+or not exists \(select 1 from public\.vehicles v where v\.id = b\.vehicle_id and v\.is_electric\)/);
+  assert.deepEqual(calls[3].values.slice(3), [['battery_jump', 'towing'], false]);
+});

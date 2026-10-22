@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { driverVehicleSummary, equipmentLabel, formToVehicle, validateDriverVehicle, vehicleComplete, vehicleToForm, type DriverVehicleForm } from './driverVehicle'
+import { driverVehicleSummary, equipmentLabel, servicesForEquipment, formToVehicle, validateDriverVehicle, vehicleComplete, vehicleToForm, type DriverVehicleForm } from './driverVehicle'
 
 const valid: DriverVehicleForm = { make: 'Ford', model: 'F-550', year: '2021', color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'flatbed' }
 const NOW = new Date('2026-10-22T12:00:00Z')
@@ -46,5 +46,17 @@ describe('driver vehicle rules (mirror server/driverVehicle.js)', () => {
     expect(driverVehicleSummary(null)).toBeNull()
     expect(equipmentLabel('wheel_lift')).toBe('Wheel-lift tow truck')
     expect(equipmentLabel('')).toBeNull()
+  })
+
+  it('lists the jobs each equipment type is offered, from the server catalog', () => {
+    const catalog = [
+      { name: "Won't start", available: true, equipmentTypes: ['flatbed', 'wheel_lift', 'light_duty'] },
+      { name: 'Towing', available: true, equipmentTypes: ['flatbed', 'wheel_lift'] },
+      { name: 'Detailing', available: false, equipmentTypes: [] },
+      { name: 'Old server', available: true },
+    ]
+    expect(servicesForEquipment(catalog, 'flatbed')).toEqual(["Won't start", 'Towing'])
+    expect(servicesForEquipment(catalog, 'light_duty')).toEqual(["Won't start"])
+    expect(servicesForEquipment(catalog, '')).toEqual([])
   })
 })
