@@ -45,7 +45,9 @@ describe('driver work layout', () => {
     render(<DriverHomeScreen onOpenOnboarding={vi.fn()} onOpenVehicle={vi.fn()} onOpenSettings={vi.fn()} onOpenActiveJob={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByLabelText('Jobs completed today').textContent).toContain('2'))
-    expect(screen.getByLabelText('Earnings coming soon').textContent).toContain('Soon')
+    // No placeholder earnings tile (simpler, and no number we don't have); the note says payouts are coming.
+    expect(screen.queryByLabelText('Earnings coming soon')).toBeNull()
+    expect(screen.getByText(/Earnings and payouts are coming soon/)).toBeTruthy()
     expect(screen.getByLabelText('Rating').textContent).toContain('—')
     expect(screen.getByText(/Your rating shows once 3 customers have rated you \(2 so far\)/)).toBeTruthy()
     expect(screen.queryByText('$0.00')).toBeNull()
@@ -227,6 +229,8 @@ describe('driver work layout', () => {
     useDriverStore.setState({ isOnline: true, nearbyStatus: 'ok', requestRadiusMiles: 25, incomingRequests: [job('a', "Won't start", 1.24)] as never })
     renderHome()
     const card = screen.getByRole('article')
+    // Owner reference card: service icon, name, price, where and distance.
+    expect(card.querySelector('.driver-request__icon svg')).toBeTruthy()
     expect(within(card).getByRole('button', { name: 'Accept request' }).className).toContain('ui-btn--primary')
     expect(within(card).getByRole('button', { name: 'Decline' }).className).toContain('ui-btn--secondary')
     for (const eyebrow of ['NEARBY WORK', 'PERFORMANCE', 'ACCOUNT STATUS', 'AVAILABILITY']) expect(screen.queryByText(eyebrow)).toBeNull()

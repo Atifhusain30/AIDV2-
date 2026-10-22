@@ -95,7 +95,6 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
   const showDirections = job.status === 'accepted' || job.status === 'en_route' || headingToDropoff
   const canCancel = DRIVER_CANCELLABLE.has(job.status)
   const customerRating = ratingSummary(job.customer)
-  const vehicleDetail = job.vehicle ? [job.vehicle.color, job.vehicle.plate].filter(Boolean).join(' · ') : ''
 
   const move = async (next: BookingStatus, reason?: string) => {
     setBusy(true)
@@ -166,8 +165,8 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
         {job.vehicle && (
           <div className="track-vehicle" role="group" aria-label="Customer vehicle">
             <Car size={18} aria-hidden="true" />
-            <span><small>Vehicle</small><strong>{job.vehicle.label}</strong></span>
-            {vehicleDetail && <span className="job-vehicle__detail">{vehicleDetail}</span>}
+            <span><small>{job.vehicle.color || 'Vehicle'}</small><strong>{job.vehicle.label}</strong></span>
+            {job.vehicle.plate && <span className="ui-plate job-vehicle__plate">{job.vehicle.plate}</span>}
           </div>
         )}
         {job.notes && (

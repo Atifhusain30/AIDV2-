@@ -32,7 +32,9 @@ describe('driver job screen', () => {
     show(tow())
     expect(screen.getByText('Casey C.')).toBeTruthy()
     expect(screen.getByText(/2020 Honda Civic/)).toBeTruthy()
-    expect(screen.getByText(/Blue · ABC123/)).toBeTruthy()
+    // The plate is a large badge (design standards: the plate is what you check on the street).
+    expect(screen.getByText('Blue')).toBeTruthy()
+    expect(screen.getByText('ABC123').className).toContain('ui-plate')
     expect(screen.getByText('Hazards on, behind the gas station')).toBeTruthy()
     expect(screen.getByText('$152.15')).toBeTruthy()
   })

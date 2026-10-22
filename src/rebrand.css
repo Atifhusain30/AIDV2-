@@ -256,7 +256,9 @@ body::before { content: ""; position: fixed; z-index: 44; top: 0; right: 0; left
 
 /* Purpose-built driver work layout */
 /* Driver Work: availability first, then requests, today, readiness. */
-.driver-work { display: grid; gap: 18px; align-content: start; padding-bottom: 40px; }
+.driver-work { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-content: start; padding-bottom: 40px; }
+/* minmax(0, 1fr): a long one-line pickup address must truncate, not widen the screen. */
+.driver-section, .request-list, .driver-request { grid-template-columns: minmax(0, 1fr); }
 .driver-work__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 4px; }
 .driver-work__header h1 { font-size: var(--aid-fs-2xl); font-weight: 700; letter-spacing: -.04em; line-height: 1.1; }
 .driver-work__header p { margin-top: 2px; color: var(--aid-text-3); font-size: var(--aid-fs-sm); }
@@ -279,6 +281,8 @@ body::before { content: ""; position: fixed; z-index: 44; top: 0; right: 0; left
 .ui-live-dot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--aid-success); }
 .driver-request { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
 .driver-request__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.driver-request__top > div { flex: 1; min-width: 0; }
+.driver-request__icon { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border-radius: var(--aid-radius-sm); background: var(--aid-surface-3); color: var(--aid-ivory); }
 .driver-request__top strong { display: block; font-size: var(--aid-fs-md); font-weight: 700; }
 .driver-request__top p { margin-top: 2px; color: var(--aid-text-3); font-size: var(--aid-fs-sm); }
 .driver-request__price { font-size: var(--aid-fs-lg); font-weight: 700; }
@@ -286,7 +290,7 @@ body::before { content: ""; position: fixed; z-index: 44; top: 0; right: 0; left
 .driver-request__where > svg { flex: none; color: var(--aid-text-3); }
 .driver-request__where > span:nth-of-type(1) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .driver-request__actions { display: grid; grid-template-columns: 1fr 1.6fr; gap: 8px; }
-.driver-stats { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
+.driver-stats { display: grid; grid-template-columns: repeat(2, 1fr); border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
 .driver-stats > div { display: grid; gap: 2px; min-width: 0; padding: 14px; }
 .driver-stats > div + div { border-left: 1px solid var(--aid-line); }
 .driver-stats svg { margin-bottom: 6px; color: var(--aid-text-3); }
@@ -407,10 +411,10 @@ body::before { content: ""; position: fixed; z-index: 44; top: 0; right: 0; left
 .job-top__sharing i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--aid-text-3); }
 .job-top__sharing i.is-live { background: var(--aid-success); }
 .job-top__price { flex: none; font-size: var(--aid-fs-lg); font-weight: 700; }
-.job-vehicle__detail { flex: none; color: var(--aid-text-2); font-size: var(--aid-fs-sm); font-weight: 600; }
+.track-vehicle .job-vehicle__plate { flex: none; padding: 6px 10px; border-color: rgba(255, 255, 255, .5); font-size: var(--aid-fs-md); }
 .job-note-quote { margin: 0; padding: 12px 14px; border-left: 3px solid var(--aid-line-strong); border-radius: 0 var(--aid-radius-xs) var(--aid-radius-xs) 0; background: var(--aid-surface-2); }
 .job-note-quote figcaption { color: var(--aid-text-3); font-size: var(--aid-fs-xs); font-weight: 600; }
-.job-note-quote blockquote { margin: 2px 0 0; color: var(--aid-ivory); font-size: var(--aid-fs-base); line-height: 1.45; }
+.job-note-quote blockquote { margin: 2px 0 0; color: var(--aid-ivory); font-size: var(--aid-fs-base); line-height: 1.45; white-space: pre-line; overflow-wrap: anywhere; }
 .job-screen .ui-actionbar { margin-top: 6px; }
 /* Safety + Call 911 (B19): restrained red, never alarmist; 50px targets. */
 .job-choice { position: relative; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; border: 1px solid var(--aid-line); border-radius: 14px; color: var(--aid-ivory); font-size: .9375rem; cursor: pointer; }
@@ -576,7 +580,8 @@ body::before { content: ""; position: fixed; z-index: 44; top: 0; right: 0; left
 .chat-bubble--theirs { align-self: flex-start; border-bottom-left-radius: 6px; background: var(--aid-panel-raised); }
 .chat-bubble--theirs time { color: #9d9da8; }
 .chat-bubble--mine { align-self: flex-end; border-bottom-right-radius: 6px; background: var(--aid-signal); color: #fff; }
-.chat-bubble--mine time, .chat-bubble--mine .chat-bubble__meta { justify-self: end; color: #d8ccf5; }
+/* White on the #6E56CF bubble (5.39:1); the old lilac was 3.56:1 at 13px. */
+.chat-bubble--mine time, .chat-bubble--mine .chat-bubble__meta { justify-self: end; color: #fff; }
 .chat-bubble--mine.is-sending { opacity: .7; }
 .chat-bubble--mine.is-failed { border: 1px solid rgba(255,107,95,.55); background: #2a1520; }
 .chat-bubble__meta--failed { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; color: #ffb4ad !important; }
@@ -1008,6 +1013,8 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 .choice__text { display: grid; flex: 1; gap: 2px; min-width: 0; }
 .choice__text strong { font-size: var(--aid-fs-base); font-weight: 600; }
 .choice__text small { color: var(--aid-text-3); font-size: var(--aid-fs-sm); line-height: 1.35; }
+/* On the violet-tinted selected fill the tertiary grey fell to 4.16:1; the secondary grey passes. */
+.choice.is-selected .choice__text small { color: var(--aid-text-2); }
 /* Verification status card. */
 .verify-hero { display: grid; gap: 6px; margin-top: 8px; padding: 18px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
 .verify-hero h1 { font-size: var(--aid-fs-xl); font-weight: 700; letter-spacing: -.035em; line-height: 1.15; }

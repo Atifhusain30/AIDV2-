@@ -110,6 +110,10 @@ describe('no glow (owner correction)', () => {
     const weights = new Set([...root.matchAll(/font-weight:\s*(\d+)/g)].map((m) => m[1]))
     expect([...weights].filter((w) => !['400', '500', '600', '700'].includes(w))).toEqual([])
   })
+
+  it('booking notes keep their line breaks (the request flow puts "Spare tire available: Yes" on its own line)', () => {
+    expect(css['src/rebrand.css']).toMatch(/\.job-note-quote blockquote\s*\{[^}]*white-space:\s*pre-line/)
+  })
 })
 
 describe('one icon set, one stroke weight', () => {

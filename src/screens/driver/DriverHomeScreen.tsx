@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
   Clock3,
-  Wallet,
   FileCheck2,
   LocateFixed,
   MapPin,
@@ -20,6 +19,7 @@ import type { Driver } from '../../types'
 import { driverEligibility, ELIGIBILITY_COPY } from '../../lib/driverEligibility'
 import { formatCalendarDate } from '../../lib/dates'
 import { formatPrice } from '../../lib/money'
+import { serviceIcon } from '../../lib/serviceDisplay'
 import { driverVehicleSummary, vehicleComplete, VEHICLE_REQUIRED_COPY } from '../../lib/driverVehicle'
 import { formatDistance, LOCATION_PROMPT_COPY } from '../../lib/nearbyRequests'
 import { completedTodayCount, driverRatingLabel, driverRatingNote, timeOfDayGreeting } from '../../lib/driverStats'
@@ -213,6 +213,7 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
             {incomingRequests.map((request) => (
               <article className="driver-request" key={request.id} aria-label={`${request.service.name} request`}>
                 <div className="driver-request__top">
+                  <span className="driver-request__icon" aria-hidden="true">{(() => { const Icon = serviceIcon(request.service.id); return <Icon size={20} /> })()}</span>
                   <div>
                     <strong>{request.service.name}</strong>
                     <p>{request.customerName || 'Nearby customer'}</p>
@@ -236,7 +237,6 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
       <section className="driver-section" aria-labelledby="today-title">
         <SectionHeader id="today-title" title="Today" />
         <div className="driver-stats">
-          <div aria-label="Earnings coming soon"><Wallet size={17} aria-hidden="true" /><strong>Soon</strong><small>Earnings</small></div>
           <div aria-label="Jobs completed today"><CheckCircle2 size={17} aria-hidden="true" /><strong>{completedToday.state === 'loading' ? '…' : completedToday.state === 'error' ? '—' : completedToday.count}</strong><small>Completed</small></div>
           <div aria-label="Rating"><Star size={17} aria-hidden="true" /><strong>{driverRatingLabel(user)}</strong><small>Rating</small></div>
         </div>
