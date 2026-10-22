@@ -1,0 +1,56 @@
+# H4: automatic checks on every push and pull request. Needs no secrets: the live database tests
+# (server/test/live-*.test.js) skip themselves unless LIVE_E2E=1 and real credentials are set.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: App, admin site and native config
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Types (npm run lint)
+        run: npm run lint
+      - name: Native permissions and privacy manifest
+        run: npm run check:native
+      - name: Unit tests
+        run: npm test
+      - name: Build app
+        run: npm run build
+      - name: Build admin site
+        run: npm run admin:build
+
+  server:
+    name: API server tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - name: Server tests (live database tests skip without credentials)
+        run: node --test test/*.test.js

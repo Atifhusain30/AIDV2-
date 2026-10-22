@@ -1,5 +1,7 @@
 # AID - Roadside Assistance App
 
+[![CI](https://github.com/Atifhusain30/AIDV2-/actions/workflows/ci.yml/badge.svg?branch=auth-foundation)](https://github.com/Atifhusain30/AIDV2-/actions/workflows/ci.yml)
+
 A modern mobile application for on-demand roadside assistance services, built with React, TypeScript, and Capacitor for iOS deployment.
 
 ## Overview
