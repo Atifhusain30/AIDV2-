@@ -95,6 +95,13 @@ function mapUser(user: ManagedUser, role: PortalRole): Customer | Driver {
   }
 }
 
+function unexpectedAuthError(error: unknown): string {
+  // fetch() rejects with TypeError when the network is unreachable.
+  if (error instanceof TypeError) return 'Unable to reach AID authentication. Check your connection and try again.'
+  console.error('[AID auth]', error)
+  return 'We could not save your secure session on this device. Please try again.'
+}
+
 export function createAuthService(client: ManagedAuthClient) {
   async function signIn(
     requestedRole: PortalRole,
@@ -133,8 +140,8 @@ export function createAuthService(client: ManagedAuthClient) {
           token: data.session.access_token,
         },
       }
-    } catch {
-      return { success: false, error: 'Unable to reach AID authentication. Check your connection and try again.' }
+    } catch (error) {
+      return { success: false, error: unexpectedAuthError(error) }
     }
   }
 
@@ -173,8 +180,8 @@ export function createAuthService(client: ManagedAuthClient) {
           token: data.session.access_token,
         },
       }
-    } catch {
-      return { success: false, error: 'Unable to reach AID authentication. Check your connection and try again.' }
+    } catch (error) {
+      return { success: false, error: unexpectedAuthError(error) }
     }
   }
 

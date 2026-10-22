@@ -146,4 +146,17 @@ describe('Supabase auth service', () => {
     expect(auth.updateUser).not.toHaveBeenCalled()
     expect(result).toEqual({ success: false, error: 'Password must be at least 8 characters.' })
   })
+
+  it('reports a network failure as a connection problem', async () => {
+    const { client } = createClient({ signInWithPassword: vi.fn().mockRejectedValue(new TypeError('Load failed')) })
+    const result = await createAuthService(client).signIn('driver', 'a@b.co', 'password123')
+    expect(result.error).toMatch(/unable to reach aid/i)
+  })
+
+  it('does not blame the connection when the device cannot store the session', async () => {
+    const { client } = createClient({ signInWithPassword: vi.fn().mockRejectedValue(new Error('Keychain write failed (-34018)')) })
+    const result = await createAuthService(client).signIn('driver', 'a@b.co', 'password123')
+    expect(result.error).not.toMatch(/connection/i)
+    expect(result.error).toMatch(/secure session on this device/i)
+  })
 })
