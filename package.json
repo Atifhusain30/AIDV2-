@@ -11,6 +11,7 @@
     "admin:dev": "vite --config admin/vite.config.ts",
     "admin:build": "vite build --config admin/vite.config.ts",
     "lint": "tsc --noEmit",
+    "check:native": "node scripts/check-native-permissions.mjs",
     "deadcode": "knip --include files,dependencies,unlisted,unresolved",
     "ios:sync": "npm run build && npx cap sync ios",
     "ios:open": "npx cap open ios",

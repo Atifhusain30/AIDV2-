@@ -30,9 +30,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -41,7 +41,7 @@
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -58,20 +58,21 @@
 	<true/>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleLightContent</string>
-	
-	<!-- Privacy Usage Descriptions -->
+
+	<!-- Privacy usage descriptions (G2). Only foreground ("While Using the App") location:
+	     customers set their pickup point; drivers share their position while the app is open
+	     during an active job and when checking for nearby requests. No background location.
+	     No camera or photo-library permission: driver documents come from the system photo
+	     picker (PHPicker) and Files picker, which need no permission.
+	     scripts/check-native-permissions.mjs (npm run check:native) fails if this drifts. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>AID needs your location to find nearby roadside assistance providers and show services available in your area.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>AID needs your location to find nearby roadside assistance providers and track service progress even when the app is in the background.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>AID needs camera access to capture photos of your documents for driver verification.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>AID needs photo library access to upload your documents for driver verification.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>AID needs to save photos to your library.</string>
-	
-	<!-- App Transport Security - Allow HTTPS connections -->
+	<string>AID uses your location only while you're using the app: customers to set the pickup point so the driver can find you, and drivers to see nearby requests and share their position with the customer during an active job.</string>
+
+	<!-- Export compliance (G3): AID only uses standard HTTPS/TLS and Apple's built-in encryption. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- App Transport Security: HTTPS only -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -79,24 +80,7 @@
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<false/>
 	</dict>
-	
-	<!-- Allow opening URLs -->
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>tel</string>
-		<string>mailto</string>
-		<string>maps</string>
-	</array>
-	
-	<!-- Background Modes (for future push notifications and location updates) -->
-	<!-- Uncomment when implementing these features:
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>location</string>
-		<string>remote-notification</string>
-	</array>
-	-->
-	
+
 	<!-- User Interface Style (Dark Mode) -->
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>

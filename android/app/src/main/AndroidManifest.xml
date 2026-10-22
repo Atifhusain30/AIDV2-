@@ -1,14 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      G5 manifest audit. Permissions are declared explicitly so the full list is reviewable here;
+      scripts/check-native-permissions.mjs (npm run check:native) fails if it drifts.
+      - No ACCESS_BACKGROUND_LOCATION: location is read only while the app is open.
+      - No camera / storage / media permissions: driver documents come from the system photo
+        picker and Files picker (@capawesome/capacitor-file-picker), which need none.
+      - Backups are off (sign-in session lives in Keystore-backed secure storage).
+      - Cleartext HTTP is off; the debug build overlays network_security_config to allow the
+        local dev API (10.0.2.2 / localhost) only.
+    -->
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        tools:targetApi="31">
 
+        <!-- Exported: required for the launcher and for the password-reset link below. -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
@@ -22,8 +40,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Password reset / auth callback: com.aid.roadside://auth/recovery (same custom
+                 scheme as iOS CFBundleURLTypes; handled by appUrlOpen in src/App.tsx).
+                 Verified https App Links on AID's own domain are blocked on G7 / A10. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.aid.roadside" android:host="auth" />
+            </intent-filter>
+
         </activity>
 
+        <!-- Not exported; only used by the file-picker plugin's copyFile, limited to the cache. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -36,6 +65,14 @@
     </application>
 
     <!-- Permissions -->
-
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Foreground location only: customer pickup point; driver position during an active job. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <!-- Local notifications (Android 13+ asks the user). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Added by @capacitor/local-notifications but not needed (no exact-time reminders), and
+         Google Play restricts it to alarm/calendar apps. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
 </manifest>
