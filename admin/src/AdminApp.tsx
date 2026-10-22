@@ -92,11 +92,16 @@ function inFilter(driver: DriverSummary, filter: QueueFilter): boolean {
 
 // ---------- Shared UI ----------
 
-/** The AID mark (three lanes) + "Admin", same mark as the apps. */
+/** The AID mark ("A" + location dot) + "Admin", same glyph as the apps and the app icon (src/components/brand/AidBrand.tsx). */
 function Brand() {
   return (
     <div className="brand">
-      <span className="brand__mark" aria-hidden="true"><i /><i /><i /></span>
+      <span className="brand__mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 32 32" fill="none" focusable="false">
+          <path d="M8.6 25 L16 7.5 L23.4 25" stroke="currentColor" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="16" cy="19.4" r="2.3" fill="currentColor" />
+        </svg>
+      </span>
       <span className="brand__name">AID <span>Admin</span></span>
     </div>
   )

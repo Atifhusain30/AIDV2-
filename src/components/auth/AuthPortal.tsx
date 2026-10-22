@@ -97,9 +97,9 @@ export default function AuthPortal({ role, onLoginSuccess, onSwitchRole }: AuthP
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
       >
+        {/* No role pill: the headline says which app this is, and the footer offers the switch. */}
         <header className="auth__top">
-          <AidBrand compact />
-          <span className="ui-chip">{isDriver ? 'Driver' : 'Customer'}</span>
+          <AidBrand compact label={isDriver ? 'Driver' : undefined} />
         </header>
 
         {checkEmail ? (

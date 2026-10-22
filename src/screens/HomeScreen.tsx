@@ -110,7 +110,7 @@ export default function HomeScreen() {
             <div className="service-shortcuts">
               {services.map(({ label, icon: Icon, service }) => (
                 <button key={service} type="button" aria-label={label === 'Tow' ? 'Need a tow' : label} onClick={() => startService(service)}>
-                  <span aria-hidden="true"><Icon size={22} strokeWidth={1.9} /></span>
+                  <span aria-hidden="true"><Icon size={22} /></span>
                   <strong>{label}</strong>
                 </button>
               ))}

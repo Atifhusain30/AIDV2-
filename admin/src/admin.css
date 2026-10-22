@@ -107,11 +107,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); outline
 textarea { resize: vertical; }
 .signin__card .btn--block { min-height: 44px; }
 
-/* Brand: the AID mark (three lanes). */
+/* Brand: the AID mark ("A" + location dot), same glyph as the apps. */
 .brand { display: flex; align-items: center; gap: 10px; }
-.brand__mark { display: grid; grid-template-columns: repeat(3, 4px); align-items: end; gap: 2px; width: 30px; height: 30px; padding: 7px; border-radius: 9px; background: var(--accent-fill); }
-.brand__mark i { display: block; width: 4px; border-radius: 9px 9px 1px 1px; background: #fff; transform: skewX(-9deg); }
-.brand__mark i:nth-child(1) { height: 9px; } .brand__mark i:nth-child(2) { height: 15px; } .brand__mark i:nth-child(3) { height: 12px; }
+.brand__mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--accent-fill); color: #fff; }
 .brand__name { color: var(--text); font-size: 16px; font-weight: 800; letter-spacing: -.04em; }
 .brand__name span { margin-left: 2px; color: var(--muted); font-weight: 600; letter-spacing: -.01em; }
 

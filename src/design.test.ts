@@ -36,3 +36,25 @@ describe('one colour system (F2)', () => {
     for (const file of NOT_YET_MIGRATED) expect(Object.keys(tsx)).toContain(file)
   })
 })
+
+describe('one icon set, one stroke weight', () => {
+  const admin = ['AdminApp.tsx', 'Reports.tsx', 'FilterTabs.tsx', 'ui.tsx'].map((file) => [`admin/src/${file}`, read(`admin/src/${file}`)] as const)
+  const all = [...Object.entries(tsx), ...admin]
+
+  it('every icon comes from lucide-react (no second icon library)', () => {
+    const other = /from ['"](?:react-icons|@heroicons|@phosphor-icons|@tabler\/icons|react-feather|@radix-ui\/react-icons)/
+    expect(all.filter(([, text]) => other.test(text)).map(([file]) => file)).toEqual([])
+  })
+
+  it('icons keep lucide\'s one stroke weight (2); only the bold check mark inside a selected choice is heavier', () => {
+    const odd: string[] = []
+    for (const [file, text] of all) {
+      for (const match of text.matchAll(/strokeWidth=\{?["']?([\d.]+)/g)) {
+        const line = text.slice(text.lastIndexOf('\n', match.index) + 1, text.indexOf('\n', match.index))
+        const allowed = match[1] === '2' || (match[1] === '3' && /<Check size=\{14\}/.test(line)) || (match[1] === '3.8' && /M8\.6 25/.test(text.slice(match.index! - 80, match.index)))
+        if (!allowed) odd.push(`${file}: strokeWidth ${match[1]}`)
+      }
+    }
+    expect(odd).toEqual([])
+  })
+})
