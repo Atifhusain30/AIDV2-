@@ -52,6 +52,20 @@ test('remote database has the AID marketplace schema', { timeout: 30000 }, async
     assert.equal(review.rows[0].events_rls, true, 'verification audit log must have RLS enabled');
     assert.equal(review.rows[0].events_readable, false, 'clients must not read the verification audit log directly');
     assert.match(review.rows[0].status_check, /suspended/);
+    const grants = await pool.query(`
+      select
+        (select count(*)::int from information_schema.role_table_grants
+           where table_schema='public' and grantee='anon') as anon_grants,
+        (select count(*)::int from information_schema.role_table_grants
+           where table_schema='public' and grantee='authenticated' and privilege_type in ('TRUNCATE','TRIGGER','REFERENCES')) as dangerous_grants,
+        (select array_agg(column_name::text order by column_name) from information_schema.column_privileges
+           where table_schema='public' and table_name='profiles' and grantee='authenticated' and privilege_type='UPDATE') as profile_update_columns,
+        exists(select 1 from pg_trigger where tgname='profiles_guard_privileged_columns') as guard_trigger
+    `);
+    assert.equal(grants.rows[0].anon_grants, 0, 'anonymous clients must have no table privileges');
+    assert.equal(grants.rows[0].dangerous_grants, 0, 'signed-in clients must not hold TRUNCATE/TRIGGER/REFERENCES');
+    assert.deepEqual(grants.rows[0].profile_update_columns, ['first_name', 'last_name', 'phone'], 'clients may only edit display fields');
+    assert.equal(grants.rows[0].guard_trigger, true, 'privileged profile columns must be trigger-guarded');
     assert.ok(hardenedPolicies.rowCount > 0);
     for (const policy of hardenedPolicies.rows) {
       assert.match(policy.expression, /is_active_account/i, `${policy.tablename}.${policy.policyname} must reject inactive accounts`);
