@@ -67,6 +67,10 @@ export async function updateProfile(input: { firstName?: string; lastName?: stri
   return apiFetch('/me', { method: 'PATCH', body: JSON.stringify(input) })
 }
 
+export async function deleteAccount(): Promise<ApiResponse<void>> {
+  return apiFetch('/me', { method: 'DELETE' })
+}
+
 export async function listVehicles(): Promise<ApiResponse<UserVehicle[]>> {
   return apiFetch('/vehicles')
 }
@@ -165,7 +169,7 @@ export function getAuthState() { return { isAuthenticated: false, user: null, to
 
 export const apiService = {
   customerLogin, customerRegister, driverLogin, driverRegister, logout, getAuthState,
-  getProfile, updateProfile, listVehicles, createVehicle, updateVehicle, deleteVehicle,
+  getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
   createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, createPaymentIntent,
 }

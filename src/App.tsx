@@ -298,14 +298,24 @@ function App() {
         setIsRecoveringPassword(false)
       }
     }
-    let removeListener: (() => Promise<void>) | undefined
-    void CapacitorApp.addListener('appUrlOpen', ({ url }) => void handleUrl(url)).then((listener) => {
-      removeListener = () => listener.remove()
-    })
-    void CapacitorApp.getLaunchUrl().then((launch) => {
-      if (launch?.url) void handleUrl(launch.url)
-    })
-    return () => { void removeListener?.() }
+    let cancelled = false
+    let listener: { remove: () => Promise<void> } | undefined
+    void CapacitorApp.addListener('appUrlOpen', ({ url }) => void handleUrl(url))
+      .then((registered) => {
+        if (cancelled) {
+          void registered.remove()
+          return
+        }
+        listener = registered
+      })
+      .catch(() => setRecoveryError('Unable to initialize password recovery links.'))
+    void CapacitorApp.getLaunchUrl()
+      .then((launch) => { if (launch?.url) void handleUrl(launch.url) })
+      .catch(() => setRecoveryError('Unable to read the password recovery link.'))
+    return () => {
+      cancelled = true
+      void listener?.remove()
+    }
   }, [])
 
   // Check for existing session

@@ -139,6 +139,32 @@ class PostgresRepository {
     return result.rows[0]?.storage_path || null;
   }
 
+  async prepareAccountDeletion(userId) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const documents = await client.query('select storage_path from public.driver_documents where driver_id=$1', [userId]);
+      await client.query('delete from public.bookings where customer_id=$1', [userId]);
+      // Preserve customers' history when a driver leaves; return active jobs to dispatch.
+      await client.query(`update public.bookings set driver_id=null, driver_lat=null, driver_lng=null,
+        status = case when status in ('accepted','en_route','arrived','in_progress') then 'searching' else status end,
+        accepted_at = case when status in ('accepted','en_route','arrived','in_progress') then null else accepted_at end,
+        arrived_at = case when status in ('accepted','en_route','arrived','in_progress') then null else arrived_at end,
+        started_at = case when status in ('accepted','en_route','arrived','in_progress') then null else started_at end,
+        updated_at = now()
+        where driver_id=$1`, [userId]);
+      await client.query('delete from public.vehicles where customer_id=$1', [userId]);
+      await client.query('delete from public.driver_documents where driver_id=$1', [userId]);
+      await client.query('commit');
+      return { storagePaths: documents.rows.map((row) => row.storage_path) };
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async listVehicles(customerId) {
     const result = await this.pool.query('select * from public.vehicles where customer_id = $1 order by created_at desc', [customerId]);
     return result.rows.map(mapVehicle);

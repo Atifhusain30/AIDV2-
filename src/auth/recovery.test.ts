@@ -5,8 +5,8 @@ describe('native password recovery callback', () => {
   it('exchanges the PKCE code from the AID recovery URL', async () => {
     const exchangeCodeForSession = vi.fn().mockResolvedValue({ error: null })
 
-    await expect(completeRecoveryFromUrl({ exchangeCodeForSession }, 'com.aid.roadside://auth/recovery?code=secure-code')).resolves.toBe(true)
-    expect(exchangeCodeForSession).toHaveBeenCalledWith('secure-code')
+    await expect(completeRecoveryFromUrl({ exchangeCodeForSession }, 'com.aid.roadside://auth/recovery?code=secure-code&sb_flow_id=flow-id')).resolves.toBe(true)
+    expect(exchangeCodeForSession).toHaveBeenCalledWith('secure-code', { flowId: 'flow-id' })
   })
 
   it('ignores unrelated app links', async () => {
@@ -18,5 +18,11 @@ describe('native password recovery callback', () => {
 
   it('fails clearly when the recovery callback has no code', async () => {
     await expect(completeRecoveryFromUrl({ exchangeCodeForSession: vi.fn() }, 'com.aid.roadside://auth/recovery')).rejects.toThrow('Password recovery link is invalid or expired.')
+  })
+
+  it('falls back to the default PKCE flow when no flow id is present', async () => {
+    const exchangeCodeForSession = vi.fn().mockResolvedValue({ error: null })
+    await expect(completeRecoveryFromUrl({ exchangeCodeForSession }, 'com.aid.roadside://auth/recovery?code=secure-code')).resolves.toBe(true)
+    expect(exchangeCodeForSession).toHaveBeenCalledWith('secure-code', undefined)
   })
 })

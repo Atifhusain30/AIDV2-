@@ -33,6 +33,18 @@ const auth = {
     return error ? null : data.user;
   },
 };
+const accountAdmin = {
+  async deleteUser(userId) {
+    // Clear rows that would block the auth.users -> profiles cascade before deleting the identity.
+    const { storagePaths } = await repository.prepareAccountDeletion(userId);
+    const { error } = await supabase.auth.admin.deleteUser(userId);
+    if (error) throw error;
+    if (storagePaths.length) {
+      const { error: storageError } = await supabase.storage.from('driver-documents').remove(storagePaths);
+      if (storageError) console.error('Account deleted but driver document cleanup failed:', storageError.message);
+    }
+  },
+};
 const documentStorage = {
   async upload(driverId, file, documentType) {
     const extension = (file.originalname.split('.').pop() || 'file').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'file';
@@ -59,6 +71,7 @@ const app = createApp({
   auth,
   repository,
   stripe,
+  accountAdmin,
   documentStorage,
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
   corsOrigin: process.env.CORS_ORIGIN || 'http://127.0.0.1:5173,http://localhost:5173,capacitor://localhost,http://localhost',

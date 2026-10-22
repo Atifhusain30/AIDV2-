@@ -50,7 +50,7 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, corsOrigin = 'http://127.0.0.1:5173' }) {
+function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173' }) {
   const app = express();
   app.disable('x-powered-by');
   const allowedOrigins = new Set((Array.isArray(corsOrigin) ? corsOrigin : String(corsOrigin).split(',')).map((origin) => origin.trim()).filter(Boolean));
@@ -121,6 +121,13 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         phone: typeof req.body.phone === 'string' ? req.body.phone.trim().slice(0, 40) : current.phone,
       };
       res.json(await repository.updateProfile(req.auth.identity.id, patch));
+    } catch (error) { next(error); }
+  });
+  app.delete('/api/me', authenticate, async (req, res, next) => {
+    try {
+      if (!accountAdmin) return res.status(503).json({ error: 'Account deletion is not configured' });
+      await accountAdmin.deleteUser(req.auth.identity.id);
+      res.status(204).end();
     } catch (error) { next(error); }
   });
 

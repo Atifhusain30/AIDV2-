@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createApp } = require('../app');
 
-function buildHarness(stripe = null) {
+function buildHarness(stripe = null, accountAdmin = null) {
   const users = {
     customerToken: { id: 'customer-1', role: 'customer', status: 'active', firstName: 'Casey', lastName: 'Customer' },
     driverToken: { id: 'driver-1', role: 'driver', status: 'active', verificationStatus: 'verified', isOnline: true },
@@ -49,6 +49,9 @@ function buildHarness(stripe = null) {
       bookings.set(bookingId, updated);
       return updated;
     },
+    async prepareAccountDeletion(userId) {
+      return { userId, storagePaths: [] };
+    },
   };
 
   const auth = {
@@ -58,7 +61,7 @@ function buildHarness(stripe = null) {
     },
   };
 
-  return { app: createApp({ auth, repository, stripe }), repository, bookings };
+  return { app: createApp({ auth, repository, stripe, accountAdmin }), repository, bookings };
 }
 
 test('health endpoint is available without authentication', async () => {
@@ -250,4 +253,27 @@ test('failed payment retries use a new idempotency key derived from the previous
 
   assert.equal(response.status, 200);
   assert.equal(options.idempotencyKey, 'booking-booking-retry-retry-pi_failed');
+});
+
+test('authenticated users can permanently delete their own account', async () => {
+  const deletedUsers = [];
+  const accountAdmin = { async deleteUser(userId) { deletedUsers.push(userId); } };
+  const { app } = buildHarness(null, accountAdmin);
+
+  const response = await request(app)
+    .delete('/api/me')
+    .set('Authorization', 'Bearer customerToken');
+
+  assert.equal(response.status, 204);
+  assert.deepEqual(deletedUsers, ['customer-1']);
+});
+
+test('account deletion fails safely when identity deletion is unavailable', async () => {
+  const { app } = buildHarness();
+  const response = await request(app)
+    .delete('/api/me')
+    .set('Authorization', 'Bearer customerToken');
+
+  assert.equal(response.status, 503);
+  assert.equal(response.body.error, 'Account deletion is not configured');
 });

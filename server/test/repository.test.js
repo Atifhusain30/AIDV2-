@@ -76,3 +76,26 @@ test('booking acceptance uses a conditional update to prevent double assignment'
   assert.match(sql, /status = 'searching'/i);
   assert.match(sql, /driver_id is null/i);
 });
+
+test('account deletion removes user-owned marketplace data in a transaction', async () => {
+  const queries = [];
+  const client = {
+    async query(text, values) {
+      queries.push({ text, values });
+      if (/select storage_path/i.test(text)) return { rows: [{ storage_path: 'driver/docs/license.png' }] };
+      return { rows: [] };
+    },
+    release() {},
+  };
+  const repository = new PostgresRepository({ connect: async () => client });
+
+  const result = await repository.prepareAccountDeletion('user-1');
+
+  assert.deepEqual(result.storagePaths, ['driver/docs/license.png']);
+  assert.equal(queries[0].text, 'begin');
+  assert.match(queries.map((query) => query.text).join('\n'), /delete from public\.bookings where customer_id=\$1'?$/im);
+  assert.doesNotMatch(queries.map((query) => query.text).join('\n'), /delete from public\.bookings[^\n]*driver_id/i);
+  assert.match(queries.map((query) => query.text).join('\n'), /update public\.bookings set driver_id=null/i);
+  assert.match(queries.map((query) => query.text).join('\n'), /delete from public\.vehicles/i);
+  assert.equal(queries.at(-1).text, 'commit');
+});

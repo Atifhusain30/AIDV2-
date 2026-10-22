@@ -37,6 +37,9 @@ export default function ProfileScreen() {
   const { user: authUser, isAuthenticated, token, logout } = useAuthStore()
   const [showVehicleForm, setShowVehicleForm] = useState(false)
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle)
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false)
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -88,6 +91,20 @@ export default function ProfileScreen() {
   }
 
   const handleLogout = () => {
+    logout()
+    signOut()
+  }
+
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true)
+    setDeleteError(null)
+    const result = await apiService.deleteAccount()
+    setIsDeletingAccount(false)
+    if (!result.success) {
+      setDeleteError(result.error || 'Unable to delete your account. Please try again.')
+      return
+    }
+    setShowDeleteConfirmation(false)
     logout()
     signOut()
   }
@@ -146,7 +163,12 @@ export default function ProfileScreen() {
         </section>
       )}
 
-      {isAuthenticated && <button type="button" className="account-signout" onClick={handleLogout}><LogOut size={17} /> Sign out</button>}
+      {isAuthenticated && (
+        <>
+          <button type="button" className="account-signout" onClick={handleLogout}><LogOut size={17} /> Sign out</button>
+          <button type="button" className="account-signout text-red-400" onClick={() => setShowDeleteConfirmation(true)}><Trash2 size={17} /> Delete account</button>
+        </>
+      )}
       <p className="account-version">AID Roadside · Version 1.0</p>
 
       {showVehicleForm && createPortal(
@@ -163,6 +185,19 @@ export default function ProfileScreen() {
             </div>
             <button type="submit" className="account-sheet__submit">Save vehicle</button>
           </form>
+        </div>,
+        document.body,
+      )}
+      {showDeleteConfirmation && createPortal(
+        <div className="account-sheet-backdrop" role="presentation" onMouseDown={() => !isDeletingAccount && setShowDeleteConfirmation(false)}>
+          <section className="account-sheet" role="dialog" aria-modal="true" aria-labelledby="delete-account-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="account-sheet__handle" />
+            <div className="account-sheet__header"><div><small>PERMANENT ACTION</small><h2 id="delete-account-title">Permanently delete account?</h2></div><button type="button" aria-label="Close account deletion" disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}><X size={20} /></button></div>
+            <p>This removes your account, saved vehicles, active requests, driver documents, and marketplace history. This cannot be undone.</p>
+            {deleteError && <p role="alert" className="text-red-400">{deleteError}</p>}
+            <button type="button" className="account-sheet__submit bg-red-600" disabled={isDeletingAccount} onClick={() => void handleDeleteAccount()}>{isDeletingAccount ? 'Deleting account…' : 'Delete my account permanently'}</button>
+            <button type="button" className="account-signout" disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}>Keep my account</button>
+          </section>
         </div>,
         document.body,
       )}
