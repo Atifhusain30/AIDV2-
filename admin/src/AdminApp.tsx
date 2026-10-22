@@ -45,12 +45,20 @@ function SignIn({ onSignedIn, initialError }: { onSignedIn: (admin: AdminProfile
   const [error, setError] = useState(initialError)
   const [busy, setBusy] = useState(false)
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Read the fields directly: browser autofill (notably Safari) can skip React's change events.
+    const form = new FormData(event.currentTarget)
+    const typedEmail = String(form.get('email') || email).trim()
+    const typedPassword = String(form.get('password') || password)
+    if (!typedEmail || !typedPassword) {
+      setError('Enter your admin email and password.')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      onSignedIn(await adminApi.signIn(email, password))
+      onSignedIn(await adminApi.signIn(typedEmail, typedPassword))
     } catch (signInError) {
       setError(message(signInError))
     } finally {
@@ -60,11 +68,11 @@ function SignIn({ onSignedIn, initialError }: { onSignedIn: (admin: AdminProfile
 
   return (
     <main className="signin">
-      <form onSubmit={(event) => void submit(event)} className="signin__card">
+      <form noValidate onSubmit={(event) => void submit(event)} className="signin__card">
         <p className="eyebrow">AID ADMIN</p>
         <h1>Driver review</h1>
-        <label>Email<input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-        <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+        <label>Email<input name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+        <label>Password<input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
         {error && <p role="alert" className="error">{error}</p>}
         <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
