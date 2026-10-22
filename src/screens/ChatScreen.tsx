@@ -22,6 +22,7 @@ import { lazy, Suspense } from 'react'
 import * as bookingService from '../services/bookingService'
 import * as chatService from '../services/chatService'
 import { formatPrice } from '../lib/money'
+import CustomerTrackingScreen from './customer/CustomerTrackingScreen'
 
 // Lazy load TrackingMap to avoid SSR issues with Leaflet
 const TrackingMap = lazy(() => import('../components/ui/TrackingMap'))
@@ -550,23 +551,7 @@ export default function ChatScreen() {
     }
   }, [activeBooking?.id])
   
-  // Keep managed bookings synchronized with driver actions from the backend.
-  useEffect(() => {
-    if (!token || !activeBooking) return
-    let stopped = false
-    const refresh = async () => {
-      const result = await apiService.getBooking(activeBooking.id)
-      if (!stopped && result.success && result.data) {
-        bookingService.reconcileManagedBooking(result.data)
-      }
-    }
-    void refresh()
-    const interval = window.setInterval(() => void refresh(), 4000)
-    return () => {
-      stopped = true
-      window.clearInterval(interval)
-    }
-  }, [token, activeBooking?.id, setActiveBooking, updateBookingInHistory])
+  // Server sync for signed-in bookings runs app-wide (useActiveBookingSync in CustomerApp).
 
   // Simulate status progression only for local guest demonstrations.
   useEffect(() => {
@@ -720,6 +705,11 @@ export default function ChatScreen() {
         </motion.div>
       </div>
     )
+  }
+
+  // A real driver accepted: show live tracking from the server instead of the demo chat view.
+  if (token && activeBooking.driver) {
+    return <CustomerTrackingScreen booking={activeBooking} />
   }
 
   // Handle view details

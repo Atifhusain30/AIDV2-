@@ -23,6 +23,7 @@ import {
 import AidBrand from '../components/brand/AidBrand'
 import { useAppStore } from '../store/useAppStore'
 import type { ServiceType } from '../types'
+import { driverTracking } from '../lib/customerTracking'
 import { HistoryModal } from '../components/modals'
 import RequestSheet from '../components/request/RequestSheet'
 
@@ -34,6 +35,13 @@ const services: Array<{ label: string; icon: typeof Battery; service: ServiceTyp
   { label: 'Fuel', icon: Fuel, service: 'fuel_delivery' },
   { label: 'EV charge', icon: Zap, service: 'ev_charging' },
 ]
+
+const driverStatus: Record<string, string> = {
+  accepted: 'accepted your request',
+  en_route: 'is on the way',
+  arrived: 'has arrived',
+  in_progress: 'is helping you',
+}
 
 const bookingStatus: Record<string, string> = {
   pending: 'Request received',
@@ -59,6 +67,13 @@ export default function HomeScreen() {
     resetServiceFormData,
     rebookFromHistory,
   } = useAppStore()
+
+  // Real jobs: the server's approximate ETA (hidden when the driver's location is too old).
+  const activeEta = activeBooking
+    ? activeBooking.driver
+      ? driverTracking(activeBooking, Date.now()).eta?.minutes ?? null
+      : activeBooking.providerETA ?? activeBooking.estimatedArrival ?? null
+    : null
 
   const activeVehicle = vehicles.find((vehicle) => vehicle.id === activeVehicleId) ?? vehicles[0]
   const recentBooking = bookingHistory.find((booking) => booking.status === 'completed')
@@ -93,10 +108,10 @@ export default function HomeScreen() {
 
       {activeBooking && (
         <button type="button" className="consumer-active" onClick={() => setCurrentScreen('chat')} aria-label="Track active request">
-          <div className="consumer-active__status"><span><i /> ACTIVE REQUEST</span><strong>{activeBooking.providerETA ?? activeBooking.estimatedArrival ?? '--'} min</strong></div>
+          <div className="consumer-active__status"><span><i /> ACTIVE REQUEST</span><strong>{activeEta != null ? `≈ ${activeEta} min` : '-- min'}</strong></div>
           <div className="consumer-active__main">
             <span className="consumer-active__nav"><Navigation size={22} /></span>
-            <div><strong>{bookingStatus[activeBooking.status] ?? activeBooking.service.name}</strong><p>{activeBooking.service.name} · {activeBooking.location.address}</p></div>
+            <div><strong>{activeBooking.driver && driverStatus[activeBooking.status] ? `${activeBooking.driver.firstName} ${driverStatus[activeBooking.status]}` : bookingStatus[activeBooking.status] ?? activeBooking.service.name}</strong><p>{activeBooking.service.name} · {activeBooking.location.address}</p></div>
             <ChevronRight size={20} />
           </div>
           <div className="consumer-active__footer"><span><MessageCircle size={15} /> Message</span><span>Track provider <ArrowRight size={15} /></span></div>

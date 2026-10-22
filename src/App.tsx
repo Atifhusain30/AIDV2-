@@ -10,6 +10,8 @@ import { useAppStore } from './store/useAppStore'
 import { useAuthStore } from './store/useAuthStore'
 import { useDriverStore } from './store/useDriverStore'
 import { useJobLocationSharing } from './lib/useJobLocationSharing'
+import { useActiveBookingSync } from './lib/useActiveBookingSync'
+import EndedBookingNotice from './components/tracking/EndedBookingNotice'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
 import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
@@ -110,6 +112,8 @@ import ReceiptModal from './components/modals/ReceiptModal'
 // Customer App Component
 function CustomerApp() {
   const { currentScreen } = useAppStore()
+  // Keep the active request (status, driver, live location, ETA) current on every customer screen.
+  useActiveBookingSync()
   const { logout } = useAuthStore()
   const [mounted, setMounted] = useState(false)
 
@@ -151,6 +155,7 @@ function CustomerApp() {
         </AnimatePresence>
 
         <BottomNav />
+        <EndedBookingNotice />
       </div>
 
       {/* Global Modals */}

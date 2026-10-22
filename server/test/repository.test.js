@@ -180,3 +180,24 @@ test('drivers can save the vehicle customers should look for', async () => {
   assert.deepEqual(captured.values, ['driver-1', 'Ford', 'F-550', 'White', 'TOW-77']);
   assert.deepEqual(vehicle, { make: 'Ford', model: 'F-550', color: 'White', plate: 'TOW-77' });
 });
+
+test('customer gets an approximate ETA from the driver\'s last shared position while they head over', async () => {
+  const repository = new PostgresRepository(poolWith(async () => ({ rows: [PARTY_ROW] })));
+  const booking = await repository.getBooking('booking-9', 'customer-1', 'customer');
+  // 33.1,-97.0 -> pickup 33.21,-97.13 ≈ 13.4 road miles at 30 mph
+  assert.deepEqual(booking.driverEta, { miles: 13.4, minutes: 27, approximate: true, fromLocationAt: '2026-01-01T00:05:00.000Z' });
+});
+
+test('no ETA before the driver shares a location, after they arrive, or once the job is over', async () => {
+  const rows = [
+    { ...PARTY_ROW, status: 'accepted', driver_lat: null, driver_lng: null, driver_location_at: null },
+    { ...PARTY_ROW, status: 'arrived' },
+    { ...PARTY_ROW, status: 'in_progress' },
+    { ...PARTY_ROW, status: 'cancelled' },
+  ];
+  for (const row of rows) {
+    const repository = new PostgresRepository(poolWith(async () => ({ rows: [row] })));
+    const booking = await repository.getBooking('booking-9', 'customer-1', 'customer');
+    assert.equal(booking.driverEta, undefined, row.status);
+  }
+});

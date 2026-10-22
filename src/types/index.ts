@@ -204,11 +204,20 @@ export interface BookingVehicleSnapshot {
 }
 
 /** The vehicle a driver arrives in (what the customer should look for). */
-export interface DriverVehicle {
+export interface JobDriverVehicle {
   make: string
   model: string
   color: string
   plate: string
+}
+
+/** Approximate arrival estimate: estimated road miles at an average city/highway speed. */
+export interface DriverEta {
+  miles: number
+  minutes: number
+  approximate: true
+  /** When the driver location this estimate is based on was taken. */
+  fromLocationAt: string | null
 }
 
 /** The other person on a job. Phone is only present while the job is active. */
@@ -222,7 +231,7 @@ export interface JobDriver extends JobContact {
   id: string
   rating: number
   totalJobs: number
-  vehicle: DriverVehicle | null
+  vehicle: JobDriverVehicle | null
 }
 
 // Service Request (Booking)
@@ -253,6 +262,8 @@ export interface Booking {
     amount: number
   }
   driverLocation?: Location & { updatedAt?: string }
+  /** Server-estimated arrival from the driver's last shared position (approximate; until arrival). */
+  driverEta?: DriverEta
   /** Assigned driver, shown to the customer once accepted. */
   driver?: JobDriver
   /** Customer contact, shown to the driver once accepted. */

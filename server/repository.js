@@ -1,4 +1,5 @@
 const { types } = require('pg');
+const { estimateArrival } = require('./pricing');
 
 // Keep SQL `date` values as YYYY-MM-DD strings; JS Date conversion shifts them by timezone.
 types.setTypeParser(1082, (value) => value);
@@ -130,6 +131,8 @@ function mapBooking(row) {
 
 // Contact details and live location are shared only while a job is in progress.
 const CONTACT_STATUSES = new Set(['accepted', 'en_route', 'arrived', 'in_progress']);
+// The driver is still heading to the pickup in these statuses, so an arrival estimate makes sense.
+const ETA_STATUSES = new Set(['accepted', 'en_route']);
 const PARTY_SELECT = `
   select b.*, concat_ws(' ', v.year, v.make, v.model) as vehicle_label, v.license_plate as vehicle_plate, v.color as vehicle_color,
     c.first_name as party_customer_first_name, c.last_name as party_customer_last_name, c.phone as party_customer_phone,
@@ -152,6 +155,10 @@ function mapParticipantBooking(row, role) {
   if (booking.vehicle && row.vehicle_color) booking.vehicle.color = row.vehicle_color;
   if (!live) delete booking.driverLocation;
   else if (booking.driverLocation && row.driver_location_at) booking.driverLocation.updatedAt = new Date(row.driver_location_at).toISOString();
+  // Approximate ETA from the driver's last shared position to the pickup, until they arrive.
+  if (live && booking.driverLocation && ETA_STATUSES.has(row.status) && Number.isFinite(booking.location.lat) && Number.isFinite(booking.location.lng)) {
+    booking.driverEta = { ...estimateArrival(booking.driverLocation, booking.location), fromLocationAt: booking.driverLocation.updatedAt || null };
+  }
 
   if ((role === 'customer' || role === 'admin') && row.driver_id && row.party_driver_first_name != null) {
     booking.driver = {

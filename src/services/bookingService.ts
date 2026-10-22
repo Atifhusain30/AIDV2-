@@ -47,7 +47,11 @@ export function reconcileManagedBooking(booking: Booking): void {
     return
   }
   if (booking.status === 'cancelled') {
-    if (store.activeBooking?.id === booking.id) store.clearActiveBooking()
+    if (store.activeBooking?.id === booking.id) {
+      // The customer's own cancel clears the booking directly, so reaching here means the driver cancelled.
+      store.setEndedBookingNotice({ bookingId: booking.id, serviceName: booking.service.name, driverName: booking.driver?.firstName })
+      store.clearActiveBooking()
+    }
     return
   }
   store.setActiveBooking(booking)

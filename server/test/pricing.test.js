@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { quoteService, roadMiles, TOWING } = require('../pricing');
+const { quoteService, roadMiles, estimateArrival, ETA_AVERAGE_MPH, TOWING } = require('../pricing');
 
 const towing = { id: 'towing', basePrice: 95, requiresDropoff: true };
 const jump = { id: 'battery_jump', basePrice: 69 };
@@ -36,4 +36,12 @@ test('tows beyond the maximum distance are refused', () => {
 
 test('towing without a drop-off cannot be quoted', () => {
   assert.throws(() => quoteService(towing, DALLAS, null), /drop-off/);
+});
+
+test('live ETA uses the same road-mile estimate at an average 30 mph, never below 1 minute', () => {
+  const FORT_WORTH = { lat: 32.7555, lng: -97.3308 };
+  assert.deepEqual(estimateArrival(DALLAS, FORT_WORTH), { miles: 38.8, minutes: 78, approximate: true });
+  assert.equal(estimateArrival(DALLAS, FORT_WORTH).miles, roadMiles(DALLAS, FORT_WORTH));
+  assert.equal(ETA_AVERAGE_MPH, 30);
+  assert.deepEqual(estimateArrival(DALLAS, DALLAS), { miles: 0, minutes: 1, approximate: true });
 });

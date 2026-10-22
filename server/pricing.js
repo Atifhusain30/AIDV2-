@@ -44,4 +44,15 @@ function quoteService(service, pickup, dropoff) {
   return { price: cents(TOWING.hookup + extraMiles * TOWING.perMile), distanceMiles };
 }
 
-module.exports = { quoteService, roadMiles, PricingError, TOWING };
+/**
+ * Approximate drive time for the customer's live ETA: estimated road miles (same estimate as
+ * pricing) at an average ETA_AVERAGE_MPH city/highway mix. Approximate until real routing (G6).
+ * @returns {{ miles: number, minutes: number, approximate: true }}
+ */
+const ETA_AVERAGE_MPH = 30;
+function estimateArrival(from, to) {
+  const miles = roadMiles(from, to);
+  return { miles, minutes: Math.max(1, Math.ceil((miles / ETA_AVERAGE_MPH) * 60)), approximate: true };
+}
+
+module.exports = { quoteService, roadMiles, estimateArrival, ETA_AVERAGE_MPH, PricingError, TOWING };
