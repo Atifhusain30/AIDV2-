@@ -36,22 +36,7 @@ export const CUSTOMER_CANCEL_REASONS: Choice[] = [
   { id: 'wrong_details', label: 'Wrong location or details' },
   { id: 'other', label: 'Other' },
 ]
-export const DRIVER_ISSUES: Choice[] = [
-  { id: 'safety', label: 'Safety concern' },
-  { id: 'customer_issue', label: 'Problem with the customer' },
-  { id: 'vehicle_damage', label: 'Vehicle damage' },
-  { id: 'cannot_complete', label: "Service can't be completed" },
-  { id: 'price', label: 'Price or payment question' },
-  { id: 'other', label: 'Something else' },
-]
-export const CUSTOMER_ISSUES: Choice[] = [
-  { id: 'safety', label: 'Safety concern' },
-  { id: 'driver_issue', label: 'Problem with the driver' },
-  { id: 'vehicle_damage', label: 'Damage to my vehicle' },
-  { id: 'cannot_complete', label: "Service can't be completed" },
-  { id: 'price', label: 'Price or payment question' },
-  { id: 'other', label: 'Something else' },
-]
+// Issue report categories live in src/lib/support.ts (B18).
 
 export interface DriverAction {
   next: BookingStatus

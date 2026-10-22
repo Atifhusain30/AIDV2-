@@ -33,6 +33,7 @@ import HomeScreen from './screens/HomeScreen'
 import HistoryScreen from './screens/HistoryScreen'
 import UpdatesScreen from './screens/UpdatesScreen'
 import ProfileScreen from './screens/ProfileScreen'
+import HelpSupportScreen from './screens/HelpSupportScreen'
 import { CustomerLoginScreen } from './screens/customer'
 import BottomNav from './components/ui/BottomNav'
 import AidBrand from './components/brand/AidBrand'
@@ -48,7 +49,7 @@ import {
 
 // App modes
 type AppMode = 'select' | 'customer' | 'driver'
-type DriverView = 'home' | 'onboarding' | 'job' | 'settings' | 'vehicle'
+type DriverView = 'home' | 'onboarding' | 'job' | 'settings' | 'vehicle' | 'help'
 
 // Intro screen to select customer or driver
 function AppModeSelector({
@@ -276,6 +277,12 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
         </motion.div>
       )}
 
+      {currentView === 'help' && (
+        <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="driver-help">
+          <HelpSupportScreen audience="driver" onBack={() => setCurrentView('settings')} />
+        </motion.div>
+      )}
+
       {currentView === 'settings' && (
         <motion.div
           key="settings"
@@ -309,6 +316,14 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
               <p className="text-gray-500 text-sm">{driverVehicleSummary((user as Driver | null)?.vehicle) || 'Add the vehicle customers will look for'}</p>
             </button>
             
+            <button
+              onClick={() => setCurrentView('help')}
+              className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
+            >
+              <span className="text-white">Help &amp; Support</span>
+              <p className="text-gray-500 text-sm">Report a problem, your reports, common questions</p>
+            </button>
+
             <div className="account-menu">
               <SafetyMenuItem audience="driver" />
             </div>

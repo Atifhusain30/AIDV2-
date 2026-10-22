@@ -93,6 +93,25 @@ test('remote database has the AID marketplace schema', { timeout: 30000 }, async
     assert.match(b15.rows[0].not_self, /rater_id <> ratee_id/);
     assert.match(b15.rows[0].stars, /stars >= 1.*stars <= 5/);
     assert.match(b15.rows[0].comment, /500/);
+    // B18: support reports are API-only too; category list per role, message ≤ 2000, resolved ⇔ resolved_at.
+    const b18 = await pool.query(`
+      select (select relrowsecurity from pg_class where oid = 'public.support_reports'::regclass) as rls,
+        (select relrowsecurity from pg_class where oid = 'public.support_report_events'::regclass) as events_rls,
+        has_table_privilege('authenticated', 'public.support_reports', 'select') or has_table_privilege('authenticated', 'public.support_reports', 'insert')
+          or has_table_privilege('anon', 'public.support_reports', 'select') or has_table_privilege('authenticated', 'public.support_report_events', 'select') as client_access,
+        (select count(*)::int from pg_policies where schemaname = 'public' and tablename in ('support_reports', 'support_report_events')) as policies,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'support_reports_category_for_role')) as categories,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'support_reports_message_check')) as message,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'support_reports_status_check')) as status
+    `);
+    assert.equal(b18.rows[0].rls, true, 'support_reports RLS must be enabled');
+    assert.equal(b18.rows[0].events_rls, true, 'support_report_events RLS must be enabled');
+    assert.equal(b18.rows[0].client_access, false, 'clients must not read or write support reports directly');
+    assert.equal(b18.rows[0].policies, 0, 'no client policies: the API is the only reader/writer');
+    const { CATEGORIES } = require('../support');
+    for (const category of [...Object.keys(CATEGORIES.customer), ...Object.keys(CATEGORIES.driver)]) assert.match(b18.rows[0].categories, new RegExp(`'${category}'`));
+    assert.match(b18.rows[0].message, /2000/);
+    assert.match(b18.rows[0].status, /'open'.*'in_review'.*'resolved'/);
     assert.ok(hardenedPolicies.rowCount > 0);
     for (const policy of hardenedPolicies.rows) {
       assert.match(policy.expression, /is_active_account/i, `${policy.tablename}.${policy.policyname} must reject inactive accounts`);

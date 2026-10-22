@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { AdminProfile, DriverDecision, DriverDetail, DriverSummary, QueueFilter, ReviewDocument } from './types'
+import type {
+  AdminProfile, DriverDecision, DriverDetail, DriverSummary, QueueFilter, ReportCategory, ReportCounts, ReportDetail, ReportFilter, ReportStatus, ReportSummary, ReviewDocument,
+} from './types'
 
 let client: SupabaseClient | null = null
 
@@ -70,4 +72,10 @@ export const adminApi = {
     call<ReviewDocument>(`/admin/documents/${encodeURIComponent(documentId)}/review`, { method: 'POST', body: JSON.stringify({ decision, notes }) }),
   decide: (driverId: string, decision: DriverDecision, notes?: string) =>
     call(`/admin/drivers/${encodeURIComponent(driverId)}/decision`, { method: 'POST', body: JSON.stringify({ decision, notes }) }),
+  // B18 reports inbox
+  listReports: (filter: ReportFilter, category: ReportCategory | '' = '') =>
+    call<{ reports: ReportSummary[]; counts: ReportCounts }>(`/admin/reports?status=${encodeURIComponent(filter)}${category ? `&category=${encodeURIComponent(category)}` : ''}`),
+  getReport: (reportId: string) => call<ReportDetail>(`/admin/reports/${encodeURIComponent(reportId)}`),
+  updateReport: (reportId: string, change: { status?: ReportStatus; note?: string }) =>
+    call<ReportDetail>(`/admin/reports/${encodeURIComponent(reportId)}`, { method: 'PATCH', body: JSON.stringify(change) }),
 }

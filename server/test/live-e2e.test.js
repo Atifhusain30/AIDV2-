@@ -294,8 +294,13 @@ test('live Supabase customer → verified driver → document → completed book
     }
     assert.equal((await api(`/bookings/${secondBookingId}/status`, customer.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) })).status, 409, 'customer cannot cancel after arrival');
     assert.equal((await api(`/bookings/${secondBookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) })).status, 400, 'driver needs a reason');
-    const issue = await api(`/bookings/${secondBookingId}/issues`, customer.token, { method: 'POST', body: JSON.stringify({ category: 'other', details: 'E2E issue report' }) });
+    // B18: Report an issue on the job goes to support_reports (job participants only).
+    const issue = await api('/support/reports', customer.token, { method: 'POST', body: JSON.stringify({ category: 'other', bookingId: secondBookingId, message: 'E2E issue report' }) });
     assert.equal(issue.status, 201);
+    const issueReport = await issue.json();
+    assert.equal(issueReport.booking.id, secondBookingId);
+    const strangerReport = await api('/support/reports', otherCustomer.token, { method: 'POST', body: JSON.stringify({ category: 'safety', bookingId: secondBookingId, message: 'not my job' }) });
+    assert.equal(strangerReport.status, 404, "a non-participant can't attach someone else's job");
     const driverCancel = await api(`/bookings/${secondBookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled', reason: 'cannot_reach_customer' }) });
     assert.equal(driverCancel.status, 200);
     const cancelled = await (await api(`/bookings/${secondBookingId}`, customer.token)).json();
@@ -309,9 +314,41 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal((await api(`/bookings/${secondBookingId}/driver-location`, driver.token, { method: 'PATCH', body: JSON.stringify({ location: { lat: 32.79, lng: -96.81 } }) })).status, 404, 'location sharing stops');
     const cancelEvent = await pool.query("select metadata from public.booking_events where booking_id=$1 and to_status='cancelled' and event_type='status_changed'", [secondBookingId]);
     assert.deepEqual(cancelEvent.rows[0].metadata, { role: 'driver', reason: 'cannot_reach_customer' });
-    const issueEvent = await pool.query("select actor_id, metadata from public.booking_events where booking_id=$1 and event_type='issue_reported'", [secondBookingId]);
+    const issueEvent = await pool.query("select actor_id, from_status, metadata from public.booking_events where booking_id=$1 and event_type='issue_reported'", [secondBookingId]);
     assert.equal(issueEvent.rows[0].actor_id, customer.id);
-    assert.equal(issueEvent.rows[0].metadata.details, 'E2E issue report');
+    assert.deepEqual(issueEvent.rows[0].metadata, { role: 'customer', category: 'other', reportId: issueReport.id });
+    assert.equal(issueEvent.rows[0].from_status, 'arrived');
+
+    // ---- B18: help & support reports and the admin inbox, against the real database ----
+    const general = await api('/support/reports', driver.token, { method: 'POST', body: JSON.stringify({ category: 'app_problem', message: 'E2E map froze' }) });
+    assert.equal(general.status, 201);
+    const generalReport = await general.json();
+    assert.equal((await api('/support/reports', driver.token, { method: 'POST', body: JSON.stringify({ category: 'driver_behaviour', message: 'x' }) })).status, 400, 'customer-only category');
+    const customerReports = await (await api('/support/reports', customer.token)).json();
+    assert.deepEqual(customerReports.map((r) => r.id), [issueReport.id], 'people see only their own reports');
+    assert.deepEqual(await (await api('/support/reports', otherCustomer.token)).json(), []);
+    for (const token of [customer.token, driver.token]) assert.equal((await api('/admin/reports', token)).status, 403, 'apps cannot use the admin inbox');
+    const inbox = await (await api('/admin/reports?status=open', reviewer.token)).json();
+    assert.ok(inbox.reports.some((r) => r.id === issueReport.id) && inbox.reports.some((r) => r.id === generalReport.id));
+    assert.ok(inbox.counts.open >= 2);
+    const reportDetail = await (await api(`/admin/reports/${issueReport.id}`, reviewer.token)).json();
+    assert.equal(reportDetail.reporter.id, customer.id);
+    assert.equal(reportDetail.booking.customer.id, customer.id);
+    assert.equal(reportDetail.booking.driver.id, driver.id);
+    assert.equal(reportDetail.booking.statusWhenReported, 'arrived');
+    const review = await api(`/admin/reports/${issueReport.id}`, reviewer.token, { method: 'PATCH', body: JSON.stringify({ status: 'in_review', note: 'E2E internal note' }) });
+    assert.equal(review.status, 200);
+    const resolved = await api(`/admin/reports/${issueReport.id}`, reviewer.token, { method: 'PATCH', body: JSON.stringify({ status: 'resolved' }) });
+    assert.equal(resolved.status, 200);
+    const resolvedBody = await resolved.json();
+    assert.equal(resolvedBody.status, 'resolved');
+    assert.equal(resolvedBody.resolvedBy.id, reviewer.id);
+    assert.deepEqual(resolvedBody.events.map((e) => e.action).sort(), ['note_added', 'status_changed', 'status_changed']);
+    assert.equal((await api(`/admin/reports/${issueReport.id}`, reviewer.token, { method: 'PATCH', body: JSON.stringify({ status: 'open' }) })).status, 409, 'resolved → open is not allowed');
+    const seenByCustomer = (await (await api('/support/reports', customer.token)).json())[0];
+    assert.equal(seenByCustomer.status, 'resolved');
+    assert.ok(seenByCustomer.resolvedAt);
+    assert.equal(JSON.stringify(seenByCustomer).includes('E2E internal note'), false, 'internal notes never reach the reporter');
 
     // ---- E4 against the real database ----
     const jump = (address) => JSON.stringify({ serviceType: 'battery_jump', location: { address, lat: 32.7767, lng: -96.797 } });
@@ -410,6 +447,8 @@ test('live Supabase customer → verified driver → document → completed book
       const { data: removed } = await storageAdmin.storage.from('driver-documents').remove(stored.rows.map((row) => row.storage_path));
       assert.equal(removed?.length, stored.rows.length, 'every uploaded test document must be removed from storage');
     }
+    // Reports outlive a deleted account (reporter set null), so remove the test ones explicitly.
+    await pool.query('delete from public.support_reports where reporter_id = any($1::uuid[])', [createdIds]).catch(() => {});
     if (bookingId) await pool.query('delete from public.bookings where id=$1', [bookingId]).catch(() => {});
     if (secondBookingId) await pool.query('delete from public.bookings where id=$1', [secondBookingId]).catch(() => {});
     if (farBookingId) await pool.query('delete from public.bookings where id=$1', [farBookingId]).catch(() => {});

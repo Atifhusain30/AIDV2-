@@ -1,11 +1,12 @@
 /**
  * Bottom sheets shared by the driver job screen and customer tracking screen:
- * a confirm step (with optional reason picker) and an issue report.
+ * a confirm step (with optional reason picker) and an issue report (B18 report form, job fixed).
  */
 
 import { useState, type ReactNode } from 'react'
 import { AlertCircle, Check } from 'lucide-react'
-import { apiService } from '../../services/api'
+import ReportProblemForm from '../support/ReportProblemForm'
+import type { SupportAudience } from '../../lib/support'
 import type { Choice } from '../../lib/jobLifecycle'
 
 function Sheet({ labelledBy, onClose, children }: { labelledBy: string; onClose: () => void; children: ReactNode }) {
@@ -75,51 +76,11 @@ export function ConfirmSheet({ id, title, text, confirmLabel, busyLabel, keepLab
   )
 }
 
-export function ReportIssueSheet({ bookingId, choices, onClose }: { bookingId: string; choices: Choice[]; onClose: () => void }) {
-  const [category, setCategory] = useState<string | null>(null)
-  const [details, setDetails] = useState('')
-  const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')
-  const [error, setError] = useState<string | null>(null)
-  const needsDetails = category === 'other' && !details.trim()
-
-  const submit = async () => {
-    if (!category) return
-    setState('sending')
-    setError(null)
-    const result = await apiService.reportBookingIssue(bookingId, category, details.trim() || undefined)
-    if (!result.success) {
-      setState('idle')
-      setError(result.error || 'Unable to send your report.')
-      return
-    }
-    setState('sent')
-  }
-
+/** "Report an issue" on an active job — the same report form and table as Help & Support (B18). */
+export function ReportIssueSheet({ bookingId, audience, onClose }: { bookingId: string; audience: SupportAudience; onClose: () => void }) {
   return (
-    <Sheet labelledBy="report-issue-title" onClose={state === 'sending' ? () => undefined : onClose}>
-      <h2 id="report-issue-title" className="job-confirm__title">{state === 'sent' ? 'Report saved' : 'Report an issue'}</h2>
-      {state === 'sent' ? (
-        <>
-          <p className="job-confirm__text">Your report is saved to this job's record.{category === 'safety' ? ' If anyone is in danger, call 911 now.' : ''}</p>
-          <div className="job-confirm__actions"><button type="button" className="job-keep" onClick={onClose}>Done</button></div>
-        </>
-      ) : (
-        <>
-          <p className="job-confirm__text">Not for emergencies: reports are saved to this job and reviewed later — no one is alerted right away. If anyone is in danger, call 911 first.</p>
-          <ChoiceList name="Issue type" choices={choices} value={category} onChange={setCategory} />
-          <label className="job-issue-details">
-            <span>Details{category === 'other' ? '' : ' (optional)'}</span>
-            <textarea value={details} maxLength={1000} rows={3} onChange={(event) => setDetails(event.target.value)} placeholder="What happened?" />
-          </label>
-          {error && <p className="job-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
-          <div className="job-confirm__actions">
-            <button type="button" className="aid-primary-button" disabled={!category || needsDetails || state === 'sending'} onClick={() => void submit()}>
-              {state === 'sending' ? 'Sending…' : 'Send report'}
-            </button>
-            <button type="button" className="job-keep" disabled={state === 'sending'} onClick={onClose}>Close</button>
-          </div>
-        </>
-      )}
+    <Sheet labelledBy="report-issue-title" onClose={onClose}>
+      <ReportProblemForm audience={audience} bookingId={bookingId} titleId="report-issue-title" onClose={onClose} />
     </Sheet>
   )
 }

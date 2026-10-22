@@ -17,6 +17,7 @@ test('signed-in users cannot escalate privileges or tamper with server-owned dat
   const email = `rls-${randomUUID()}@example.com`;
   const password = `Aid-${randomUUID()}-aA1!`;
   let userId;
+  const reportIds = [];
   try {
     const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { role: 'driver', first_name: 'Rls', last_name: 'Probe' } });
     if (error) throw error;
@@ -47,12 +48,28 @@ test('signed-in users cannot escalate privileges or tamper with server-owned dat
     assert.ok(fakeRating.error, 'clients must not insert ratings directly');
     const readRatings = await client.from('ratings').select('comment');
     assert.ok(readRatings.error || readRatings.data.length === 0, 'rating comments must not be readable');
+    // B18: support reports go through the API only — no direct writes, and nobody reads anyone's reports
+    // (including their own: the API serves those, without the admin trail).
+    const otherReport = await pool.query("insert into public.support_reports (reporter_id, reporter_role, category, message) values (null, 'customer', 'safety', 'RLS probe: someone else''s report') returning id");
+    reportIds.push(otherReport.rows[0].id);
+    const ownReport = await pool.query("insert into public.support_reports (reporter_id, reporter_role, category, message) values ($1, 'driver', 'app_problem', 'RLS probe: own report') returning id", [userId]);
+    reportIds.push(ownReport.rows[0].id);
+    const readReports = await client.from('support_reports').select('id, message');
+    assert.ok(readReports.error || readReports.data.length === 0, 'support reports must not be readable directly');
+    const fakeReport = await client.from('support_reports').insert({ reporter_id: userId, reporter_role: 'driver', category: 'other', message: 'direct' });
+    assert.ok(fakeReport.error, 'clients must not insert support reports directly');
+    const selfResolve = await client.from('support_reports').update({ status: 'resolved' }).eq('id', ownReport.rows[0].id).select();
+    assert.ok(selfResolve.error || selfResolve.data.length === 0, 'clients must not change report status');
+    const readTrail = await client.from('support_report_events').select('note');
+    assert.ok(readTrail.error || readTrail.data.length === 0, 'internal notes must not be readable');
+    assert.equal((await pool.query('select status from public.support_reports where id=$1', [ownReport.rows[0].id])).rows[0].status, 'open');
     const audit = await client.from('driver_verification_events').select('*');
     assert.ok(audit.error || audit.data.length === 0, 'audit log must not be readable');
 
     const row = await pool.query('select p.role, p.status, p.session_version, dp.verification_status from public.profiles p join public.driver_profiles dp on dp.profile_id=p.id where p.id=$1', [userId]);
     assert.deepEqual(row.rows[0], { role: 'driver', status: 'active', session_version: 1, verification_status: 'pending' });
   } finally {
+    if (reportIds.length) await pool.query('delete from public.support_reports where id = any($1::uuid[])', [reportIds]).catch(() => {});
     if (userId) await admin.auth.admin.deleteUser(userId).catch(() => {});
     await pool.end();
   }

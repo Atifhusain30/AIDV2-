@@ -4,6 +4,7 @@ const {
   ACTIVE_STATUSES: ACTIVE, EXPIRABLE, STALE_RELEASABLE, DEFAULT_REQUEST_EXPIRY_MINUTES, DEFAULT_STALE_JOB_MINUTES,
 } = require('./lifecycle');
 const { publicRating, RATING_WINDOW_DAYS, LOW_RATING_MAX_STARS } = require('./ratings');
+const { categoryLabel, ADMIN_CATEGORY_LABELS } = require('./support');
 
 // Keep SQL `date` values as YYYY-MM-DD strings; JS Date conversion shifts them by timezone.
 types.setTypeParser(1082, (value) => value);
@@ -162,6 +163,45 @@ function mapBooking(row) {
     booking.customerPhone = row.customer_phone || '';
   }
   return booking;
+}
+
+const iso = (value) => (value ? new Date(value).toISOString() : null);
+
+// B18: a report as its sender sees it (never the admin trail).
+function mapSupportReport(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    category: row.category,
+    categoryLabel: categoryLabel(row.reporter_role, row.category),
+    message: row.message || '',
+    status: row.status,
+    booking: row.booking_id ? { id: row.booking_id, serviceName: row.service_name || 'Job' } : null,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    resolvedAt: iso(row.resolved_at),
+  };
+}
+
+// B18: a report in the admin inbox.
+function mapAdminSupportReport(row) {
+  return {
+    id: row.id,
+    reporterRole: row.reporter_role,
+    reporterName: row.reporter_id ? `${row.reporter_first_name || ''} ${row.reporter_last_name || ''}`.trim() || 'Unnamed' : 'Deleted account',
+    reporterEmail: row.reporter_email || '',
+    category: row.category,
+    categoryLabel: ADMIN_CATEGORY_LABELS[row.category] || row.category,
+    isSafety: row.category === 'safety',
+    message: row.message || '',
+    status: row.status,
+    booking: row.booking_id ? { id: row.booking_id, serviceName: row.service_name || 'Job', status: row.current_booking_status || null } : null,
+    noteCount: row.note_count ?? undefined,
+    fromJobIssue: row.source_event_id != null,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    resolvedAt: iso(row.resolved_at),
+  };
 }
 
 // Contact details and live location are shared only while a job is in progress.
@@ -762,16 +802,6 @@ class PostgresRepository {
     return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, role) : null;
   }
 
-  async reportBookingIssue(bookingId, actorId, { role, category, details, status }) {
-    const result = await this.pool.query(`
-      insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
-      values ($1, $2, 'issue_reported', $3, $3, $4::jsonb)
-      returning id, created_at
-    `, [bookingId, actorId, status, JSON.stringify({ role, category, details: details || null })]);
-    const row = result.rows[0];
-    return { id: String(row.id), bookingId, category, status, createdAt: new Date(row.created_at).toISOString() };
-  }
-
   /**
    * B15: store a rating. The insert itself re-checks the rules the API already applied — completed
    * booking, rater and ratee are its customer and driver, inside the window — so a rating can never
@@ -852,6 +882,164 @@ class PostgresRepository {
     };
   }
 
+  // ---- B18: support reports (rules in support.js) ----
+
+  /** Reports this person sent in the last `minutes` (rate limit). */
+  async countRecentSupportReports(reporterId, minutes = 60) {
+    const result = await this.pool.query(
+      'select count(*)::int as n from public.support_reports where reporter_id=$1 and created_at > now() - make_interval(mins => $2::int)',
+      [reporterId, minutes],
+    );
+    return result.rows[0].n;
+  }
+
+  /**
+   * Save a report. A job-linked one also leaves an 'issue_reported' event on the job's audit trail
+   * (metadata.reportId points here; the message itself is only stored on the report).
+   */
+  async createSupportReport({ reporterId, role, bookingId = null, bookingStatus = null, category, message }) {
+    const result = await this.pool.query(`
+      with ins as (
+        insert into public.support_reports (reporter_id, reporter_role, booking_id, booking_status, category, message)
+        values ($1, $2, $3, $4, $5, $6)
+        returning *
+      ), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select booking_id, reporter_id, 'issue_reported', booking_status, booking_status,
+          jsonb_build_object('role', reporter_role, 'category', category, 'reportId', id)
+        from ins where booking_id is not null
+      )
+      select ins.*, b.service_name from ins left join public.bookings b on b.id = ins.booking_id
+    `, [reporterId, role, bookingId, bookingStatus, category, message]);
+    return mapSupportReport(result.rows[0]);
+  }
+
+  /** The signed-in person's own reports, newest first (no admin notes). */
+  async listMySupportReports(reporterId) {
+    const result = await this.pool.query(`
+      select r.*, b.service_name from public.support_reports r
+      left join public.bookings b on b.id = r.booking_id
+      where r.reporter_id = $1 order by r.created_at desc limit 50
+    `, [reporterId]);
+    return result.rows.map(mapSupportReport);
+  }
+
+  /** Admin inbox: reports in `statuses` (optionally one category), plus counts per status. */
+  async listSupportReportsForAdmin({ statuses, category = null }) {
+    const [list, counts] = await Promise.all([
+      this.pool.query(`
+        select r.*, b.service_name, b.status as current_booking_status,
+          p.first_name as reporter_first_name, p.last_name as reporter_last_name, u.email as reporter_email,
+          (select count(*)::int from public.support_report_events e where e.report_id = r.id and e.action = 'note_added') as note_count
+        from public.support_reports r
+        left join public.bookings b on b.id = r.booking_id
+        left join public.profiles p on p.id = r.reporter_id
+        left join auth.users u on u.id = r.reporter_id
+        where r.status = any($1::text[]) and ($2::text is null or r.category = $2)
+        order by (r.category = 'safety' and r.status <> 'resolved') desc, r.created_at desc
+        limit 200
+      `, [statuses, category]),
+      this.pool.query(`
+        select status, count(*)::int as n, count(*) filter (where category = 'safety')::int as safety
+        from public.support_reports group by status
+      `),
+    ]);
+    const byStatus = { open: 0, in_review: 0, resolved: 0, safetyActive: 0 };
+    for (const row of counts.rows) {
+      byStatus[row.status] = row.n;
+      if (row.status !== 'resolved') byStatus.safetyActive += row.safety;
+    }
+    return { reports: list.rows.map(mapAdminSupportReport), counts: byStatus };
+  }
+
+  async getSupportReportStatus(reportId) {
+    const result = await this.pool.query('select status from public.support_reports where id=$1', [reportId]);
+    return result.rows[0]?.status ?? null;
+  }
+
+  /** Admin detail: the report, who sent it, the linked job with both parties, and the triage trail. */
+  async getSupportReportForAdmin(reportId) {
+    const result = await this.pool.query(`
+      select r.*, b.service_name, b.status as current_booking_status,
+        p.first_name as reporter_first_name, p.last_name as reporter_last_name, p.phone as reporter_phone, u.email as reporter_email,
+        rb.first_name as resolver_first_name, rb.last_name as resolver_last_name,
+        (select count(*)::int from public.support_reports o where o.reporter_id = r.reporter_id and o.id <> r.id) as other_reports
+      from public.support_reports r
+      left join public.bookings b on b.id = r.booking_id
+      left join public.profiles p on p.id = r.reporter_id
+      left join auth.users u on u.id = r.reporter_id
+      left join public.profiles rb on rb.id = r.resolved_by
+      where r.id = $1
+    `, [reportId]);
+    const row = result.rows[0];
+    if (!row) return null;
+    const [events, booking] = await Promise.all([
+      this.pool.query(`
+        select e.*, a.first_name, a.last_name, a.role from public.support_report_events e
+        left join public.profiles a on a.id = e.actor_id
+        where e.report_id = $1 order by e.created_at desc, e.id desc
+      `, [reportId]),
+      row.booking_id ? this.pool.query(`
+        select b.id, b.service_name, b.status, b.location_address, b.dropoff_address, b.estimated_price_cents, b.final_price_cents,
+          b.created_at, b.accepted_at, b.completed_at, b.cancelled_at, b.expired_at,
+          b.customer_id, c.first_name as c_first, c.last_name as c_last, c.phone as c_phone, cu.email as c_email,
+          b.driver_id, d.first_name as d_first, d.last_name as d_last, d.phone as d_phone, du.email as d_email
+        from public.bookings b
+        left join public.profiles c on c.id = b.customer_id left join auth.users cu on cu.id = b.customer_id
+        left join public.profiles d on d.id = b.driver_id left join auth.users du on du.id = b.driver_id
+        where b.id = $1
+      `, [row.booking_id]) : Promise.resolve({ rows: [] }),
+    ]);
+    const job = booking.rows[0];
+    const party = (id, first, last, email, phone) => (id ? { id, name: `${first || ''} ${last || ''}`.trim() || 'Unnamed', email: email || '', phone: phone || '' } : null);
+    return {
+      ...mapAdminSupportReport(row),
+      reporter: row.reporter_id ? { ...party(row.reporter_id, row.reporter_first_name, row.reporter_last_name, row.reporter_email, row.reporter_phone), role: row.reporter_role, otherReports: row.other_reports } : null,
+      resolvedBy: row.resolved_by ? { id: row.resolved_by, name: `${row.resolver_first_name || ''} ${row.resolver_last_name || ''}`.trim() } : null,
+      booking: job ? {
+        id: job.id, serviceName: job.service_name, status: job.status, statusWhenReported: row.booking_status || null,
+        address: job.location_address, dropoffAddress: job.dropoff_address || null,
+        price: dollars(job.final_price_cents ?? job.estimated_price_cents) ?? null,
+        createdAt: job.created_at, acceptedAt: job.accepted_at || null, completedAt: job.completed_at || null,
+        cancelledAt: job.cancelled_at || null, expiredAt: job.expired_at || null,
+        customer: party(job.customer_id, job.c_first, job.c_last, job.c_email, job.c_phone),
+        driver: party(job.driver_id, job.d_first, job.d_last, job.d_email, job.d_phone),
+      } : null,
+      events: events.rows.map((event) => ({
+        id: String(event.id), action: event.action, fromStatus: event.from_status || null, toStatus: event.to_status || null, note: event.note || null,
+        actor: event.actor_id ? { id: event.actor_id, name: `${event.first_name || ''} ${event.last_name || ''}`.trim(), role: event.role } : null,
+        createdAt: new Date(event.created_at).toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Admin status change and/or internal note, in one statement. The status change is a compare-and-set
+   * on `fromStatus` (the status the API validated), so a concurrent change returns null instead of
+   * skipping a rule. A note alone always applies.
+   */
+  async updateSupportReport(reportId, adminId, { fromStatus, status = null, note = null }) {
+    const result = await this.pool.query(`
+      with upd as (
+        update public.support_reports r set
+          status = coalesce($3::text, r.status),
+          resolved_at = case when $3::text = 'resolved' then now() when $3::text is null then r.resolved_at else null end,
+          resolved_by = case when $3::text = 'resolved' then $2::uuid when $3::text is null then r.resolved_by else null end,
+          updated_at = now()
+        where r.id = $1::uuid and r.status = $4::text
+        returning r.id
+      ), st as (
+        insert into public.support_report_events (report_id, actor_id, action, from_status, to_status)
+        select id, $2::uuid, 'status_changed', $4::text, $3::text from upd where $3::text is not null
+      ), nt as (
+        insert into public.support_report_events (report_id, actor_id, action, note)
+        select id, $2::uuid, 'note_added', $5::text from upd where $5::text is not null
+      )
+      select id from upd
+    `, [reportId, adminId, status, fromStatus, note]);
+    return result.rows[0] ? this.getSupportReportForAdmin(result.rows[0].id) : null;
+  }
+
   async updateDriverOnlineStatus(driverId, isOnline) {
     // Going offline forgets the driver's position: it's only kept while they're available for work.
     const result = await this.pool.query(`
@@ -904,5 +1092,5 @@ class PostgresRepository {
 
 module.exports = {
   PostgresRepository, ActiveBookingExistsError, RatingExistsError, RATING_UNIQUE, ONE_ACTIVE_INDEX, ONE_JOB_PER_DRIVER_INDEX,
-  mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, ACTIVE_STATUSES, CONTACT_STATUSES,
+  mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, mapSupportReport, mapAdminSupportReport, ACTIVE_STATUSES, CONTACT_STATUSES,
 };

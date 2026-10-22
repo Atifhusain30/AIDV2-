@@ -6,7 +6,12 @@ const {
   todayIso, parseIsoDate, cleanNotes, verificationReadiness, credentialsCurrent,
 } = require('./verification');
 const { quoteService, PricingError, TOWING } = require('./pricing');
-const { checkRequest, checkTransition, REPORTABLE, ISSUE_CATEGORIES, DEFAULT_REQUEST_EXPIRY_MINUTES } = require('./lifecycle');
+const { checkRequest, checkTransition, DEFAULT_REQUEST_EXPIRY_MINUTES } = require('./lifecycle');
+const {
+  MESSAGE_MAX, REPORTS_PER_HOUR, STATUS_FILTERS, ALL_CATEGORIES, categoriesFor, cleanReport, checkAdminUpdate, supportContactFromEnv,
+} = require('./support');
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const {
   cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE, SERVICE_EQUIPMENT, EQUIPMENT_MISMATCH_CODE,
   equipmentCapability, canPerformService,
@@ -77,7 +82,7 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS }) {
+function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv() }) {
   const app = express();
   const requestExpiryMinutes = repository.requestExpiryMinutes || DEFAULT_REQUEST_EXPIRY_MINUTES;
   // E4: end stale work for this caller before answering (the interval sweep in index.js does the rest).
@@ -317,21 +322,42 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  // Either party can flag a problem on an active job — the only option once service has started.
-  app.post('/api/bookings/:bookingId/issues', authenticate, async (req, res, next) => {
+  // ---- B18: help & support reports (rules in support.js) ----
+  // Public: the support contact from server config (null when not set — the apps then hide it) and the
+  // report categories for each role.
+  app.get('/api/support/config', (_req, res) => res.json({
+    contact: supportContact,
+    categories: { customer: categoriesFor('customer'), driver: categoriesFor('driver') },
+    messageMaxLength: MESSAGE_MAX,
+    reportsPerHour: REPORTS_PER_HOUR,
+  }));
+  // A customer or driver reports a problem — general, or about one of their own jobs (any status:
+  // during the job from "Report an issue", or afterwards from Help & Support).
+  app.post('/api/support/reports', authenticate, async (req, res, next) => {
     try {
       const role = req.auth.profile.role;
-      if (role !== 'driver' && role !== 'customer') return res.status(403).json({ error: 'Only the customer or the assigned driver can report an issue' });
-      if (role === 'driver' && req.auth.profile.verificationStatus !== 'verified') return res.status(403).json({ error: 'Verified driver account required' });
-      const category = req.body.category;
-      if (typeof category !== 'string' || !Object.hasOwn(ISSUE_CATEGORIES, category)) return res.status(400).json({ error: 'Choose what the issue is about' });
-      const details = typeof req.body.details === 'string' ? req.body.details.trim().slice(0, 1000) : '';
-      if (category === 'other' && !details) return res.status(400).json({ error: 'Describe the issue' });
-      const booking = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
-      if (!booking) return res.status(404).json({ error: 'Booking not found' });
-      if (!REPORTABLE.includes(booking.status)) return res.status(409).json({ error: 'Issues can be reported only on an active job' });
-      const issue = await repository.reportBookingIssue(booking.id, req.auth.identity.id, { role, category, details, status: booking.status });
-      res.status(201).json(issue);
+      const userId = req.auth.identity.id;
+      const cleaned = cleanReport(req.body, role);
+      if (!cleaned.ok) return res.status(cleaned.status).json({ error: cleaned.error, ...(cleaned.field ? { field: cleaned.field } : {}) });
+      const { category, message, bookingId } = cleaned.report;
+      let bookingStatus = null;
+      if (bookingId) {
+        // Participant check: only the job's own customer or driver can attach it (others get 404, learning nothing).
+        const booking = UUID.test(bookingId) ? await repository.getBooking(bookingId, userId, role) : null;
+        if (!booking) return res.status(404).json({ error: 'That job could not be found on your account', field: 'bookingId' });
+        bookingStatus = booking.status;
+      }
+      if (await repository.countRecentSupportReports(userId, 60) >= REPORTS_PER_HOUR) {
+        return res.status(429).json({ error: `You've sent ${REPORTS_PER_HOUR} reports in the last hour. Please wait a little before sending another. If anyone is in danger, call 911.`, code: 'report_rate_limited' });
+      }
+      const report = await repository.createSupportReport({ reporterId: userId, role, bookingId, bookingStatus, category, message });
+      res.status(201).json(report);
+    } catch (error) { next(error); }
+  });
+  app.get('/api/support/reports', authenticate, async (req, res, next) => {
+    try {
+      if (req.auth.profile.role !== 'customer' && req.auth.profile.role !== 'driver') return res.json([]);
+      res.json(await repository.listMySupportReports(req.auth.identity.id));
     } catch (error) { next(error); }
   });
 
@@ -619,6 +645,35 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       });
       if (!verification) return res.status(409).json({ error: `A driver who is ${detail.driver.verificationStatus.replace('_', ' ')} cannot be moved to ${rule.to}` });
       res.json(verification);
+    } catch (error) { next(error); }
+  });
+
+  // ---- B18: admin reports inbox ----
+  app.get('/api/admin/reports', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const filter = req.query.status ? String(req.query.status) : 'active';
+      if (!Object.hasOwn(STATUS_FILTERS, filter)) return res.status(400).json({ error: 'Unsupported status filter' });
+      const category = req.query.category ? String(req.query.category) : null;
+      if (category && !ALL_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Unsupported category' });
+      res.json(await repository.listSupportReportsForAdmin({ statuses: STATUS_FILTERS[filter], category }));
+    } catch (error) { next(error); }
+  });
+  app.get('/api/admin/reports/:reportId', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const report = UUID.test(req.params.reportId) ? await repository.getSupportReportForAdmin(req.params.reportId) : null;
+      if (!report) return res.status(404).json({ error: 'Report not found' });
+      res.json(report);
+    } catch (error) { next(error); }
+  });
+  app.patch('/api/admin/reports/:reportId', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const current = UUID.test(req.params.reportId) ? await repository.getSupportReportStatus(req.params.reportId) : null;
+      if (!current) return res.status(404).json({ error: 'Report not found' });
+      const verdict = checkAdminUpdate(req.body, current);
+      if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error, currentStatus: current });
+      const updated = await repository.updateSupportReport(req.params.reportId, req.auth.identity.id, { fromStatus: current, status: verdict.status, note: verdict.note });
+      if (!updated) return res.status(409).json({ error: 'This report was just updated by someone else. Reload to see the latest.' });
+      res.json(updated);
     } catch (error) { next(error); }
   });
 

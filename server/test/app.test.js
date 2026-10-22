@@ -134,11 +134,6 @@ function buildHarness(stripe = null, accountAdmin = null) {
       return updated;
     },
     events: [],
-    async reportBookingIssue(bookingId, actorId, issue) {
-      this.issues.push({ bookingId, actorId, ...issue });
-      return { id: String(this.issues.length), bookingId, category: issue.category, status: issue.status };
-    },
-    issues: [],
     async setPaymentIntent(bookingId, customerId, paymentIntentId) {
       const booking = bookings.get(bookingId);
       if (!booking || booking.customerId !== customerId) return null;
@@ -677,20 +672,7 @@ test('a concurrent change turns into a 409 with the latest booking instead of sk
   assert.equal(response.body.booking.cancelledBy, 'customer');
 });
 
-test('either party can report an issue on an active job, including after service starts', async () => {
-  const { app, bookings, repository } = buildHarness();
-  bookings.set('job-1', job('in_progress'));
-  const driver = await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer driverToken').send({ category: 'vehicle_damage', details: ' Bumper was already cracked ' });
-  assert.equal(driver.status, 201);
-  assert.deepEqual(repository.issues[0], { bookingId: 'job-1', actorId: 'driver-1', role: 'driver', category: 'vehicle_damage', details: 'Bumper was already cracked', status: 'in_progress' });
-  const customer = await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer customerToken').send({ category: 'safety' });
-  assert.equal(customer.status, 201);
-  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer customerToken').send({ category: 'nope' })).status, 400);
-  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer customerToken').send({ category: 'other' })).status, 400, 'other needs details');
-  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer otherCustomerToken').send({ category: 'safety' })).status, 404);
-  bookings.set('job-1', job('completed'));
-  assert.equal((await request(app).post('/api/bookings/job-1/issues').set('Authorization', 'Bearer driverToken').send({ category: 'safety' })).status, 409);
-});
+// Job issue reports (B10) now go through POST /api/support/reports with a bookingId — see support.test.js.
 
 // D5 follow-up: a driver only sees and can accept work their equipment can perform.
 function seedEquipmentJobs(bookings) {

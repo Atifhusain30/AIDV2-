@@ -73,3 +73,43 @@ export interface DriverDetail {
   events: ReviewEvent[]
   readiness: Readiness
 }
+
+// ---- B18: support reports inbox ----
+export type ReportStatus = 'open' | 'in_review' | 'resolved'
+export type ReportFilter = 'active' | ReportStatus | 'all'
+export type ReportCategory = 'driver_behaviour' | 'customer_behaviour' | 'vehicle_damage' | 'pricing' | 'payment' | 'service_problem' | 'app_problem' | 'safety' | 'other'
+
+export interface ReportSummary {
+  id: string
+  reporterRole: 'customer' | 'driver'
+  reporterName: string
+  reporterEmail: string
+  category: ReportCategory
+  categoryLabel: string
+  isSafety: boolean
+  message: string
+  status: ReportStatus
+  booking: { id: string; serviceName: string; status: string | null } | null
+  noteCount?: number
+  /** Copied from a B10 job issue report (booking_events) by the migration. */
+  fromJobIssue: boolean
+  createdAt: string
+  updatedAt: string | null
+  resolvedAt: string | null
+}
+
+export interface ReportCounts { open: number; in_review: number; resolved: number; safetyActive: number }
+
+export interface ReportParty { id: string; name: string; email: string; phone: string }
+
+export interface ReportDetail extends Omit<ReportSummary, 'booking'> {
+  reporter: (ReportParty & { role: 'customer' | 'driver'; otherReports: number }) | null
+  resolvedBy: { id: string; name: string } | null
+  booking: {
+    id: string; serviceName: string; status: string; statusWhenReported: string | null
+    address: string; dropoffAddress: string | null; price: number | null
+    createdAt: string; acceptedAt: string | null; completedAt: string | null; cancelledAt: string | null; expiredAt: string | null
+    customer: ReportParty | null; driver: ReportParty | null
+  } | null
+  events: { id: string; action: 'status_changed' | 'note_added'; fromStatus: ReportStatus | null; toStatus: ReportStatus | null; note: string | null; actor: { id: string; name: string; role: string } | null; createdAt: string }[]
+}

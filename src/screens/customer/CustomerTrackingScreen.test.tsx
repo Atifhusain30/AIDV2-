@@ -10,7 +10,7 @@ vi.mock('../../components/tracking/LiveDriverMap', () => ({
     <div data-testid="map" data-driver={props.driver ? `${props.driver.lat},${props.driver.lng}` : 'none'} data-stale={String(Boolean(props.stale))} />
   ),
 }))
-vi.mock('../../services/api', () => ({ apiService: { updateBookingStatus: vi.fn(), reportBookingIssue: vi.fn() } }))
+vi.mock('../../services/api', () => ({ apiService: { updateBookingStatus: vi.fn(), createSupportReport: vi.fn() } }))
 
 const NOW = Date.parse('2026-10-22T19:00:00Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -148,16 +148,18 @@ describe('customer live tracking', () => {
     expect(screen.getByRole('heading', { name: 'On the way to drop-off' })).toBeTruthy()
   })
 
-  it('reports a problem to the server', async () => {
-    vi.mocked(apiService.reportBookingIssue).mockResolvedValue({ success: true, data: { id: '1' } })
+  it('reports a problem on this job through the shared support report (B18)', async () => {
+    vi.mocked(apiService.createSupportReport).mockResolvedValue({ success: true, data: { id: '1', category: 'vehicle_damage', categoryLabel: 'Damage to my vehicle', message: '', status: 'open', booking: { id: 'booking-9', serviceName: 'Towing' }, createdAt: '2026-10-22T10:00:00Z', updatedAt: null, resolvedAt: null } })
     render(<CustomerTrackingScreen booking={job({ status: 'in_progress' })} />)
     fireEvent.click(screen.getByRole('button', { name: 'Report a problem' }))
-    const send = screen.getByRole('button', { name: 'Send report' }) as HTMLButtonElement
-    expect(send.disabled).toBe(true)
+    const send = screen.getByRole('button', { name: 'Send report' })
+    fireEvent.click(send)
+    expect(await screen.findByText('Choose what the problem is about.')).toBeTruthy()
+    expect(apiService.createSupportReport).not.toHaveBeenCalled()
     fireEvent.click(screen.getByLabelText('Damage to my vehicle'))
     fireEvent.click(send)
-    expect(await screen.findByRole('heading', { name: 'Report saved' })).toBeTruthy()
-    expect(apiService.reportBookingIssue).toHaveBeenCalledWith('booking-9', 'vehicle_damage', undefined)
+    expect(await screen.findByRole('heading', { name: 'Report sent' })).toBeTruthy()
+    expect(apiService.createSupportReport).toHaveBeenCalledWith({ category: 'vehicle_damage', message: undefined, bookingId: 'booking-9' })
   })
 
   it('offers Safety and Call 911 (confirm first) on the tracking screen', () => {

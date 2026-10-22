@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { AlertCircle, Car, Check, ChevronLeft, Flag, Info, Loader2, MapPin, Navigation, Phone, Star, StickyNote, Wrench, X } from 'lucide-react'
 import { useDriverStore } from '../../store/useDriverStore'
 import { formatPrice } from '../../lib/money'
-import { DRIVER_CANCEL_REASONS, DRIVER_CANCELLABLE, DRIVER_ISSUES, REPORTABLE, driverNextAction } from '../../lib/jobLifecycle'
+import { DRIVER_CANCEL_REASONS, DRIVER_CANCELLABLE, REPORTABLE, driverNextAction } from '../../lib/jobLifecycle'
 import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
 import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
@@ -190,7 +190,7 @@ export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreen
           onConfirm={(reason) => void move('cancelled', reason ?? undefined)} onClose={() => setSheet(null)}
         />
       )}
-      {sheet === 'report' && <ReportIssueSheet bookingId={job.id} choices={DRIVER_ISSUES} onClose={() => setSheet(null)} />}
+      {sheet === 'report' && <ReportIssueSheet bookingId={job.id} audience="driver" onClose={() => setSheet(null)} />}
     </div>
   )
 }

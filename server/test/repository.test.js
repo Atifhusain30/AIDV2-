@@ -203,15 +203,6 @@ test('bookings expose each lifecycle timestamp and who cancelled', async () => {
   assert.equal(booking.cancelledAt.toISOString(), '2026-01-01T00:25:00.000Z');
 });
 
-test('issue reports are stored on the booking audit trail', async () => {
-  let captured;
-  const repository = new PostgresRepository(poolWith(async (text, values) => { captured = { text, values }; return { rows: [{ id: 41, created_at: new Date('2026-01-01T01:00:00Z') }] }; }));
-  const issue = await repository.reportBookingIssue('booking-9', 'driver-1', { role: 'driver', category: 'safety', details: '', status: 'in_progress' });
-  assert.match(captured.text, /'issue_reported'/);
-  assert.deepEqual(captured.values, ['booking-9', 'driver-1', 'in_progress', JSON.stringify({ role: 'driver', category: 'safety', details: null })]);
-  assert.deepEqual(issue, { id: '41', bookingId: 'booking-9', category: 'safety', status: 'in_progress', createdAt: '2026-01-01T01:00:00.000Z' });
-});
-
 test('driver location updates record when the location was taken', async () => {
   const queries = [];
   const repository = new PostgresRepository(poolWith(async (text) => { queries.push(text); return { rows: [PARTY_ROW] }; }));

@@ -1311,3 +1311,46 @@ select:focus-visible {
 .rating-prompt small { display: block; color: var(--aid-muted); font-size: .8125rem; font-weight: 500; }
 .rating-done { display: flex; align-items: center; gap: 8px; color: var(--aid-muted); font-size: .875rem; }
 .rating-done svg { color: #f2c46d; fill: #f2c46d; }
+
+/* B18 Help & Support */
+.support-screen { padding-top: max(18px, env(safe-area-inset-top)); }
+.support-back { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: -6px; padding: 0 8px; border-radius: 12px; color: #b9b1c4; font-size: .875rem; font-weight: 600; }
+.support-screen .account-menu > a + a,
+.support-screen .account-menu > button + a { border-top: 1px solid rgba(255,255,255,.06); text-decoration: none; }
+.support-empty { padding: 16px; border: 1px dashed rgba(255,255,255,.1); border-radius: 16px; color: #a39bab; font-size: .8125rem; line-height: 1.45; }
+.support-retry { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 8px; padding: 0 14px; border-radius: 999px; background: rgba(139,92,246,.13); color: #c9b6ff; font-size: .8125rem; font-weight: 650; }
+.support-reports { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.support-report { padding: 13px 14px; border: 1px solid rgba(255,255,255,.075); border-radius: 16px; background: #110d16; }
+.support-report__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.support-report strong { font-size: .875rem; }
+.support-report small { display: block; margin-top: 4px; color: #948c9d; font-size: .75rem; }
+.support-report p { display: -webkit-box; margin-top: 8px; overflow: hidden; color: #d6cfdd; font-size: .8125rem; line-height: 1.45; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.support-status { flex: none; padding: 3px 9px; border-radius: 999px; font-size: .6875rem; font-weight: 700; }
+.support-status--open { background: rgba(139,92,246,.16); color: #c9b6ff; }
+.support-status--in_review { background: rgba(242,196,109,.13); color: #f2c46d; }
+.support-status--resolved { background: rgba(88,213,158,.12); color: #70dfa9; }
+.support-faq { overflow: hidden; border: 1px solid rgba(255,255,255,.075); border-radius: 16px; background: #110d16; }
+.support-faq details + details { border-top: 1px solid rgba(255,255,255,.06); }
+.support-faq summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 54px; padding: 12px 14px; color: var(--aid-ivory); font-size: .875rem; font-weight: 650; cursor: pointer; list-style: none; }
+.support-faq summary::-webkit-details-marker { display: none; }
+.support-faq summary svg { flex: none; color: #7d7486; transition: transform .2s; }
+.support-faq details[open] summary svg { transform: rotate(180deg); }
+.support-faq summary:focus-visible { outline: 2px solid var(--aid-signal-strong); outline-offset: -2px; }
+.support-faq details p { padding: 0 14px 14px; color: #b3abbd; font-size: .8125rem; line-height: 1.55; }
+.support-fieldset { margin: 0; padding: 0; border: 0; }
+.support-select { width: 100%; min-height: 48px; padding: 0 12px; border: 1px solid var(--aid-line); border-radius: 14px; background: #0d0a11; color: var(--aid-ivory); font-size: 1rem; }
+.support-count { justify-self: end; color: #7d7486; font-size: .75rem; }
+.support-field-error { display: block; margin-top: 6px; color: #ff9a91; font-size: .8125rem; }
+.support-error { margin-top: 12px; }
+.support-sent { display: grid; justify-items: center; text-align: center; padding-top: 6px; }
+.support-sent__icon { color: #70dfa9; }
+.support-sent .job-confirm__actions { width: 100%; }
+.job-issue-details textarea[aria-invalid='true'],
+.support-select[aria-invalid='true'] { border-color: rgba(255,107,95,.6); }
+.driver-help { min-height: 100dvh; background: var(--aid-ink); }
+.job-choice--safety { border-color: rgba(255,107,95,.22); }
+/* Choice and field labels inside sheets keep their own size (not the small account-sheet form label). */
+.account-sheet .job-choice span { display: inline; margin: 0; color: inherit; font-size: .9375rem; }
+.account-sheet .job-issue-details > span { margin: 0; color: #9a92a6; font-size: .8125rem; }
+.support-fieldset { margin-top: 18px; }
+.support-fieldset legend { margin: 0; padding: 0; }

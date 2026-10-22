@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import {
-  ArrowLeft, ArrowRight, Ban, CalendarClock, Check, ExternalLink, FileText, Inbox, LogOut,
+  ArrowLeft, ArrowRight, Ban, CalendarClock, Check, ExternalLink, FileText, Flag, Inbox, LogOut,
   Maximize2, RefreshCw, Search, ShieldCheck, UserCheck, Users, X,
 } from 'lucide-react'
 import { adminApi } from './api'
-import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverRatings, DriverSummary, QueueFilter, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
+import ReportsInbox from './Reports'
+import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverRatings, DriverSummary, QueueFilter, ReportCounts, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
 
 // ---------- Copy & rules ----------
 
@@ -164,7 +165,7 @@ function SignIn({ onSignedIn, initialError }: { onSignedIn: (admin: AdminProfile
         <div className="brand brand--dark"><span className="brand__mark">AID</span><span>Admin</span></div>
         <div>
           <h1>Sign in</h1>
-          <p className="muted">Review and approve AID drivers.</p>
+          <p className="muted">Review drivers and reports.</p>
         </div>
         <label className="field">Email<input name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
         <label className="field">Password<input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
@@ -599,6 +600,13 @@ function Dashboard({ admin, onSignOut }: { admin: AdminProfile; onSignOut: () =>
   const [search, setSearch] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [section, setSection] = useState<'drivers' | 'reports'>('drivers')
+  const [reportCounts, setReportCounts] = useState<ReportCounts | null>(null)
+
+  // B18: the Reports badge (open + in review) is shown before the inbox is opened.
+  useEffect(() => {
+    adminApi.listReports('active').then((result) => setReportCounts(result.counts)).catch(() => {})
+  }, [])
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -646,9 +654,15 @@ function Dashboard({ admin, onSignOut }: { admin: AdminProfile; onSignOut: () =>
     <div className="shell">
       <nav className="sidebar" aria-label="Admin">
         <div className="brand"><span className="brand__mark">AID</span><span>Admin</span></div>
-        <button type="button" className="nav-item is-active" aria-current="page" onClick={() => setSelected(null)}>
+        <button type="button" className={`nav-item${section === 'drivers' ? ' is-active' : ''}`} aria-current={section === 'drivers' ? 'page' : undefined} onClick={() => { setSection('drivers'); setSelected(null) }}>
           <ShieldCheck size={18} aria-hidden="true" />Driver verification
           {counts && counts.needs_review > 0 && <span className="nav-item__count">{counts.needs_review}</span>}
+        </button>
+        <button type="button" className={`nav-item${section === 'reports' ? ' is-active' : ''}`} aria-current={section === 'reports' ? 'page' : undefined} onClick={() => setSection('reports')}>
+          <Flag size={18} aria-hidden="true" />Reports
+          {reportCounts && reportCounts.open + reportCounts.in_review > 0 && (
+            <span className={`nav-item__count${reportCounts.safetyActive > 0 ? ' nav-item__count--safety' : ''}`} aria-label={`${reportCounts.open + reportCounts.in_review} need attention${reportCounts.safetyActive > 0 ? `, ${reportCounts.safetyActive} safety` : ''}`}>{reportCounts.open + reportCounts.in_review}</span>
+          )}
         </button>
         <div className="sidebar__footer">
           <span className="avatar avatar--sm" aria-hidden="true">{initials(admin)}</span>
@@ -658,7 +672,9 @@ function Dashboard({ admin, onSignOut }: { admin: AdminProfile; onSignOut: () =>
       </nav>
 
       <main className="content">
-        {selected ? (
+        {section === 'reports' ? (
+          <ReportsInbox notify={setToast} onCounts={setReportCounts} />
+        ) : selected ? (
           <DriverReview
             driverId={selected}
             nextDriverId={nextDriverId}

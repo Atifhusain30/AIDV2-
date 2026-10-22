@@ -2,6 +2,7 @@ import type { Booking, ServiceRequest, Location, ApiResponse, Service, ServiceTy
 import type { UserVehicle } from '../store/useAppStore'
 import { supabase, managedAuth } from '../auth/supabase'
 import type { PendingRating, RatingInput } from '../lib/ratings'
+import type { SupportConfig, SupportReport } from '../lib/support'
 
 function normalizeApiBaseUrl(value?: string): string {
   const base = (value || 'http://127.0.0.1:3001').replace(/\/$/, '')
@@ -197,8 +198,25 @@ export async function updateBookingStatus(bookingId: string, status: Booking['st
   return result.success && result.data ? { ...result, data: parseBooking(result.data) } : result
 }
 
-export async function reportBookingIssue(bookingId: string, category: string, details?: string): Promise<ApiResponse<{ id: string }>> {
-  return apiFetch(`/bookings/${bookingId}/issues`, { method: 'POST', body: JSON.stringify({ category, details }) })
+/** B18: support contact (null when not configured) and report limits. Public endpoint. */
+export async function getSupportConfig(): Promise<ApiResponse<SupportConfig>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/support/config`)
+    if (!response.ok) return { success: false, error: `Request failed (${response.status})` }
+    return { success: true, data: await response.json() as SupportConfig }
+  } catch {
+    return { success: false, error: 'Unable to reach AID. Check your connection and try again.' }
+  }
+}
+
+/** B18: report a problem — general, or about one of your own jobs (`bookingId`). Also used by "Report an issue" on a job. */
+export async function createSupportReport(input: { category: string; message?: string; bookingId?: string | null }): Promise<ApiResponse<SupportReport>> {
+  return apiFetch('/support/reports', { method: 'POST', body: JSON.stringify(input) })
+}
+
+/** B18: the signed-in person's own reports with their status (never the AID team's internal notes). */
+export async function listSupportReports(): Promise<ApiResponse<SupportReport[]>> {
+  return apiFetch('/support/reports')
 }
 
 /** B15: completed jobs the signed-in person can still rate, newest first. */
@@ -244,8 +262,8 @@ export function getAuthState() { return { isAuthenticated: false, user: null, to
 export const apiService = {
   customerLogin, customerRegister, driverLogin, driverRegister, logout, getAuthState,
   getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
-  listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, reportBookingIssue, getActiveBooking, getDriverActiveBooking,
-  listPendingRatings, submitRating,
+  listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
+  listPendingRatings, submitRating, getSupportConfig, createSupportReport, listSupportReports,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, updateDriverVehicle, createPaymentIntent,
 }
 

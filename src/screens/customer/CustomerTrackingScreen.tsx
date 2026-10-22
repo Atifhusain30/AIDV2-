@@ -9,7 +9,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { apiService } from '../../services/api'
 import { formatPrice } from '../../lib/money'
 import { arrivalClock, driverTracking, driverVehicleLabel, formatAge } from '../../lib/customerTracking'
-import { CUSTOMER_CANCEL_REASONS, CUSTOMER_CANCELLABLE, CUSTOMER_ISSUES, REPORTABLE, customerCancelText, customerNoCancelText } from '../../lib/jobLifecycle'
+import { CUSTOMER_CANCEL_REASONS, CUSTOMER_CANCELLABLE, REPORTABLE, customerCancelText, customerNoCancelText } from '../../lib/jobLifecycle'
 import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
 import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
@@ -199,7 +199,7 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
           onConfirm={(reason) => void cancel(reason)} onClose={() => setSheet(null)}
         />
       )}
-      {sheet === 'report' && <ReportIssueSheet bookingId={booking.id} choices={CUSTOMER_ISSUES} onClose={() => setSheet(null)} />}
+      {sheet === 'report' && <ReportIssueSheet bookingId={booking.id} audience="customer" onClose={() => setSheet(null)} />}
     </div>
   )
 }

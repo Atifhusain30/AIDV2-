@@ -4,6 +4,7 @@ import {
   Car,
   Check,
   ChevronRight,
+  LifeBuoy,
   LogOut,
   Mail,
   MapPin,
@@ -18,6 +19,7 @@ import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiService } from '../services/api'
 import { SafetyMenuItem } from '../components/safety/Safety'
+import HelpSupportScreen from './HelpSupportScreen'
 
 const emptyVehicle = { make: '', model: '', year: '', color: '', plate: '' }
 
@@ -39,6 +41,7 @@ export default function ProfileScreen() {
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false)
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
     if (!token) return
@@ -108,6 +111,8 @@ export default function ProfileScreen() {
     signOut()
   }
 
+  if (showHelp) return <HelpSupportScreen audience="customer" onBack={() => setShowHelp(false)} />
+
   return (
     <div className="account-screen">
       <header className="account-header"><p>Profile and preferences</p><h1>Account</h1></header>
@@ -143,9 +148,10 @@ export default function ProfileScreen() {
         )}
       </section>
 
-      <section className="account-section" aria-labelledby="support-title">
-        <div className="account-section__heading"><div><p>HELP & SAFETY</p><h2 id="support-title">Support</h2></div></div>
+      <section className="account-section" aria-labelledby="help-safety-title">
+        <div className="account-section__heading"><div><p>HELP & SAFETY</p><h2 id="help-safety-title">Help &amp; safety</h2></div></div>
         <div className="account-menu">
+          <button type="button" onClick={() => setShowHelp(true)}><span className="account-menu__icon"><LifeBuoy size={20} /></span><span><strong>Help &amp; Support</strong><small>Report a problem, your reports, common questions</small></span><ChevronRight size={18} /></button>
           <SafetyMenuItem audience="customer" />
           <button type="button" onClick={() => setActiveModal('locationConfirm')}><span className="account-menu__icon"><MapPin size={20} /></span><span><strong>Location preferences</strong><small>Confirm where assistance should arrive</small></span><ChevronRight size={18} /></button>
         </div>

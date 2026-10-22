@@ -46,7 +46,8 @@ function expiryConfigFromEnv(env = process.env) {
     sweepSeconds: intFromEnv(env.EXPIRY_SWEEP_SECONDS, DEFAULT_EXPIRY_SWEEP_SECONDS, 5, 3600),
   };
 }
-// Statuses where either party can file an issue report on the job.
+// Statuses in which the job screens offer "Report an issue" (the report itself goes to support_reports, B18;
+// any of your own jobs can also be reported later from Help & Support).
 const REPORTABLE = Object.freeze(['accepted', 'en_route', 'arrived', 'in_progress']);
 
 const DRIVER_CANCEL_REASONS = Object.freeze({
@@ -62,15 +63,6 @@ const CUSTOMER_CANCEL_REASONS = Object.freeze({
   found_other_help: 'Found other help',
   wait_too_long: 'Wait is too long',
   wrong_details: 'Wrong location or details',
-  other: 'Other',
-});
-const ISSUE_CATEGORIES = Object.freeze({
-  safety: 'Safety concern',
-  customer_issue: 'Problem with the customer',
-  driver_issue: 'Problem with the driver',
-  vehicle_damage: 'Vehicle damage',
-  cannot_complete: "Service can't be completed",
-  price: 'Price or payment question',
   other: 'Other',
 });
 
@@ -145,6 +137,6 @@ module.exports = {
   DRIVER_STEPS, CUSTOMER_CANCELLABLE, DRIVER_CANCELLABLE, REPORTABLE, TERMINAL,
   ACTIVE_STATUSES, EXPIRABLE, STALE_RELEASABLE, SYSTEM_END_REASONS, expiryConfigFromEnv,
   DEFAULT_REQUEST_EXPIRY_MINUTES, DEFAULT_STALE_JOB_MINUTES, DEFAULT_EXPIRY_SWEEP_SECONDS,
-  DRIVER_CANCEL_REASONS, CUSTOMER_CANCEL_REASONS, ISSUE_CATEGORIES,
+  DRIVER_CANCEL_REASONS, CUSTOMER_CANCEL_REASONS,
   allowedFrom, checkRequest, checkTransition,
 };
