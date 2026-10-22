@@ -26,7 +26,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 1.2 | Towing & EV use a hard-coded Dallas location; drop-off coordinates never set | ✅ `bbf9c8c` one RequestSheet, confirmed location, tow drop-off from address search, server requires drop-off |
 | 1.3 | Detailing & Window Tint show "Booked!" without creating a booking | ✅ `bbf9c8c` "Coming soon"; server rejects (409) |
 | 1.4 | "Request again"/Rebook creates a local-only phantom booking (`rebookFromHistory`) | ✅ `bbf9c8c` reopens sheet prefilled; server creates booking |
-| 1.5 | After acceptance customer gets no driver name/phone/vehicle/live location; driver sees "Customer" with no contact, notes or tow destination | ✅ server cards (3a); driver job screen (3b); customer tracking screen with live map, stale-location warning, approximate server ETA, call button (3c `4cfd340`). Gaps: no driver vehicle entry screen yet, no profile photos |
+| 1.5 | After acceptance customer gets no driver name/phone/vehicle/live location; driver sees "Customer" with no contact, notes or tow destination | ✅ server cards (3a); driver job screen (3b); customer tracking screen with live map, stale-location warning, approximate server ETA, call button (3c `4cfd340`); driver vehicle & equipment screen, required before going online (D5 `eb21ba6`). Gap: no profile photos |
 | 1.6 | Driver app never captures/uploads GPS during a job (`watchLocation` never called) | ✅ app-wide `useJobLocationSharing` (throttled, stops when job ends); foreground only for now |
 | 1.7 | Release builds silently default API to `127.0.0.1`; Android CORS origin `https://localhost` missing | ❌ |
 
@@ -40,7 +40,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 2.5 | Payment: pre-authorize at booking (manual capture), capture on completion; customer confirmation of completion | ❌ |
 | 2.6 | Stripe webhook: dedupe event ids, verify amount/booking, handle refunds/disputes, 500 on DB errors; reuse/cancel stale intents | ⚠️ |
 | 2.7 | Verification: atomic readiness check; rejecting an approved doc of a verified driver must suspend/recompute | ⚠️ revoke → offline fixed `7e3bb83`; atomic check open |
-| 2.7b | Drivers can always go offline (even after credentials lapse) | ✅ `04ba223` |
+| 2.7b | Drivers can always go offline (even after credentials lapse) | ✅ `04ba223`; still true with the D5 vehicle requirement — a driver with no/incomplete vehicle can go offline but not online (`eb21ba6`, tested) |
 | 2.7c | Sign-out and wrong-portal rejection affect only this device (password change still global) | ✅ `7e3bb83` |
 | 2.8 | Account deletion: keep (anonymize) paid bookings for records; handle auth-delete failure; let suspended users delete; sweep storage prefix | ⚠️ |
 | 2.9 | Auth settings for production: email confirmation, secure password change, stronger password rules + leaked-password check | 🔒 Supabase dashboard |
