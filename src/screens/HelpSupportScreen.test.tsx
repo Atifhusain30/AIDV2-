@@ -142,13 +142,12 @@ describe('Help & Support (B18)', () => {
     expect(within(dialog).getByRole('button', { name: 'Send report' })).toBeTruthy()
   })
 
-  it('opens from Account → Help & safety (the old empty "Support" header is gone)', async () => {
+  it('opens from the Account "Help & support" row (the old empty "Support" header is gone)', async () => {
     useAppStore.setState({ user: null, vehicles: [], activeVehicleId: null, currentScreen: 'profile' })
     useAuthStore.setState({ isAuthenticated: false, user: null, token: null })
     render(<ProfileScreen />)
     expect(screen.queryByRole('heading', { name: 'Support' })).toBeNull()
-    expect(screen.getByRole('heading', { name: 'Help & safety' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /Help & Support/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Help & support/ }))
     // F6: Help & Support is lazy-loaded, so it appears once its code has loaded.
     expect(await screen.findByRole('heading', { name: 'Help & Support' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))

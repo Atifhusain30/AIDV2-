@@ -6,7 +6,8 @@
  */
 
 import { useState } from 'react'
-import { AlertCircle, LifeBuoy, LogOut, MapPin, Trash2 } from 'lucide-react'
+import { AlertCircle, LifeBuoy, LogOut, MapPin, Settings, Trash2 } from 'lucide-react'
+import AidBrand from '../components/brand/AidBrand'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiService } from '../services/api'
@@ -34,6 +35,7 @@ export default function ProfileScreen() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   const name = profile?.name || (authUser ? `${authUser.firstName} ${authUser.lastName}`.trim() : '')
   const email = profile?.email || authUser?.email
@@ -66,17 +68,23 @@ export default function ProfileScreen() {
 
   return (
     <div className="ui-screen account-screen">
-      <header className="ui-screen-title"><h1>Account</h1></header>
+      {/* Owner reference: the AID logo and a settings gear; the page name is for screen readers. */}
+      <header className="account-top">
+        <AidBrand compact />
+        <h1 className="sr-only">Account</h1>
+        <button type="button" className="ui-icon-btn" aria-label="Settings" aria-haspopup="dialog" onClick={() => setShowSettings(true)}>
+          <Settings size={20} aria-hidden="true" />
+        </button>
+      </header>
 
-      {/* Uber-style identity: big name and avatar on the canvas, no boxed card. */}
       <section className="account-identity" aria-label="Account profile">
+        <PersonAvatar name={name} size="lg" />
         <div>
           <strong>{name || 'Guest account'}</strong>
           {!email && !phone && <small>Your roadside settings are saved on this device</small>}
           {email && <small>{email}</small>}
           {phone && <small>{phone}</small>}
         </div>
-        <PersonAvatar name={name} size="lg" />
       </section>
 
       <section className="ui-section" aria-labelledby="account-garage-title">
@@ -86,24 +94,34 @@ export default function ProfileScreen() {
         <GarageList garage={garage} onAdd={() => setShowVehicleForm(true)} />
       </section>
 
-      <section className="ui-section" aria-labelledby="help-safety-title">
-        <SectionHeader id="help-safety-title" title="Help & safety" />
+      {/* No "Payment methods" row: card payments aren't live, and AID never shows a fake card. */}
+      <section className="ui-section" aria-label="Help, safety and settings">
         <List>
-          <ListRow icon={<LifeBuoy size={19} />} title="Help & Support" subtitle="Report a problem, get answers" onClick={() => setShowHelp(true)} />
+          <ListRow icon={<LifeBuoy size={19} />} title="Help & support" subtitle="Report a problem, get answers" onClick={() => setShowHelp(true)} />
           <SafetyMenuItem audience="customer" />
-          <ListRow icon={<MapPin size={19} />} title="Location" subtitle="Where help should arrive" hasPopup onClick={() => setActiveModal('locationConfirm')} />
+          <ListRow icon={<Settings size={19} />} title="Settings" subtitle={isAuthenticated ? 'Location, delete account' : 'Location'} hasPopup onClick={() => setShowSettings(true)} />
         </List>
       </section>
 
       {isAuthenticated && (
-        <section className="ui-section" aria-label="Sign out and account deletion">
+        <section className="ui-section" aria-label="Sign out">
           <List>
-            <ListRow icon={<LogOut size={19} />} title="Sign out" chevron={false} onClick={handleLogout} />
-            <ListRow icon={<Trash2 size={19} />} title="Delete account" tone="danger" chevron={false} hasPopup onClick={() => setShowDeleteConfirmation(true)} />
+            <ListRow icon={<LogOut size={19} />} title="Sign out" tone="danger" chevron={false} onClick={handleLogout} />
           </List>
         </section>
       )}
       <p className="account-version">AID Roadside · Version 1.0</p>
+
+      {showSettings && (
+        <BottomSheet title="Settings" closeLabel="Close settings" onClose={() => setShowSettings(false)}>
+          <List>
+            <ListRow icon={<MapPin size={19} />} title="Location" subtitle="Where help should arrive" hasPopup onClick={() => { setShowSettings(false); setActiveModal('locationConfirm') }} />
+            {isAuthenticated && (
+              <ListRow icon={<Trash2 size={19} />} title="Delete account" tone="danger" chevron={false} hasPopup onClick={() => { setShowSettings(false); setShowDeleteConfirmation(true) }} />
+            )}
+          </List>
+        </BottomSheet>
+      )}
 
       {showVehicleForm && <AddVehicleSheet onClose={() => setShowVehicleForm(false)} onSave={saveVehicle} />}
       {showDeleteConfirmation && (

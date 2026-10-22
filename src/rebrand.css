@@ -956,7 +956,9 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 
 /* ---------- Customer Account ---------- */
 /* Identity straight on the canvas (Uber-style): big name, quiet email, avatar on the right. */
-.account-identity { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; padding: 4px 0 6px; }
+.account-top { display: flex; align-items: center; justify-content: space-between; min-height: 48px; }
+.account-top .ui-icon-btn { width: 44px; height: 44px; border-radius: 50%; }
+.account-identity { display: flex; align-items: center; gap: 16px; margin-top: 20px; padding: 4px 0 6px; }
 .account-identity > div { display: grid; gap: 4px; min-width: 0; }
 .account-identity strong { overflow: hidden; font-size: var(--aid-fs-xl); font-weight: 700; letter-spacing: -.03em; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .account-identity small { overflow: hidden; color: var(--aid-text-3); font-size: var(--aid-fs-sm); text-overflow: ellipsis; white-space: nowrap; }

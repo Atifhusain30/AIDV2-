@@ -35,6 +35,20 @@ describe('customer account', () => {
     expect(screen.getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
   })
 
+  it('design (owner reference): logo + gear header, rows Help & support · Safety · Settings, red Sign out, no fake Payment methods', () => {
+    vi.mocked(apiService.listVehicles).mockResolvedValue({ success: true, data: [] })
+    useAuthStore.setState({ isAuthenticated: true, token: 'token', user: {
+      id: 'customer-1', email: 'alex@example.com', phone: '', firstName: 'Alex', lastName: 'Morgan', role: 'customer', createdAt: new Date(), savedAddresses: [], vehicles: [], paymentMethods: [],
+    } })
+    const { container } = render(<ProfileScreen />)
+    expect(container.querySelector('.account-top .aid-brand, .account-top [class*="brand"]')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /^Settings/ }).length).toBe(2)
+    expect(screen.getByRole('button', { name: /Help & support/ })).toBeTruthy()
+    expect(screen.queryByText(/Payment methods/i)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sign out' }).className).toContain('ui-row--danger')
+    expect(screen.queryByRole('button', { name: 'Delete account' })).toBeNull()
+  })
+
   it('requires explicit confirmation before deleting an authenticated account', async () => {
     vi.mocked(apiService.listVehicles).mockResolvedValue({ success: true, data: [] })
     vi.mocked(apiService.deleteAccount).mockResolvedValue({ success: true })
@@ -43,6 +57,8 @@ describe('customer account', () => {
     } })
     render(<ProfileScreen />)
 
+    // Owner reference: deletion lives under Settings (gear in the header or the Settings row).
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
     fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
     expect(screen.getByRole('alertdialog', { name: 'Permanently delete account?' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Delete my account permanently' }))
