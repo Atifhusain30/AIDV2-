@@ -19,7 +19,7 @@ const indexHtml = read('index.html')
 const adminHtml = read('admin/index.html')
 const mainTsx = read('src/main.tsx')
 
-const tsx = import.meta.glob(['./**/*.tsx', '!./**/*.test.tsx', '!./components/ui/{Avatar,Badge,BottomSheet,Button,Card,EmptyState,Input,Modal,Progress,Skeleton,StatusBadge,Tabs,Toast}.tsx'], {
+const tsx = import.meta.glob(['./**/*.tsx', '!./**/*.test.tsx'], {
   query: '?raw', import: 'default', eager: true,
 }) as Record<string, string>
 
@@ -33,7 +33,7 @@ const contrast = (a: string, b: string) => {
   return (x + 0.05) / (y + 0.05)
 }
 /** The app's dark surfaces, from the page background up to the lightest card. */
-const SURFACES = ['#07050a', '#110d16', '#141019', '#1b1523', '#1f1828']
+const SURFACES = ['#07050a', '#110d16', '#141019', '#17121d', '#1b1523', '#1f1828']
 
 describe('text size (F4)', () => {
   it('no app text smaller than 12px, and none sized in px except form fields', () => {

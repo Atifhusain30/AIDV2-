@@ -38,6 +38,7 @@ import ProfileScreen from './screens/ProfileScreen'
 import HelpSupportScreen from './screens/HelpSupportScreen'
 import { CustomerLoginScreen } from './screens/customer'
 import BottomNav from './components/ui/BottomNav'
+import OfflineBanner from './components/ui/OfflineBanner'
 import AidBrand from './components/brand/AidBrand'
 
 // Driver Screens
@@ -170,6 +171,8 @@ function CustomerApp() {
 
       {/* Mobile App Container */}
       <div className="w-full max-w-[430px] relative min-h-screen">
+        {/* F5: no connection / server unreachable, on every screen. */}
+        <OfflineBanner />
         <AnimatePresence mode="wait">
           <motion.main
             key={currentScreen}
@@ -239,6 +242,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
 
   return (
     <>
+    <OfflineBanner />
     <AnimatePresence mode="wait">
       {currentView === 'home' && (
         <motion.main

@@ -8,6 +8,7 @@ import type { TicketResult } from '../lib/realtime'
 import { API_BASE_URL, normalizeApiBaseUrl } from './apiBase'
 import { currentSessionEpoch, reportUnauthorized, requestSignOut } from '../auth/sessionEpoch'
 import type { ApiProfile } from '../auth/serverProfile'
+import { reportServerReachable } from '../lib/connectivity'
 
 export type { ApiProfile }
 
@@ -42,6 +43,8 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
         ...options.headers,
       },
     })
+    // F5: the server answered (any status), so the offline banner can go.
+    reportServerReachable(true)
     if (epoch !== currentSessionEpoch()) return { success: false, error: SIGNED_OUT, code: 'signed_out' }
     // E6: the server no longer accepts this session (expired, revoked, account deleted): sign out once.
     if (response.status === 401) reportUnauthorized(epoch)
@@ -59,6 +62,8 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
     return { success: true, data: data as T }
   } catch (error) {
     console.error(`[AID API] ${endpoint}`, error)
+    // F5: fetch() throws TypeError when the request never reached the server (offline, DNS, TLS).
+    if (error instanceof TypeError) reportServerReachable(false)
     return { success: false, error: 'Unable to reach AID. Check your connection and try again.' }
   }
 }
