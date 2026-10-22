@@ -111,6 +111,17 @@ describe('no glow (owner correction)', () => {
     expect([...weights].filter((w) => !['400', '500', '600', '700'].includes(w))).toEqual([])
   })
 
+  it('admin site: same palette and flat cards — no glow, gradients, drop shadows or shimmer', () => {
+    const admin = read('admin/src/admin.css')
+    expect(glowViolations(admin)).toEqual([])
+    expect(admin).not.toMatch(/gradient\(/)
+    const drops = [...admin.matchAll(/box-shadow:\s*([^;}]+)/g)].map((m) => m[1].trim()).filter((value) => !/^inset\b/.test(value) && value !== 'none')
+    expect(drops).toEqual([])
+    expect(admin).toMatch(/--bg:\s*#000000/i)
+    expect(admin).toMatch(/--accent:\s*#9d8cff/i)
+    expect(admin).toMatch(/--accent-fill:\s*#6e56cf/i)
+  })
+
   it('booking notes keep their line breaks (the request flow puts "Spare tire available: Yes" on its own line)', () => {
     expect(css['src/rebrand.css']).toMatch(/\.job-note-quote blockquote\s*\{[^}]*white-space:\s*pre-line/)
   })
