@@ -30,11 +30,11 @@ export default function DriverSettingsScreen({ onBack, onOpenDocuments, onOpenVe
 
       {user && (
         <section className="account-identity" aria-label="Signed in as">
-          <PersonAvatar name={name} size="lg" />
           <div>
             <strong>{name || 'AID driver'}</strong>
             {user.email && <small>{user.email}</small>}
           </div>
+          <PersonAvatar name={name} size="lg" />
         </section>
       )}
 

@@ -6,7 +6,7 @@
 
 import { useRef, useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
-import type { LatLngExpression, LeafletEvent } from 'leaflet'
+import L, { type LatLngExpression, type LeafletEvent } from 'leaflet'
 
 export interface MapPinPickerProps {
   lat: number
@@ -32,6 +32,15 @@ function MapRecenter({ lat, lng }: { lat: number; lng: number }) {
   
   return null
 }
+
+// The AID pin (violet head, white ring) instead of Leaflet's default blue marker; the tip is the spot.
+const pinIcon = L.divIcon({
+  className: 'pick-pin',
+  html: '<span class="pick-pin__head"></span><span class="pick-pin__stem"></span>',
+  // 44 px wide touch target around the 28 px head; the stem's tip is the anchor.
+  iconSize: [44, 46],
+  iconAnchor: [22, 46],
+})
 
 // Draggable marker component
 function DraggableMarker({
@@ -62,6 +71,8 @@ function DraggableMarker({
 
   return (
     <Marker
+      icon={pinIcon}
+      title="Map pin — drag it to your exact spot"
       draggable
       eventHandlers={eventHandlers}
       position={position}

@@ -149,7 +149,9 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
           </div>
         </div>
         {isOnline || canWork ? (
-          <Button size="lg" block variant={isOnline ? 'secondary' : 'primary'} icon={<Power size={18} aria-hidden="true" />} onClick={toggleAvailability} disabled={isLoading}>
+          // Online: going offline is a quiet pill beside the status (the requests below are the focus).
+          // Offline: Go online is the one big violet action.
+          <Button size={isOnline ? 'sm' : 'lg'} block={!isOnline} variant={isOnline ? 'secondary' : 'primary'} icon={<Power size={isOnline ? 16 : 18} aria-hidden="true" />} onClick={toggleAvailability} disabled={isLoading}>
             {isOnline ? 'Go offline' : 'Go online'}
           </Button>
         ) : (

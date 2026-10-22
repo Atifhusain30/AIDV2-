@@ -253,7 +253,9 @@ select:focus-visible {
 .driver-work__header h1 { font-size: var(--aid-fs-2xl); font-weight: 760; letter-spacing: -.04em; line-height: 1.1; }
 .driver-work__header p { margin-top: 2px; color: var(--aid-text-3); font-size: var(--aid-fs-sm); }
 .driver-status { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-lg); background: var(--aid-surface-1); }
-.driver-status.is-online { border-color: rgba(112, 223, 169, .32); }
+.driver-status.is-online { grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-color: rgba(112, 223, 169, .32); }
+.driver-status.is-online > .ui-alert { grid-column: 1 / -1; }
+.driver-status.is-online .ui-btn { min-height: 44px; padding: 0 14px; border-radius: var(--aid-radius-pill); }
 .driver-status__text { display: flex; align-items: flex-start; gap: 12px; }
 .driver-status__dot { flex: none; width: 10px; height: 10px; margin-top: 9px; border-radius: 50%; background: var(--aid-text-3); }
 .is-online .driver-status__dot { background: var(--aid-success); box-shadow: 0 0 0 4px rgba(112, 223, 169, .16); }
@@ -328,6 +330,13 @@ select:focus-visible {
 .pin-map { overflow: hidden; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); }
 .pin-map .leaflet-tile-pane { filter: invert(1) hue-rotate(200deg) brightness(.82) contrast(.9) saturate(.35); }
 .pin-map .leaflet-control-zoom a { width: 44px; height: 44px; line-height: 44px; }
+/* Zoom buttons on the dark surface, not Leaflet's default white boxes. */
+.pin-map .leaflet-bar { overflow: hidden; border: 1px solid var(--aid-line-strong); border-radius: var(--aid-radius-sm); box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.pin-map .leaflet-bar a, .pin-map .leaflet-bar a:hover { border-bottom-color: var(--aid-line); background: var(--aid-surface-2); color: var(--aid-ivory); }
+.pin-map .leaflet-bar a:active { background: var(--aid-surface-3); }
+.pick-pin { position: relative; }
+.pick-pin__head { position: absolute; top: 2px; left: 8px; width: 28px; height: 28px; border: 4px solid var(--aid-ivory); border-radius: 50%; background: var(--aid-signal); box-shadow: 0 4px 12px rgba(0,0,0,.55); }
+.pick-pin__stem { position: absolute; bottom: 0; left: 20px; width: 4px; height: 17px; border-radius: 0 0 2px 2px; background: var(--aid-ivory); }
 .pin-map__credit { padding: 4px 8px; background: var(--aid-surface-1); color: var(--aid-text-3); font-size: var(--aid-fs-xs); text-align: right; }
 .location-selected { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
 .location-selected > svg { flex: none; margin-top: 2px; color: var(--aid-success); }
