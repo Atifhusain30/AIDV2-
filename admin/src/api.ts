@@ -23,10 +23,29 @@ const API_BASE_URL = (() => {
   return base.endsWith('/api') ? base : `${base}/api`
 })()
 
+const SESSION_EXPIRED = 'Your admin session expired. Sign in again.'
+let sessionEndedListener: ((reason: string) => void) | null = null
+let endingSession: Promise<void> | null = null
+
+/**
+ * E6: end the admin session in this tab and remove everything the admin site stored. It keeps the
+ * session only in this tab's sessionStorage (nothing in localStorage), and both are cleared — even
+ * when the sign-out call can't reach Supabase.
+ */
+async function endSession(): Promise<void> {
+  if (endingSession) return endingSession
+  endingSession = (async () => {
+    try { await supabase().auth.signOut({ scope: 'local' }) } catch { /* offline: cleared below */ }
+    try { window.sessionStorage.clear() } catch { /* unavailable */ }
+    try { window.localStorage.clear() } catch { /* unavailable */ }
+  })().finally(() => { endingSession = null })
+  return endingSession
+}
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data } = await supabase().auth.getSession()
   const token = data.session?.access_token
-  if (!token) throw new Error('Your admin session expired. Sign in again.')
+  if (!token) throw new Error(SESSION_EXPIRED)
   let response: Response
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
@@ -35,6 +54,13 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     })
   } catch {
     throw new Error('Unable to reach the AID API. Is the server running?')
+  }
+  if (response.status === 401) {
+    // E6: the server no longer accepts this session — sign out of the admin site (once) and say so.
+    const first = !endingSession
+    await endSession()
+    if (first) sessionEndedListener?.(SESSION_EXPIRED)
+    throw new Error(SESSION_EXPIRED)
   }
   const body = await response.json().catch(() => null) as ({ error?: string } & T) | null
   if (!response.ok) throw new Error(body?.error || `Request failed (${response.status})`)
@@ -64,7 +90,11 @@ export const adminApi = {
     return profile
   },
   async signOut() {
-    await supabase().auth.signOut({ scope: 'local' })
+    await endSession()
+  },
+  /** E6: told when the server refuses the session (401), so the site can return to sign-in. */
+  onSessionEnded(listener: ((reason: string) => void) | null) {
+    sessionEndedListener = listener
   },
   listDrivers: (filter: QueueFilter) => call<DriverSummary[]>(`/admin/drivers?status=${encodeURIComponent(filter)}`),
   getDriver: (driverId: string) => call<DriverDetail>(`/admin/drivers/${encodeURIComponent(driverId)}`),

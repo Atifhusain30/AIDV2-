@@ -5,13 +5,13 @@ import type { PendingRating, RatingInput } from '../lib/ratings'
 import type { SupportConfig, SupportReport } from '../lib/support'
 import type { BlockResult, ChatMessage, ChatPage } from '../lib/chat'
 import type { TicketResult } from '../lib/realtime'
+import { API_BASE_URL, normalizeApiBaseUrl } from './apiBase'
+import { currentSessionEpoch, reportUnauthorized, requestSignOut } from '../auth/sessionEpoch'
+import type { ApiProfile } from '../auth/serverProfile'
 
-function normalizeApiBaseUrl(value?: string): string {
-  const base = (value || 'http://127.0.0.1:3001').replace(/\/$/, '')
-  return base.endsWith('/api') ? base : `${base}/api`
-}
+export type { ApiProfile }
 
-const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL)
+const SIGNED_OUT = 'You signed out.'
 
 function parseBooking(booking: Booking): Booking {
   return {
@@ -27,6 +27,8 @@ function parseBooking(booking: Booking): Booking {
 }
 
 async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
+  // E6: an answer to a request made before a sign-out is dropped (never shown to the next person).
+  const epoch = currentSessionEpoch()
   try {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()
     if (sessionError) return { success: false, error: 'Unable to read your secure session.' }
@@ -40,8 +42,12 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
         ...options.headers,
       },
     })
+    if (epoch !== currentSessionEpoch()) return { success: false, error: SIGNED_OUT, code: 'signed_out' }
+    // E6: the server no longer accepts this session (expired, revoked, account deleted): sign out once.
+    if (response.status === 401) reportUnauthorized(epoch)
     const isJson = response.headers.get('content-type')?.includes('application/json')
     const data = isJson ? await response.json() : undefined
+    if (epoch !== currentSessionEpoch()) return { success: false, error: SIGNED_OUT, code: 'signed_out' }
     if (!response.ok) {
       return {
         success: false,
@@ -55,28 +61,6 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
     console.error(`[AID API] ${endpoint}`, error)
     return { success: false, error: 'Unable to reach AID. Check your connection and try again.' }
   }
-}
-
-export interface ApiProfile {
-  id: string
-  email: string
-  role: 'customer' | 'driver'
-  status: string
-  firstName: string
-  lastName: string
-  phone: string
-  createdAt: string
-  verificationStatus?: VerificationStatus
-  credentialsValidUntil?: string | null
-  isVerified?: boolean
-  isOnline?: boolean
-  /** Average of ratings received — null until MIN_RATINGS_TO_SHOW ratings exist (B15). */
-  rating?: number | null
-  ratingCount?: number
-  /** Jobs completed as a driver. */
-  totalJobs?: number
-  specializations?: ServiceType[]
-  driverVehicle?: DriverVehicle | null
 }
 
 export async function getProfile(): Promise<ApiResponse<ApiProfile>> {
@@ -292,7 +276,8 @@ export const customerRegister = (email: string, password: string, firstName: str
   managedAuth.register('customer', { email, password, firstName, lastName, phone })
 export const driverRegister = (email: string, password: string, firstName: string, lastName: string, phone: string) =>
   managedAuth.register('driver', { email, password, firstName, lastName, phone })
-export function logout(): void { void managedAuth.signOut() }
+/** E6: the one full sign-out (src/auth/signOut.ts). */
+export function logout(): void { requestSignOut() }
 export function getAuthState() { return { isAuthenticated: false, user: null, token: null } }
 
 export const apiService = {

@@ -7,6 +7,10 @@
 import { create } from 'zustand'
 import type { Customer, Driver, AuthState, UserRole } from '../types'
 import { managedAuth } from '../auth/supabase'
+import type { AuthPayload } from '../auth/authService'
+import { claimDeviceFor, resetUserState, signOut } from '../auth/signOut'
+import { removeLegacyKeys, wipeLocalUserData } from '../auth/deviceData'
+import { useAppStore } from './useAppStore'
 
 interface AuthStore extends AuthState {
   isLoading: boolean
@@ -30,12 +34,15 @@ interface AuthStore extends AuthState {
 }
 
 // Remove credentials persisted by the previous prototype implementation.
-try {
-  localStorage.removeItem('auth-storage')
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('user')
-} catch {
-  // localStorage may be unavailable in a restricted runtime; managed auth still works.
+removeLegacyKeys()
+
+/**
+ * E6: a confirmed session (user and role from the AID server). Data saved on this phone for any other
+ * account is wiped before the first screen opens.
+ */
+function signedIn(payload: AuthPayload) {
+  claimDeviceFor(payload.user)
+  return { isAuthenticated: true, user: payload.user, token: payload.token, isLoading: false, error: null }
 }
 
 export const useAuthStore = create<AuthStore>()((set, get) => ({
@@ -51,12 +58,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
     const result = await managedAuth.signIn('customer', email, password)
 
     if (result.success && result.data) {
-      set({
-        isAuthenticated: true,
-        user: result.data.user,
-        token: result.data.token,
-        isLoading: false,
-      })
+      set(signedIn(result.data))
       return true
     }
 
@@ -69,12 +71,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
     const result = await managedAuth.register('customer', { email, password, firstName, lastName, phone })
 
     if (result.success && result.data) {
-      set({
-        isAuthenticated: true,
-        user: result.data.user,
-        token: result.data.token,
-        isLoading: false,
-      })
+      set(signedIn(result.data))
       return true
     }
 
@@ -92,12 +89,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
     const result = await managedAuth.signIn('driver', email, password)
 
     if (result.success && result.data) {
-      set({
-        isAuthenticated: true,
-        user: result.data.user,
-        token: result.data.token,
-        isLoading: false,
-      })
+      set(signedIn(result.data))
       return true
     }
 
@@ -110,12 +102,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
     const result = await managedAuth.register('driver', { email, password, firstName, lastName, phone })
 
     if (result.success && result.data) {
-      set({
-        isAuthenticated: true,
-        user: result.data.user,
-        token: result.data.token,
-        isLoading: false,
-      })
+      set(signedIn(result.data))
       return true
     }
 
@@ -154,6 +141,7 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
       paymentMethods: [],
     }
 
+    claimDeviceFor(guest)
     set({
       isAuthenticated: true,
       user: guest,
@@ -168,28 +156,24 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
   restoreSession: async () => {
     const result = await managedAuth.restore()
     if (result.success && result.data) {
-      set({
-        isAuthenticated: true,
-        user: result.data.user,
-        token: result.data.token,
-        error: null,
-      })
+      set(signedIn(result.data))
       return
     }
 
-    if (!result.success) set({ error: result.error || 'Unable to restore your session.' })
+    if (!result.success) {
+      // Server not reachable: open nothing (the role is unconfirmed); the saved session stays for a retry.
+      set({ error: result.error || 'Unable to restore your session.' })
+      return
+    }
+    // No valid session: anything still saved from the last account goes.
+    if (useAppStore.getState().ownerId) {
+      resetUserState()
+      wipeLocalUserData({ keepSession: true })
+    }
   },
 
-  logout: () => {
-    set({
-      isAuthenticated: false,
-      user: null,
-      token: null,
-      error: null,
-      notice: null,
-    })
-    void managedAuth.signOut()
-  },
+  // E6: full sign-out (session, GPS, live updates, every store and saved key) — src/auth/signOut.ts.
+  logout: () => { void signOut('user') },
 
   clearError: () => set({ error: null, notice: null }),
 

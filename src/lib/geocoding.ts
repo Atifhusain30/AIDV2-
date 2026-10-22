@@ -45,6 +45,17 @@ const geocodeCache = new Map<string, string>()
 // In-memory cache for address search results
 const searchCache = new Map<string, AddressSuggestion[]>()
 
+/** E6: forget every address looked up (called on sign-out). */
+export function clearGeocodingCache(): void {
+  geocodeCache.clear()
+  searchCache.clear()
+}
+
+/** Tests: how many lookups are cached. */
+export function geocodingCacheSize(): number {
+  return geocodeCache.size + searchCache.size
+}
+
 /**
  * Generate cache key from coordinates (rounded to 5 decimal places)
  * 5 decimal places = ~1.1 meter precision, good enough for address lookup

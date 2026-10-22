@@ -10,6 +10,7 @@ vi.mock('./api', () => ({
     currentAdmin: vi.fn(),
     signIn: vi.fn(),
     signOut: vi.fn(async () => {}),
+    onSessionEnded: vi.fn(),
     listDrivers: vi.fn(),
     getDriver: vi.fn(),
     reviewDocument: vi.fn(async () => ({})),

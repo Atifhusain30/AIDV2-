@@ -68,6 +68,23 @@ export async function initNotifications(): Promise<void> {
 }
 
 /**
+ * E6 sign-out: cancel scheduled booking notifications and remove the ones already shown, so the
+ * next person on this phone never sees the previous person's job updates.
+ */
+export async function clearAllNotifications(): Promise<void> {
+  if (!isNotificationsAvailable()) return
+  try {
+    const pending = await LocalNotifications.getPending()
+    if (pending.notifications.length) {
+      await LocalNotifications.cancel({ notifications: pending.notifications.map(({ id }) => ({ id })) })
+    }
+    await LocalNotifications.removeAllDeliveredNotifications()
+  } catch {
+    // Web or plugin unavailable: nothing was scheduled.
+  }
+}
+
+/**
  * Parameters for booking update notification
  */
 export interface NotifyBookingUpdateParams {

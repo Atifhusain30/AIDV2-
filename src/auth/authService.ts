@@ -1,4 +1,5 @@
 import type { ApiResponse, Customer, Driver, UserRole } from '../types'
+import { profileToUser, type FetchProfile, type ProfileResult } from './serverProfile'
 
 type PortalRole = Extract<UserRole, 'customer' | 'driver'>
 
@@ -52,51 +53,10 @@ export type RegistrationInput = {
   phone: string
 }
 
-function metadataString(user: ManagedUser, key: string): string {
-  const value = user.user_metadata?.[key]
-  return typeof value === 'string' ? value : ''
-}
-
-function getManagedRole(user: ManagedUser): PortalRole | null {
-  const role = metadataString(user, 'role')
-  return role === 'customer' || role === 'driver' ? role : null
-}
-
-function mapUser(user: ManagedUser, role: PortalRole): Customer | Driver {
-  const base = {
-    id: user.id,
-    email: user.email || '',
-    phone: user.phone || metadataString(user, 'phone'),
-    firstName: metadataString(user, 'first_name') || user.email?.split('@')[0] || 'AID',
-    lastName: metadataString(user, 'last_name'),
-    createdAt: new Date(user.created_at || Date.now()),
-  }
-
-  if (role === 'driver') {
-    return {
-      ...base,
-      role: 'driver',
-      isOnline: false,
-      isVerified: false,
-      verificationStatus: 'pending',
-      documents: [],
-      rating: null,
-      totalJobs: 0,
-      specializations: [],
-    }
-  }
-
-  return {
-    ...base,
-    role: 'customer',
-    savedAddresses: [],
-    vehicles: [],
-    paymentMethods: [],
-  }
-}
-
 // Supabase signs out every device by default; leaving or rejecting one device must not end the others.
 const LOCAL_ONLY = { scope: 'local' } as const
+
+const SERVER_UNREACHABLE = 'Unable to reach AID to confirm your account. Check your connection and try again.'
 
 function unexpectedAuthError(error: unknown): string {
   // fetch() rejects with TypeError when the network is unreachable.
@@ -105,7 +65,41 @@ function unexpectedAuthError(error: unknown): string {
   return 'We could not save your secure session on this device. Please try again.'
 }
 
-export function createAuthService(client: ManagedAuthClient) {
+type RoleCheck = { ok: true; user: Customer | Driver } | { ok: false; error: string }
+
+function roleCheckError(result: Extract<ProfileResult, { ok: false }>): string {
+  if (result.network || !result.status || result.status >= 500) return SERVER_UNREACHABLE
+  if (result.status === 403) return 'This AID account is not active. Contact AID support.'
+  return 'Your session could not be confirmed. Please sign in again.'
+}
+
+export interface AuthServiceDeps {
+  /** GET /api/me with the session token — the only source of the account's role (E6). */
+  fetchProfile: FetchProfile
+}
+
+export function createAuthService(client: ManagedAuthClient, { fetchProfile }: AuthServiceDeps) {
+  /**
+   * E6: which portal an account may use is decided by the AID server's profile, never by the
+   * sign-in metadata (editable by the account holder) or anything stored on the phone.
+   */
+  async function confirmServerRole(accessToken: string, requestedRole: PortalRole): Promise<RoleCheck> {
+    const result = await fetchProfile(accessToken)
+    if (!result.ok) return { ok: false, error: roleCheckError(result) }
+    const role = result.profile.role
+    if (role === 'admin') return { ok: false, error: 'This is an AID admin account. Use the AID admin site.' }
+    if (role !== 'customer' && role !== 'driver') return { ok: false, error: 'This account does not have an AID customer or driver role.' }
+    if (role !== requestedRole) {
+      return {
+        ok: false,
+        error: role === 'customer'
+          ? 'This is a customer account. Switch to customer mode to sign in.'
+          : 'This is a driver account. Switch to driver mode to sign in.',
+      }
+    }
+    return { ok: true, user: profileToUser(result.profile) }
+  }
+
   async function signIn(
     requestedRole: PortalRole,
     email: string,
@@ -120,29 +114,12 @@ export function createAuthService(client: ManagedAuthClient) {
       if (error) return { success: false, error: error.message }
       if (!data.user || !data.session) return { success: false, error: 'Unable to start a secure session.' }
 
-      const accountRole = getManagedRole(data.user)
-      if (!accountRole) {
+      const checked = await confirmServerRole(data.session.access_token, requestedRole)
+      if (!checked.ok) {
         await client.auth.signOut(LOCAL_ONLY)
-        return { success: false, error: 'This account does not have an AID customer or driver role.' }
+        return { success: false, error: checked.error }
       }
-
-      if (accountRole !== requestedRole) {
-        await client.auth.signOut(LOCAL_ONLY)
-        return {
-          success: false,
-          error: accountRole === 'customer'
-            ? 'This is a customer account. Switch to customer mode to sign in.'
-            : 'This is a driver account. Switch to driver mode to sign in.',
-        }
-      }
-
-      return {
-        success: true,
-        data: {
-          user: mapUser(data.user, accountRole),
-          token: data.session.access_token,
-        },
-      }
+      return { success: true, data: { user: checked.user, token: data.session.access_token } }
     } catch (error) {
       return { success: false, error: unexpectedAuthError(error) }
     }
@@ -176,36 +153,40 @@ export function createAuthService(client: ManagedAuthClient) {
         }
       }
 
-      return {
-        success: true,
-        data: {
-          user: mapUser(data.user, role),
-          token: data.session.access_token,
-        },
+      const checked = await confirmServerRole(data.session.access_token, role)
+      if (!checked.ok) {
+        await client.auth.signOut(LOCAL_ONLY)
+        return { success: false, error: checked.error }
       }
+      return { success: true, data: { user: checked.user, token: data.session.access_token } }
     } catch (error) {
       return { success: false, error: unexpectedAuthError(error) }
     }
   }
 
+  /**
+   * App start: a saved session opens screens only after the server confirms the account and its
+   * role. Server unreachable → keep the session but open nothing (error); session refused → end it.
+   */
   async function restore(): Promise<ApiResponse<AuthPayload | null>> {
     try {
       const { data, error } = await client.auth.getSession()
       if (error) return { success: false, error: error.message }
       if (!data.session) return { success: true, data: null }
 
-      const role = getManagedRole(data.session.user)
-      if (!role) {
+      const result = await fetchProfile(data.session.access_token)
+      if (!result.ok) {
+        if (result.network || !result.status || result.status >= 500) return { success: false, error: SERVER_UNREACHABLE }
         await client.auth.signOut(LOCAL_ONLY)
         return { success: true, data: null }
       }
-
+      if (result.profile.role !== 'customer' && result.profile.role !== 'driver') {
+        await client.auth.signOut(LOCAL_ONLY)
+        return { success: true, data: null }
+      }
       return {
         success: true,
-        data: {
-          user: mapUser(data.session.user, role),
-          token: data.session.access_token,
-        },
+        data: { user: profileToUser(result.profile), token: data.session.access_token },
       }
     } catch {
       return { success: false, error: 'Unable to restore your secure session.' }

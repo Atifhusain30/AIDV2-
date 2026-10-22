@@ -5,6 +5,7 @@ import { useAuthStore } from './store/useAuthStore'
 import { initNotifications } from './lib/notifications'
 import { apiService } from './services/api'
 import { useDriverStore } from './store/useDriverStore'
+import { profileToUser } from './auth/serverProfile'
 
 vi.mock('./lib/notifications', () => ({
   initNotifications: vi.fn(),
@@ -92,24 +93,18 @@ describe('first-run flow', () => {
     expect(screen.queryByRole('button', { name: 'Explore with a guest account' })).toBeNull()
   })
 
-  it('hydrates verified driver status and online state from the authoritative profile', async () => {
-    vi.mocked(apiService.getProfile).mockResolvedValue({
-      success: true,
-      data: {
-        id: 'driver-1', role: 'driver', status: 'active', email: 'driver@aid.test', firstName: 'Alex', lastName: 'Rivera', phone: '',
-        createdAt: '2026-01-01T00:00:00.000Z', verificationStatus: 'verified', isVerified: true, isOnline: true,
-        rating: 4.9, totalJobs: 18, specializations: [],
-      },
-    })
+  it('driver screens use the server-confirmed profile (verified status and online state)', async () => {
     vi.mocked(apiService.getDriverActiveBooking).mockResolvedValue({ success: true, data: undefined })
     vi.mocked(apiService.getServiceRequests).mockResolvedValue({ success: true, data: { status: 'ok', radiusMiles: 25, requests: [] } })
+    // E6: the signed-in user is built from GET /api/me at sign-in / app start (see authService).
     useAuthStore.setState({
       isAuthenticated: true,
       token: 'managed-token',
-      user: {
-        id: 'driver-1', email: 'driver@aid.test', phone: '', firstName: 'Alex', lastName: 'Rivera', role: 'driver', createdAt: new Date(),
-        isOnline: false, isVerified: false, verificationStatus: 'pending', documents: [], rating: 0, totalJobs: 0, specializations: [],
-      },
+      user: profileToUser({
+        id: 'driver-1', role: 'driver', status: 'active', email: 'driver@aid.test', firstName: 'Alex', lastName: 'Rivera', phone: '',
+        createdAt: '2026-01-01T00:00:00.000Z', verificationStatus: 'verified', isVerified: true, isOnline: true,
+        rating: 4.9, totalJobs: 18, specializations: [],
+      }),
     })
     useDriverStore.setState({ isOnline: false, incomingRequests: [], activeBooking: null, documents: [] })
 

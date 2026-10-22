@@ -18,6 +18,7 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiService } from '../services/api'
+import { signOut } from '../auth/signOut'
 import { SafetyMenuItem } from '../components/safety/Safety'
 import HelpSupportScreen from './HelpSupportScreen'
 
@@ -33,9 +34,8 @@ export default function ProfileScreen() {
     setActiveVehicle,
     setVehicles,
     setActiveModal,
-    signOut,
   } = useAppStore()
-  const { user: authUser, isAuthenticated, token, logout } = useAuthStore()
+  const { user: authUser, isAuthenticated, token } = useAuthStore()
   const [showVehicleForm, setShowVehicleForm] = useState(false)
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle)
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false)
@@ -92,10 +92,8 @@ export default function ProfileScreen() {
     removeVehicle(vehicleId)
   }
 
-  const handleLogout = () => {
-    logout()
-    signOut()
-  }
+  // E6: the one full sign-out (src/auth/signOut.ts).
+  const handleLogout = () => { void signOut('user') }
 
   const handleDeleteAccount = async () => {
     setIsDeletingAccount(true)
@@ -107,8 +105,8 @@ export default function ProfileScreen() {
       return
     }
     setShowDeleteConfirmation(false)
-    logout()
-    signOut()
+    // E6: the account is gone on the server; remove everything of it from this phone too.
+    void signOut('deleted')
   }
 
   if (showHelp) return <HelpSupportScreen audience="customer" onBack={() => setShowHelp(false)} />

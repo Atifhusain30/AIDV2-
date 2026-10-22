@@ -91,6 +91,16 @@ export interface UserVehicle {
 }
 
 interface AppState {
+  /**
+   * E6: whose data this is. Everything persisted here belongs to this account; when a different
+   * account (or the same account with a different server role) signs in, it is wiped first.
+   */
+  ownerId: string | null
+  ownerRole: 'customer' | 'driver' | null
+  setOwner: (ownerId: string, ownerRole: 'customer' | 'driver') => void
+  /** E6: back to a fresh install's state (sign-out, account switch). */
+  resetUserData: () => void
+
   // Auth + User Profile
   isAuthed: boolean
   user: UserProfile | null
@@ -280,17 +290,54 @@ const getStorage = () => {
   }
 }
 
+/** Every piece of user data in this store at its fresh-install value (E6 reset). */
+const initialUserData = () => ({
+  ownerId: null,
+  ownerRole: null,
+  isAuthed: false,
+  user: null,
+  vehicles: [],
+  activeVehicleId: null,
+  userLocationLabel: '',
+  userCoords: null,
+  locationConfirmedAt: null,
+  activeBooking: null,
+  endedBookingNotice: null,
+  activeRequestRedirect: false,
+  bookingHistory: [],
+  selectedService: null,
+  isServicesModalOpen: false,
+  currentScreen: 'home' as const,
+  selectedBookingId: null,
+  receiptBookingId: null,
+  activeModal: null,
+  pendingReturnModal: null,
+  pendingReturnModalStep: 1,
+  modalStep: 1,
+  serviceFormData: initialServiceFormData,
+  towingFormData: initialTowingFormData,
+  evChargingFormData: initialEVChargingFormData,
+  detailingFormData: initialDetailingFormData,
+  windowTintingFormData: initialWindowTintingFormData,
+  isCalculating: false,
+  isSubmitting: false,
+  showSuccess: false,
+  searchQuery: '',
+})
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
+      ownerId: null,
+      ownerRole: null,
+      setOwner: (ownerId, ownerRole) => set({ ownerId, ownerRole }),
+      resetUserData: () => set(initialUserData()),
+
       // Auth + User Profile
       isAuthed: false,
       user: null,
-      signOut: () => set({
-        isAuthed: false,
-        user: null,
-        activeVehicleId: null,
-      }),
+      // Store-only reset; the full sign-out (session, GPS, live updates, storage) is src/auth/signOut.ts.
+      signOut: () => set(initialUserData()),
       updateUserProfile: (patch) => set((state) => ({
         user: state.user ? { ...state.user, ...patch } : null,
       })),
@@ -512,19 +559,21 @@ export const useAppStore = create<AppState>()(
       name: 'aid-bookings-v1',
       storage: createJSONStorage(() => getStorage()),
       // v1 drops data left by the old on-device demo (simulated chat threads and made-up providers).
-      version: 1,
+      // v2 (E6) drops the cached profile/sign-in flag; data saved before v2 has no owner stamp, so the
+      // next sign-in wipes it rather than guess whose it is.
+      version: 2,
       migrate: (persisted) => stripLegacyDemoState(persisted) as unknown as AppState,
-      // Only persist booking data + confirmed location + auth + vehicles - NOT UI state (modals, forms, loading states)
+      // Only persist booking data + confirmed location + vehicles + whose they are — NOT UI state
+      // (modals, forms, loading states) and never a role or sign-in state (E6: those come from the server).
       partialize: (state) => ({
+        ownerId: state.ownerId,
+        ownerRole: state.ownerRole,
         bookingHistory: state.bookingHistory,
         activeBooking: state.activeBooking,
         // Confirmed location (survives restart so user doesn't have to re-confirm)
         userLocationLabel: state.userLocationLabel,
         userCoords: state.userCoords,
         locationConfirmedAt: state.locationConfirmedAt,
-        // Auth + User Profile + Vehicles
-        isAuthed: state.isAuthed,
-        user: state.user,
         vehicles: state.vehicles,
         activeVehicleId: state.activeVehicleId,
       }),
@@ -540,6 +589,9 @@ export function stripLegacyDemoState(persisted: unknown): Record<string, unknown
   const state = { ...((persisted as Record<string, unknown>) || {}) }
   delete state.bookingMessages
   delete state.lastNotifiedStatusByBooking
+  // E6: a cached profile/role/sign-in flag is never trusted.
+  delete state.user
+  delete state.isAuthed
   const clean = (booking: unknown) => {
     if (!booking || typeof booking !== 'object') return booking
     const rest = { ...(booking as Record<string, unknown>) }

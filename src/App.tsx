@@ -22,6 +22,7 @@ import { driverVehicleSummary } from './lib/driverVehicle'
 import type { Booking, Driver } from './types'
 import { App as CapacitorApp } from '@capacitor/app'
 import { supabase } from './auth/supabase'
+import { installSessionWatch, signOut } from './auth/signOut'
 import { completeRecoveryFromUrl } from './auth/recovery'
 import PasswordRecoveryScreen from './components/auth/PasswordRecoveryScreen'
 import { SafetyMenuItem } from './components/safety/Safety'
@@ -129,7 +130,7 @@ function CustomerApp() {
   const hasLiveRequest = useAppStore((state) => Boolean(state.activeBooking?.id))
   const signedIn = useAuthStore((state) => Boolean(state.token))
   useRealtimeConnection(signedIn && hasLiveRequest)
-  const { logout, user } = useAuthStore()
+  const { user } = useAuthStore()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -365,7 +366,7 @@ function App() {
   const [appMode, setAppMode] = useState<AppMode>('select')
   const [isRecoveringPassword, setIsRecoveringPassword] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
-  const { isAuthenticated, user, token, logout, restoreSession, updateUser } = useAuthStore()
+  const { isAuthenticated, user, token, restoreSession } = useAuthStore()
 
   // Initialize app features on startup
   useEffect(() => {
@@ -424,48 +425,19 @@ function App() {
     }
   }, [isAuthenticated, user])
 
-  // Rehydrate the authoritative server profile and marketplace state after a managed session is restored.
+  // E6: sign out here when the session ends elsewhere (refresh failed, revoked) or another account appears.
+  useEffect(() => installSessionWatch(), [])
+
+  // Load marketplace state for the signed-in person. Their profile and role were confirmed by the
+  // server (GET /api/me) at sign-in / app start — never taken from anything saved on the phone (E6).
+  const userRole = user?.role
   useEffect(() => {
     if (!token || !user) return
     let cancelled = false
 
     void (async () => {
-      const profileResult = await apiService.getProfile()
-      if (cancelled) return
-
-      const role = profileResult.success && profileResult.data ? profileResult.data.role : user.role
-      if (profileResult.success && profileResult.data) {
-        const profile = profileResult.data
-        const baseProfile = {
-          id: profile.id,
-          email: profile.email,
-          firstName: profile.firstName,
-          lastName: profile.lastName,
-          phone: profile.phone,
-          createdAt: new Date(profile.createdAt),
-        }
-        if (profile.role === 'driver') {
-          updateUser({
-            ...baseProfile,
-            role: 'driver',
-            isVerified: profile.isVerified,
-            verificationStatus: profile.verificationStatus,
-            credentialsValidUntil: profile.credentialsValidUntil ?? null,
-            isOnline: profile.isOnline,
-            rating: profile.rating ?? null,
-            ratingCount: profile.ratingCount ?? 0,
-            totalJobs: profile.totalJobs ?? 0,
-            specializations: profile.specializations,
-            vehicle: profile.driverVehicle ?? null,
-          })
-          useDriverStore.setState({ isOnline: profile.isOnline })
-        } else {
-          updateUser({ ...baseProfile, role: 'customer' })
-        }
-        setAppMode(profile.role)
-      }
-
-      if (role === 'driver') {
+      if (user.role === 'driver') {
+        useDriverStore.setState({ isOnline: Boolean((user as Driver).isOnline) })
         await useDriverStore.getState().fetchActiveBooking(user.id)
         return
       }
@@ -484,12 +456,11 @@ function App() {
     })()
 
     return () => { cancelled = true }
-  }, [token, user?.id, updateUser])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the account or its role changes
+  }, [token, user?.id, userRole])
 
-  const handleLogout = () => {
-    logout()
-    setAppMode('select')
-  }
+  // E6: the one sign-out; with nobody signed in this portal shows its sign-in screen.
+  const handleLogout = () => { void signOut('user') }
 
   if (isRecoveringPassword) {
     return <PasswordRecoveryScreen onComplete={() => { setIsRecoveringPassword(false); setAppMode('customer') }} />

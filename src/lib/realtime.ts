@@ -259,6 +259,14 @@ export function setRealtimeClient(client: RealtimeClient | null): void {
   bind(client)
 }
 
+/**
+ * E6 sign-out: close the stream and drop any pending reconnect/ticket request now (without creating
+ * a client if none exists). The next sign-in starts a fresh one with a new ticket.
+ */
+export function stopRealtime(): void {
+  shared?.stop()
+}
+
 export function realtimeStatus(): RealtimeStatus {
   return shared?.status ?? 'off'
 }

@@ -714,9 +714,12 @@ export default function AdminApp() {
       .then(setAdmin)
       .catch((sessionError) => setError(message(sessionError)))
       .finally(() => setChecking(false))
+    // E6: an expired or revoked session (401) signs the reviewer out and shows the sign-in screen.
+    adminApi.onSessionEnded((reason) => { setAdmin(null); setError(reason) })
+    return () => adminApi.onSessionEnded(null)
   }, [])
 
   if (checking) return <div className="boot">Loading…</div>
   if (!admin) return <SignIn onSignedIn={setAdmin} initialError={error} />
-  return <Dashboard admin={admin} onSignOut={() => { void adminApi.signOut(); setAdmin(null) }} />
+  return <Dashboard admin={admin} onSignOut={() => { void adminApi.signOut(); setError(null); setAdmin(null) }} />
 }

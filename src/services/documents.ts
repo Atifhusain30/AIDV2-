@@ -2,11 +2,17 @@ import { FilePicker, type PickedFile } from '@capawesome/capacitor-file-picker'
 import { Capacitor } from '@capacitor/core'
 import type { DriverDocument, DriverDocumentType, DriverVerification, VerificationStatus } from '../types'
 import { supabase } from '../auth/supabase'
+import { API_BASE_URL } from './apiBase'
+import { currentSessionEpoch, reportUnauthorized } from '../auth/sessionEpoch'
 
-const API_BASE_URL = (() => {
-  const configured = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:3001').replace(/\/+$/, '')
-  return configured.endsWith('/api') ? configured : `${configured}/api`
-})()
+/** E6: same rules as the main API client — a 401 signs out once; answers after a sign-out are dropped. */
+async function guardedFetch(url: string, init: RequestInit): Promise<Response> {
+  const epoch = currentSessionEpoch()
+  const response = await fetch(url, init)
+  if (epoch !== currentSessionEpoch()) throw new Error('You signed out.')
+  if (response.status === 401) reportUnauthorized(epoch)
+  return response
+}
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'application/pdf']
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 
@@ -63,7 +69,7 @@ export async function uploadDocument(file: PickedFile, documentType: DriverDocum
   formData.append('file', base64ToBlob(file.data, file.mimeType || 'application/octet-stream'), file.name || `document-${Date.now()}`)
   formData.append('type', documentType)
   if (expiresOn) formData.append('expiresOn', expiresOn)
-  const response = await fetch(`${API_BASE_URL}/drivers/me/documents`, {
+  const response = await guardedFetch(`${API_BASE_URL}/drivers/me/documents`, {
     method: 'POST',
     headers: await authHeaders(),
     body: formData,
@@ -73,13 +79,13 @@ export async function uploadDocument(file: PickedFile, documentType: DriverDocum
 }
 
 export async function getStoredDocuments(): Promise<DriverDocument[]> {
-  const response = await fetch(`${API_BASE_URL}/drivers/me/documents`, { headers: await authHeaders() })
+  const response = await guardedFetch(`${API_BASE_URL}/drivers/me/documents`, { headers: await authHeaders() })
   if (!response.ok) throw new Error(await responseError(response))
   return (await response.json() as DriverDocument[]).map(parseDocument)
 }
 
 export async function deleteStoredDocument(documentId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/drivers/me/documents/${encodeURIComponent(documentId)}`, {
+  const response = await guardedFetch(`${API_BASE_URL}/drivers/me/documents/${encodeURIComponent(documentId)}`, {
     method: 'DELETE',
     headers: await authHeaders(),
   })
@@ -87,14 +93,14 @@ export async function deleteStoredDocument(documentId: string): Promise<void> {
 }
 
 export async function getVerification(): Promise<DriverVerification> {
-  const response = await fetch(`${API_BASE_URL}/drivers/me/verification`, { headers: await authHeaders() })
+  const response = await guardedFetch(`${API_BASE_URL}/drivers/me/verification`, { headers: await authHeaders() })
   if (!response.ok) throw new Error(await responseError(response))
   const verification = await response.json() as DriverVerification
   return { ...verification, documents: verification.documents.map(parseDocument) }
 }
 
 export async function submitVerification(): Promise<{ status: VerificationStatus }> {
-  const response = await fetch(`${API_BASE_URL}/drivers/me/verification/submit`, {
+  const response = await guardedFetch(`${API_BASE_URL}/drivers/me/verification/submit`, {
     method: 'POST',
     headers: await authHeaders(),
   })
