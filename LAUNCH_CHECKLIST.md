@@ -97,10 +97,10 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | # | Item | Owner | Status |
 |---|---|---|---|
 | G1 | App icon + splash screen (iOS + Android incl. monochrome) | 👤 artwork / 🛠 install | 🟡 `9e5e632` `800292f` — the Capacitor placeholders are replaced: iOS app icon (1024 px, no transparency) and Android launcher/round/adaptive icons use the AID mark (white “A with a location dot” on violet); launch splash is the mark on black (iOS and Android); web favicon added. Seen on the iPhone simulator. Left: your approval of the artwork (or a designer's final version), an Android monochrome/themed icon, and a check on real phones |
-| G2 | iOS permission texts; remove unused (Always location, camera, photo add) | 🛠 | ⬜ |
-| G3 | iOS Privacy Manifest (`PrivacyInfo.xcprivacy`), encryption declaration | 🛠 | ⬜ |
+| G2 | iOS permission texts; remove unused (Always location, camera, photo add) | 🛠 | ✅ `3b06f61` — the iPhone asks only for location “While Using the App”, with a clear reason for customers (pickup point) and drivers (nearby requests, sharing position during a job). “Always”/background location, camera, photo-library and save-to-photos texts removed (documents come from the system photo/Files picker, which needs no permission). A test fails if any of them come back. Seen in the built app on the simulator |
+| G3 | iOS Privacy Manifest (`PrivacyInfo.xcprivacy`), encryption declaration | 🛠 | ✅ `3b06f61` — privacy manifest added and shipped inside the app (checked in the built app): no tracking; name, email, phone, precise location, account ID, payment info (Stripe form), purchases, chat, document photos, ratings, support messages, vehicle/PDF data — all tied to the account, used only to run the app; file-timestamp reason for the file picker. Export compliance: “uses only standard encryption” set, so no question per upload. Your App Store “App Privacy” and Google Play “Data safety” answers are written out in `docs/store/app-privacy-answers.md` to paste in later (I-section) |
 | G4 | iPhone-only vs iPad support decision | 🤝 | ⬜ |
-| G5 | Android: location permissions, deep links, backup off, target latest API level | 🛠 | ⬜ |
+| G5 | Android: location permissions, deep links, backup off, target latest API level | 🛠 | 🟡 `3b06f61` — Android asks for location only while the app is open (no background location), notifications on Android 13+, no storage/camera/media permissions (system photo picker), the exact-alarm permission a plugin added is removed; backups off (sign-in stays on the phone); plain-HTTP off (debug builds may reach the local dev server only); password-reset links open the app; targets Android 16 (API 36, above Play's API 35 minimum). Left: compile and run it on Android (needs Java + Android Studio, G9); web App Links on your domain wait on G7/A10 |
 | G6 | Maps & address search from a commercial provider (Mapbox/MapTiler/Google) | 🤝 | ⬜ |
 | G7 | Universal Links / App Links on your domain (password reset) | 🛠 | ⬜ needs A10 |
 | G8 | Code signing: Apple team + Android upload key (kept safe) | 🤝 | ⬜ |
@@ -113,7 +113,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | H1 | Host the API (Render/Railway/Fly) at api.yourdomain | 🤝 | ⬜ |
 | H2 | Host admin panel (Vercel/Netlify) at admin.yourdomain, protected access | 🤝 | ⬜ |
 | H3 | Separate staging and production (Supabase + Stripe + API) | 🛠 | ⬜ |
-| H4 | Automatic checks on every push (tests, build) | 🛠 | ⬜ |
+| H4 | Automatic checks on every push (tests, build) | 🛠 | ✅ `bc6d7d0` `6cb75f1` — GitHub runs the app tests, type check, permission/privacy check, app build, admin build and server tests on every push and pull request (no secrets needed; live database tests skip there). First green run: https://github.com/Atifhusain30/AIDV2-/actions/runs/39859877346 — badge in README. Native iOS/Android builds are not in CI yet |
 | H5 | Crash & error reporting (e.g. Sentry) | 🛠 | ⬜ |
 | H6 | Uptime monitoring + alerts | 🛠 | ⬜ |
 | H7 | Transactional email from your domain (custom SMTP for Supabase) | 🤝 | ⬜ |
