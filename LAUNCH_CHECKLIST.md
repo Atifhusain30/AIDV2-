@@ -1,7 +1,7 @@
 # AID — Full Launch Checklist
 
 App Store + Google Play launch for AID roadside assistance (individual drivers only at launch).
-Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.md`.
+Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.md`.
 
 **Legend:** ✅ done · 🟡 partial · ⬜ not started · **Owner:** 🛠 dev (assistant) · 👤 you · 🤝 both
 
@@ -34,9 +34,9 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | B6 | Detailing / Window Tint: "Coming soon" or real scheduling | 🤝 | ✅ Coming soon (revisit after launch) |
 | B7 | "Request again" creates a real booking | 🛠 | ✅ |
 | B8 | Driver sees nearby requests, accepts (no double-booking) | 🛠 | 🟡 backend ✅, UI polish |
-| B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | 🟡 **next** — server ✅ (3a), driver GPS sharing + job screen ✅ (3b); customer tracking (3c) next. Sharing works while the driver app is open — background tracking (screen locked) comes with store setup (G2) |
+| B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | 🟡 nearly done — server ✅ (3a), driver GPS sharing + job screen ✅ (3b), customer live map + driver name/rating/vehicle/plate + approximate ETA ✅ (3c, `4cfd340`). Left: driver screen to enter their vehicle (API exists; until then customers see "Vehicle details not added yet"), profile photos (initials shown — no photo upload exists yet). ETA is distance-based (road-mile estimate at 30 mph), not live traffic, until G6. Updates by polling every 4 s; sharing works only while the driver app is open — background tracking comes with G2 |
 | B10 | Job lifecycle: en route → arrived → in progress → completed; cancel rules | 🛠 | 🟡 |
-| B11 | Real-time status updates on every screen | 🛠 | ⬜ |
+| B11 | Real-time status updates on every screen | 🛠 | 🟡 customer's active request (status, driver location, ETA, cancel/complete) refreshes every 4 s on every customer screen (polling); push (B14) and realtime channel not yet |
 | B12 | Real chat customer↔driver + report/block | 🛠 | ⬜ |
 | B13 | Calling (masked numbers e.g. Twilio, or direct tel:) | 🤝 | ⬜ real numbers shared during a job for now; Twilio private numbers later |
 | B14 | Push notifications (accepted, arriving, completed, new job) | 🛠 | ⬜ needs A2 |
