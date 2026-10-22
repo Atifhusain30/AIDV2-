@@ -14,7 +14,7 @@ const adminId = '33333333-3333-4333-8333-333333333333';
 const users = {
   'customer-token': { id: customerId, email: 'customer@example.com' },
   'driver-token': { id: driverId, email: 'driver@example.com' },
-  'admin-token': { id: adminId, email: 'admin@example.com' },
+  'admin-token': { id: adminId, email: 'admin@example.com', aal: 'aal2' },
 };
 const auth = { async getUser(token) { return users[token] || null; } };
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);

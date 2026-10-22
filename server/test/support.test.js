@@ -55,7 +55,7 @@ function harness({ contact } = {}) {
     },
     updates: [],
   };
-  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id } : null; } };
+  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, aal: 'aal2' } : null; } };
   return { app: createApp({ auth, repository, supportContact: contact || { email: null, phone: null } }), repository, reports, bookings };
 }
 

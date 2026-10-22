@@ -165,7 +165,7 @@ function buildHarness(stripe = null, accountAdmin = null) {
   const auth = {
     async getUser(token) {
       const user = users[token];
-      return user ? { id: user.id, email: `${user.id}@example.com` } : null;
+      return user ? { id: user.id, email: `${user.id}@example.com`, aal: 'aal2' } : null;
     },
   };
 

@@ -132,9 +132,24 @@ npm run ios:run     # Build + run on simulator
 2. Get your keys from **Developers > API Keys**
 3. For testing, use the test mode keys (starting with `pk_test_` and `sk_test_`)
 
-### 2. Configure Environment Variables
+### 2. Save the keys with the setup script (recommended)
 
-**Frontend** (`.env`):
+Run this in your own Terminal (the keys are hidden while you paste them and are never printed):
+
+```bash
+bash "/Users/agentmac/Desktop/aid app store/AIDV2-/scripts/set-stripe-keys.sh"
+```
+
+It asks for the secret key (`sk_test_…`), the publishable key (`pk_test_…`) and, optionally, the webhook
+signing secret (`whsec_…`; press Return to skip). It checks the prefixes and that both keys are the same mode
+(asks you to type `LIVE` before saving live keys), writes `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` and
+`STRIPE_WEBHOOK_SECRET` into `server/.env` and `VITE_STRIPE_PUBLISHABLE_KEY` into `.env.local` (every other
+line is kept; both files are owner-only and ignored by Git), then asks Stripe whether the key works and prints
+only `Stripe key OK (test mode)` or the error type. Afterwards restart the API and rebuild the app.
+
+### 2b. Or configure the variables by hand
+
+**Frontend** (`.env.local`):
 ```bash
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_your_key_here
 VITE_API_URL=http://localhost:3001/api

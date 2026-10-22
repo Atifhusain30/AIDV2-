@@ -119,7 +119,7 @@ function harness({ status = 'en_route', perMinute, now = NOW } = {}) {
       };
     },
   };
-  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, email: user.email } : null; } };
+  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, email: user.email, aal: 'aal2' } : null; } };
   const app = createApp({ auth, repository, supportContact: { email: null, phone: null }, clock: () => now, ...(perMinute ? { chatMessagesPerMinute: perMinute } : {}) });
   return { app, repository, bookings, messages, blocks };
 }
@@ -402,7 +402,7 @@ test('an hour of normal polling by the customer and driver on one IP never hits 
   const h = harness();
   h.repository.updateDriverLocation = async (bookingId) => h.bookings.get(bookingId);
   const { createApp: build } = require('../app');
-  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, email: user.email } : null; } };
+  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, email: user.email, aal: 'aal2' } : null; } };
   const app = build({ auth, repository: h.repository, supportContact: { email: null, phone: null }, clock: () => now });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));

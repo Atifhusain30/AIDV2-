@@ -6,6 +6,7 @@ const { randomUUID } = require('node:crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { Pool } = require('pg');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { signInWithNewTotp } = require('./helpers/totp');
 
 const runLive = process.env.LIVE_E2E === '1';
 
@@ -88,6 +89,9 @@ test('live Supabase customer → verified driver → document → completed book
     const reviewer = await createUser(`e2e-admin-${suffix}@example.com`, 'customer');
     const otherCustomer = await createUser(`e2e-customer2-${suffix}@example.com`, 'customer');
     await pool.query("update public.profiles set role='admin' where id=$1", [reviewer.id]);
+    // E5: admins need the authenticator-app step; a password-only (aal1) admin token is refused.
+    assert.equal((await api('/admin/drivers', reviewer.token)).status, 403, 'aal1 admin is refused');
+    reviewer.token = (await signInWithNewTotp(`e2e-admin-${suffix}@example.com`, password)).token;
 
     // Individual-provider onboarding: upload every required document, submit, admin reviews.
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);

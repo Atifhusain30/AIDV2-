@@ -107,6 +107,26 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); outline
 textarea { resize: vertical; }
 .signin__card .btn--block { min-height: 44px; }
 
+/* E5: two-step sign-in (authenticator app). */
+.signin__card--wide { width: min(480px, 100%); }
+.field__help { color: var(--faint); font-size: 12px; font-weight: 500; }
+.code-input { padding: 11px 14px; font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: .32em; }
+.two-step__head { display: flex; align-items: flex-start; gap: 12px; }
+.two-step__head p { margin-top: 4px; font-size: 13.5px; line-height: 1.45; }
+.two-step__icon { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.two-step__steps { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.two-step__steps li { display: flex; gap: 10px; }
+.two-step__steps li span { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-3); color: var(--text); font-size: 12px; font-weight: 700; }
+.two-step__setup { display: flex; align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.two-step__qr { display: block; flex: none; width: 152px; height: 152px; padding: 8px; border-radius: 10px; background: #fff; }
+.two-step__key { display: grid; gap: 8px; min-width: 0; font-size: 12.5px; line-height: 1.4; }
+.two-step__key code { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font: 600 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; overflow-wrap: anywhere; }
+.two-step__copy { justify-self: start; min-height: 32px; padding: 0 8px; }
+.two-step__error { margin: 0; }
+.two-step__foot { display: grid; gap: 6px; justify-items: center; padding-top: 4px; border-top: 1px solid var(--line); text-align: center; }
+.two-step__foot .hint { margin-top: 8px; font-size: 12.5px; }
+@media (max-width: 520px) { .two-step__setup { flex-direction: column; align-items: stretch; } .two-step__qr { align-self: center; } }
+
 /* Brand: the AID mark ("A" + location dot), same glyph as the apps. */
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand__mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--accent-fill); color: #fff; }

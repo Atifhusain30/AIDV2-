@@ -6,6 +6,21 @@
 import type { ReactNode } from 'react'
 import { AlertCircle, RotateCw } from 'lucide-react'
 
+/** The AID mark ("A" + location dot) + "Admin", same glyph as the apps and the app icon (src/components/brand/AidBrand.tsx). */
+export function Brand() {
+  return (
+    <div className="brand">
+      <span className="brand__mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 32 32" fill="none" focusable="false">
+          <path d="M8.6 25 L16 7.5 L23.4 25" stroke="currentColor" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="16" cy="19.4" r="2.3" fill="currentColor" />
+        </svg>
+      </span>
+      <span className="brand__name">AID <span>Admin</span></span>
+    </div>
+  )
+}
+
 /** Placeholder rows shaped like the table that is loading (never fake names or numbers). */
 export function SkeletonTable({ rows = 6, cols = 5, label }: { rows?: number; cols?: number; label: string }) {
   return (

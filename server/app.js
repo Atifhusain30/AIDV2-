@@ -32,6 +32,7 @@ const {
   securityHeaders, corsGuard, requestContext, notFound, errorHandler, silentLogger, DEFAULT_CORS_ORIGINS,
 } = require('./security');
 const { createRealtimeHub, notifyEnded } = require('./realtime');
+const { MFA_REQUIRED_CODE, MFA_REQUIRED_MESSAGE, adminNeedsMfa, mfaExempt } = require('./mfa');
 
 // E4 answer codes the apps act on.
 const ACTIVE_REQUEST_CODE = 'active_request_exists';
@@ -164,6 +165,10 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (!identity) return res.status(401).json({ error: 'Invalid or expired session' });
       const profile = await repository.getProfile(identity.id);
       if (!profile || profile.status !== 'active') return res.status(403).json({ error: 'Account is not active' });
+      // E5: an admin session without the authenticator-app step (aal1) can only read its own profile.
+      if (adminNeedsMfa(profile, identity) && !mfaExempt(req.method, `${req.baseUrl || ''}${req.path}`)) {
+        return res.status(403).json({ error: MFA_REQUIRED_MESSAGE, code: MFA_REQUIRED_CODE });
+      }
       req.auth = { identity, profile, token };
       next();
     } catch (_error) {

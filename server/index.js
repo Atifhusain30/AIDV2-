@@ -13,6 +13,7 @@ const { rateLimitsFromEnv } = require('./rateLimit');
 const { serializeError } = require('./redact');
 const { createRealtimeHub, realtimeConfigFromEnv, notifyEnded } = require('./realtime');
 const { radiusFromEnv } = require('./nearby');
+const { accessTokenClaims } = require('./mfa');
 
 // E8: one JSON line per event on stdout, already redacted (see redact.js). LOG_LEVEL: debug|info|warn|error|silent.
 const logger = createLogger({ level: process.env.LOG_LEVEL || 'info' });
@@ -44,7 +45,9 @@ const stripe = stripeKey && /^sk_(test|live)_/.test(stripeKey) ? new Stripe(stri
 const auth = {
   async getUser(accessToken) {
     const { data, error } = await supabase.auth.getUser(accessToken);
-    return error ? null : data.user;
+    if (error || !data.user) return null;
+    // E5: Supabase accepted this token above, so its aal claim ('aal1' | 'aal2') can be trusted.
+    return { ...data.user, aal: accessTokenClaims(accessToken).aal || 'aal1' };
   },
 };
 const accountAdmin = {

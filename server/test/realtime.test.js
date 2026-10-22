@@ -96,7 +96,7 @@ function harness({ clock = () => Date.now(), hubOptions = {}, status = 'accepted
     async createRating(input) { return { id: 'r1', bookingId: input.bookingId, stars: input.stars }; },
   };
   const hub = createRealtimeHub({ clock, radiusMiles: 25, ...hubOptions });
-  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id } : null; } };
+  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, aal: 'aal2' } : null; } };
   const app = createApp({ auth, repository, realtime: hub, clock, supportContact: { email: null, phone: null } });
   return { app, hub, repository, bookings };
 }

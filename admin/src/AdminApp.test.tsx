@@ -12,6 +12,10 @@ vi.mock('./api', () => ({
     signIn: vi.fn(),
     signOut: vi.fn(async () => {}),
     onSessionEnded: vi.fn(),
+    mfaState: vi.fn(),
+    startEnrollment: vi.fn(),
+    verifyCode: vi.fn(),
+    onMfaRequired: vi.fn(),
     listDrivers: vi.fn(),
     getDriver: vi.fn(),
     reviewDocument: vi.fn(async () => ({})),
@@ -73,6 +77,7 @@ function detail(extra: Partial<DriverDetail> = {}, docStatus: 'pending' | 'appro
 beforeEach(() => {
   vi.clearAllMocks()
   api.currentAdmin.mockResolvedValue(admin)
+  api.mfaState.mockResolvedValue({ step: 'done' })
   api.listDrivers.mockImplementation(async (filter) => (filter === 'all' ? [summary, second, verifiedSummary] : filter === 'verified' ? [verifiedSummary] : [summary, second]))
   api.getDriver.mockResolvedValue(detail())
   api.listReports.mockImplementation(async (filter) => ({ reports: filter === 'resolved' ? [] : [safetyReport, appReport], counts: { open: 1, in_review: 1, resolved: 0, safetyActive: 1 } }))
@@ -215,6 +220,109 @@ describe('AID admin review', () => {
     await waitFor(() => expect(api.getDriver).toHaveBeenLastCalledWith('driver-2'))
     fireEvent.click(screen.getByRole('button', { name: /back to queue/i }))
     expect(await screen.findByRole('button', { name: /dana driver/i })).toBeTruthy()
+  })
+})
+
+describe('E5: two-step sign-in for admins (authenticator app)', () => {
+  const enrollment = { factorId: 'factor-1', qrCode: 'data:image/svg+xml;utf-8,<svg xmlns="http://www.w3.org/2000/svg"/>', secret: 'JBSWY3DPEHPK3PXPJBSWY3DP', uri: 'otpauth://totp/AID%20Admin:zach@aid.test?secret=JBSWY3DPEHPK3PXPJBSWY3DP' }
+
+  async function signInWithPassword() {
+    fireEvent.change(await screen.findByLabelText(/email/i), { target: { value: 'zach@aid.test' } })
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'secret-password' } })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+  }
+
+  it('first sign-in: no authenticator yet → QR code + setup key; a wrong code is refused; the right one opens the dashboard', async () => {
+    api.currentAdmin.mockResolvedValue(null)
+    api.signIn.mockResolvedValue(admin)
+    api.mfaState.mockResolvedValue({ step: 'enroll' })
+    api.startEnrollment.mockResolvedValue(enrollment)
+    api.verifyCode.mockRejectedValueOnce(new Error("That code didn't work. Codes change every 30 seconds — enter the one your app shows now.")).mockResolvedValueOnce(undefined)
+    render(<AdminApp />)
+    await signInWithPassword()
+
+    expect(await screen.findByRole('heading', { name: /set up two-step sign-in/i })).toBeTruthy()
+    expect((await screen.findByAltText(/qr code/i)).getAttribute('src')).toBe(enrollment.qrCode)
+    expect(screen.getByLabelText(/setup key/i).textContent).toBe('JBSW Y3DP EHPK 3PXP JBSW Y3DP')
+    expect(api.listDrivers).not.toHaveBeenCalled()
+
+    const code = screen.getByLabelText(/6-digit code/i)
+    fireEvent.change(code, { target: { value: '12a345' } })
+    expect((code as HTMLInputElement).value).toBe('12345')
+    fireEvent.click(screen.getByRole('button', { name: /turn on two-step sign-in/i }))
+    expect((await screen.findByRole('alert')).textContent).toMatch(/enter the 6-digit code/i)
+    expect(api.verifyCode).not.toHaveBeenCalled()
+
+    fireEvent.change(code, { target: { value: '000000' } })
+    fireEvent.click(screen.getByRole('button', { name: /turn on two-step sign-in/i }))
+    expect((await screen.findByRole('alert')).textContent).toMatch(/didn't work/i)
+    expect(api.listDrivers).not.toHaveBeenCalled()
+
+    fireEvent.change(code, { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: /turn on two-step sign-in/i }))
+    await screen.findByRole('button', { name: /dana driver/i })
+    expect(api.verifyCode).toHaveBeenLastCalledWith('factor-1', '123456')
+  })
+
+  it('later sign-ins: asks for the code (no QR), shows rate-limit messages, then opens the dashboard', async () => {
+    api.mfaState.mockResolvedValue({ step: 'challenge', factorId: 'factor-9' })
+    api.verifyCode.mockRejectedValueOnce(new Error('Too many attempts. Wait a minute, then try again with the current code.')).mockResolvedValueOnce(undefined)
+    render(<AdminApp />)
+    expect(await screen.findByRole('heading', { name: /enter your code/i })).toBeTruthy()
+    expect(screen.queryByAltText(/qr code/i)).toBeNull()
+    expect(api.startEnrollment).not.toHaveBeenCalled()
+    expect(screen.getByText(/lost your phone/i)).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText(/6-digit code/i), { target: { value: '654321' } })
+    fireEvent.click(screen.getByRole('button', { name: /verify and continue/i }))
+    expect((await screen.findByRole('alert')).textContent).toMatch(/too many attempts/i)
+    fireEvent.change(screen.getByLabelText(/6-digit code/i), { target: { value: '654321' } })
+    fireEvent.click(screen.getByRole('button', { name: /verify and continue/i }))
+    await screen.findByRole('button', { name: /dana driver/i })
+    expect(api.verifyCode).toHaveBeenLastCalledWith('factor-9', '654321')
+  })
+
+  it('sign out from the code screen returns to sign-in', async () => {
+    api.mfaState.mockResolvedValue({ step: 'challenge', factorId: 'factor-9' })
+    render(<AdminApp />)
+    fireEvent.click(await screen.findByRole('button', { name: /sign out/i }))
+    expect(api.signOut).toHaveBeenCalled()
+    expect(await screen.findByLabelText(/email/i)).toBeTruthy()
+  })
+
+  it('if set-up cannot start, says so with Try again', async () => {
+    api.mfaState.mockResolvedValue({ step: 'enroll' })
+    api.startEnrollment.mockRejectedValueOnce(new Error('Authenticator apps are turned off for this AID project.')).mockResolvedValueOnce(enrollment)
+    render(<AdminApp />)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/turned off/i)
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }))
+    expect(await screen.findByAltText(/qr code/i)).toBeTruthy()
+  })
+
+  it('when the server answers mfa_required, the site goes back to the code screen', async () => {
+    render(<AdminApp />)
+    await screen.findByRole('button', { name: /dana driver/i })
+    const calls = api.onMfaRequired.mock.calls
+    const listener = calls[calls.length - 1]?.[0]
+    expect(listener).toBeTypeOf('function')
+    api.mfaState.mockResolvedValue({ step: 'challenge', factorId: 'factor-9' })
+    listener!()
+    expect(await screen.findByRole('heading', { name: /enter your code/i })).toBeTruthy()
+  })
+
+  it('the set-up and code screens have no serious axe violations', async () => {
+    document.documentElement.lang = 'en'
+    document.title = 'AID Admin'
+    api.mfaState.mockResolvedValue({ step: 'enroll' })
+    api.startEnrollment.mockResolvedValue(enrollment)
+    const first = render(<AdminApp />)
+    await screen.findByAltText(/qr code/i)
+    expect(await seriousA11yViolations()).toEqual([])
+    first.unmount()
+    api.mfaState.mockResolvedValue({ step: 'challenge', factorId: 'factor-9' })
+    render(<AdminApp />)
+    await screen.findByRole('heading', { name: /enter your code/i })
+    expect(await seriousA11yViolations()).toEqual([])
   })
 })
 

@@ -38,7 +38,7 @@ describe('one colour system (F2)', () => {
 })
 
 describe('one icon set, one stroke weight', () => {
-  const admin = ['AdminApp.tsx', 'Reports.tsx', 'FilterTabs.tsx', 'ui.tsx'].map((file) => [`admin/src/${file}`, read(`admin/src/${file}`)] as const)
+  const admin = ['AdminApp.tsx', 'Reports.tsx', 'FilterTabs.tsx', 'ui.tsx', 'TwoStep.tsx'].map((file) => [`admin/src/${file}`, read(`admin/src/${file}`)] as const)
   const all = [...Object.entries(tsx), ...admin]
 
   it('every icon comes from lucide-react (no second icon library)', () => {

@@ -51,7 +51,7 @@ function harness({ now = Date.now() } = {}) {
         .map((b) => ({ bookingId: b.id, serviceName: b.service.name, completedAt: b.completedAt.toISOString(), rateeFirstName: role === 'customer' ? 'Marcus' : 'Casey' }));
     },
   };
-  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id } : null; } };
+  const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, aal: 'aal2' } : null; } };
   return { app: createApp({ auth, repository }), repository, ratings, bookings };
 }
 

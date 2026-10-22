@@ -7,7 +7,9 @@ import { adminApi } from './api'
 import Dialog from '../../src/components/ui/Dialog'
 import FilterTabs, { tabId } from './FilterTabs'
 import ReportsInbox from './Reports'
-import { EmptyState, LoadError, SkeletonDetail, SkeletonTable } from './ui'
+import { Brand, EmptyState, LoadError, SkeletonDetail, SkeletonTable } from './ui'
+import TwoStep from './TwoStep'
+import type { MfaState } from './api'
 import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverRatings, DriverSummary, QueueFilter, ReportCounts, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
 
 // ---------- Copy & rules ----------
@@ -92,21 +94,6 @@ function inFilter(driver: DriverSummary, filter: QueueFilter): boolean {
 
 // ---------- Shared UI ----------
 
-/** The AID mark ("A" + location dot) + "Admin", same glyph as the apps and the app icon (src/components/brand/AidBrand.tsx). */
-function Brand() {
-  return (
-    <div className="brand">
-      <span className="brand__mark" aria-hidden="true">
-        <svg width="20" height="20" viewBox="0 0 32 32" fill="none" focusable="false">
-          <path d="M8.6 25 L16 7.5 L23.4 25" stroke="currentColor" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="16" cy="19.4" r="2.3" fill="currentColor" />
-        </svg>
-      </span>
-      <span className="brand__name">AID <span>Admin</span></span>
-    </div>
-  )
-}
-
 function StatusBadge({ status }: { status: VerificationStatus }) {
   return <span className={`badge badge--${status}`}>{STATUS_LABELS[status]}</span>
 }
@@ -149,7 +136,7 @@ function ReasonField({ id, value, onChange, suggestions }: { id: string; value: 
 
 // ---------- Sign in ----------
 
-function SignIn({ onSignedIn, initialError }: { onSignedIn: (admin: AdminProfile) => void; initialError: string | null }) {
+function SignIn({ onSignedIn, initialError }: { onSignedIn: (admin: AdminProfile) => Promise<void>; initialError: string | null }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(initialError)
@@ -168,7 +155,7 @@ function SignIn({ onSignedIn, initialError }: { onSignedIn: (admin: AdminProfile
     setBusy(true)
     setError(null)
     try {
-      onSignedIn(await adminApi.signIn(typedEmail, typedPassword))
+      await onSignedIn(await adminApi.signIn(typedEmail, typedPassword))
     } catch (signInError) {
       setError(message(signInError))
     } finally {
@@ -723,20 +710,36 @@ function Dashboard({ admin, onSignOut }: { admin: AdminProfile; onSignOut: () =>
 
 export default function AdminApp() {
   const [admin, setAdmin] = useState<AdminProfile | null>(null)
+  // E5: password alone is not enough — the dashboard opens only once this is { step: 'done' } (aal2).
+  const [mfa, setMfa] = useState<MfaState | null>(null)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  /** After the password step: find out whether to set up the authenticator app, ask for a code, or open the dashboard. */
+  const enter = useCallback(async (profile: AdminProfile) => {
+    const state = await adminApi.mfaState()
+    setMfa(state)
+    setAdmin(profile)
+  }, [])
+
+  const signOut = useCallback(() => { void adminApi.signOut(); setError(null); setMfa(null); setAdmin(null) }, [])
+
   useEffect(() => {
     adminApi.currentAdmin()
-      .then(setAdmin)
+      .then((profile) => (profile ? enter(profile) : undefined))
       .catch((sessionError) => setError(message(sessionError)))
       .finally(() => setChecking(false))
     // E6: an expired or revoked session (401) signs the reviewer out and shows the sign-in screen.
-    adminApi.onSessionEnded((reason) => { setAdmin(null); setError(reason) })
-    return () => adminApi.onSessionEnded(null)
-  }, [])
+    adminApi.onSessionEnded((reason) => { setAdmin(null); setMfa(null); setError(reason) })
+    // E5: the server says this session hasn't passed the code step (e.g. the factor was reset) — ask again.
+    adminApi.onMfaRequired(() => {
+      adminApi.mfaState().then(setMfa).catch((mfaError) => { void adminApi.signOut(); setAdmin(null); setMfa(null); setError(message(mfaError)) })
+    })
+    return () => { adminApi.onSessionEnded(null); adminApi.onMfaRequired(null) }
+  }, [enter])
 
   if (checking) return <div className="boot">Loading…</div>
-  if (!admin) return <SignIn onSignedIn={setAdmin} initialError={error} />
-  return <Dashboard admin={admin} onSignOut={() => { void adminApi.signOut(); setError(null); setAdmin(null) }} />
+  if (!admin || !mfa) return <SignIn onSignedIn={enter} initialError={error} />
+  if (mfa.step !== 'done') return <TwoStep key={mfa.step} admin={admin} state={mfa} onVerified={() => setMfa({ step: 'done' })} onSignOut={signOut} />
+  return <Dashboard admin={admin} onSignOut={signOut} />
 }

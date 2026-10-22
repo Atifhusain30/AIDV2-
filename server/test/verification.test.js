@@ -81,7 +81,7 @@ function harness() {
     async remove() {},
   };
   const tokens = { driver: 'driver-1', customer: 'customer-1', admin: 'admin-1' };
-  const auth = { async getUser(token) { return tokens[token] ? { id: tokens[token], email: `${token}@example.com` } : null; } };
+  const auth = { async getUser(token) { return tokens[token] ? { id: tokens[token], email: `${token}@example.com`, aal: 'aal2' } : null; } };
   return { app: createApp({ auth, repository, documentStorage }), profiles, documents, events };
 }
 

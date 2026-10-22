@@ -14,7 +14,12 @@ const accounts = {
     identity: { id: 'd1', user_metadata: { role: 'admin' } },
     profile: { id: 'd1', role: 'driver', status: 'active', verificationStatus: 'verified', credentialsValidUntil: '2099-01-01', isOnline: true, driverVehicle: VEHICLE },
   },
-  adminToken: { identity: { id: 'a1', user_metadata: { role: 'customer' } }, profile: { id: 'a1', role: 'admin', status: 'active' } },
+  adminToken: { identity: { id: 'a1', aal: 'aal2', user_metadata: { role: 'customer' } }, profile: { id: 'a1', role: 'admin', status: 'active' } },
+  // E5: the same admin before the authenticator-app step (password only).
+  adminAal1Token: { identity: { id: 'a1', aal: 'aal1', user_metadata: { role: 'customer' } }, profile: { id: 'a1', role: 'admin', status: 'active' } },
+  // An admin whose token carries no aal claim at all is treated as password-only.
+  adminNoAalToken: { identity: { id: 'a1', user_metadata: { role: 'customer' } }, profile: { id: 'a1', role: 'admin', status: 'active' } },
+  customerAal1Token: { identity: { id: 'c1', aal: 'aal1', user_metadata: {} }, profile: { id: 'c1', role: 'customer', status: 'active' } },
   suspendedToken: { identity: { id: 's1', user_metadata: { role: 'customer' } }, profile: { id: 's1', role: 'customer', status: 'suspended' } },
 };
 
@@ -89,6 +94,62 @@ test('admin-only routes refuse customers and drivers — a metadata role of "adm
       assert.equal(response.body.error, 'admin account required', `${token} ${method} ${path}`);
     }
   }
+});
+
+// ---- E5: admin two-step sign-in (TOTP) ----
+const EXTRA_ADMIN_REACHABLE = [
+  ['patch', '/api/me'], ['delete', '/api/me'], ['get', '/api/bookings'], ['post', '/api/realtime/ticket'],
+  ['get', '/api/support/reports'], ['get', '/api/ratings/pending'],
+];
+
+test('E5: an admin session without the authenticator code (aal1) is refused on every admin route with mfa_required', async () => {
+  const app = harness();
+  for (const token of ['adminAal1Token', 'adminNoAalToken']) {
+    for (const [method, path] of [...ADMIN_ONLY, ...EXTRA_ADMIN_REACHABLE, ...CUSTOMER_ONLY, ...DRIVER_ONLY]) {
+      const response = await send(app, method, path, token);
+      assert.equal(response.status, 403, `${token} ${method} ${path}`);
+      assert.equal(response.body.code, 'mfa_required', `${token} ${method} ${path}`);
+    }
+  }
+});
+
+test('E5: an aal1 admin may still read its own profile (so the admin site can ask for the code)', async () => {
+  const response = await send(harness(), 'get', '/api/me', 'adminAal1Token');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.role, 'admin');
+});
+
+test('E5: an admin who passed the authenticator step (aal2) gets admin data', async () => {
+  const app = harness();
+  for (const [method, path] of ADMIN_ONLY) {
+    const response = await send(app, method, path, 'adminToken');
+    assert.notEqual(response.body.code, 'mfa_required', `${method} ${path}`);
+    assert.notEqual(response.body.error, 'admin account required', `${method} ${path}`);
+  }
+});
+
+test('E5: customers and drivers never need a second step (aal1 is fine)', async () => {
+  const app = harness();
+  const me = await send(app, 'get', '/api/me', 'customerAal1Token');
+  assert.equal(me.status, 200);
+  for (const [method, path] of CUSTOMER_ONLY) {
+    const response = await send(app, method, path, 'customerAal1Token');
+    assert.notEqual(response.body.code, 'mfa_required', `${method} ${path}`);
+  }
+  // Admin routes still say "admin account required" to them, not "enter your code".
+  const adminRoute = await send(app, 'get', '/api/admin/drivers', 'customerAal1Token');
+  assert.equal(adminRoute.status, 403);
+  assert.equal(adminRoute.body.error, 'admin account required');
+});
+
+test('E5: accessTokenClaims reads the aal claim and never throws on junk', () => {
+  const { accessTokenClaims, adminNeedsMfa } = require('../mfa');
+  const payload = Buffer.from(JSON.stringify({ sub: 'a1', aal: 'aal2' })).toString('base64url');
+  assert.equal(accessTokenClaims(`header.${payload}.signature`).aal, 'aal2');
+  for (const junk of ['', 'abc', 'a.b.c', null, undefined, 'a.!!!.c']) assert.deepEqual(accessTokenClaims(junk), {});
+  assert.equal(adminNeedsMfa({ role: 'admin' }, { aal: 'aal1' }), true);
+  assert.equal(adminNeedsMfa({ role: 'admin' }, { aal: 'aal2' }), false);
+  assert.equal(adminNeedsMfa({ role: 'driver' }, { aal: 'aal1' }), false);
 });
 
 test('live updates are only for customers and drivers', async () => {
