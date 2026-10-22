@@ -6,7 +6,7 @@ const {
   todayIso, parseIsoDate, cleanNotes, verificationReadiness, credentialsCurrent,
 } = require('./verification');
 const { quoteService, PricingError, TOWING } = require('./pricing');
-const { checkRequest, checkTransition, REPORTABLE, ISSUE_CATEGORIES } = require('./lifecycle');
+const { checkRequest, checkTransition, REPORTABLE, ISSUE_CATEGORIES, DEFAULT_REQUEST_EXPIRY_MINUTES } = require('./lifecycle');
 const {
   cleanDriverVehicle, driverVehicleComplete, VEHICLE_REQUIRED_MESSAGE, SERVICE_EQUIPMENT, EQUIPMENT_MISMATCH_CODE,
   equipmentCapability, canPerformService,
@@ -15,6 +15,10 @@ const {
   radiusFromEnv, parsePosition, boundingBox, distanceTo, nearestWithin,
   LOCATION_MAX_AGE_MINUTES, LOCATION_REQUIRED_CODE, OUT_OF_RANGE_CODE,
 } = require('./nearby');
+
+// E4 answer codes the apps act on.
+const ACTIVE_REQUEST_CODE = 'active_request_exists';
+const REQUEST_EXPIRED_CODE = 'request_expired';
 
 const DOCUMENT_TYPES = new Set(REQUIRED_DOCUMENT_TYPES);
 const publicDocument = ({ storagePath: _storagePath, ...document }) => document;
@@ -71,6 +75,22 @@ function validVehicle(input) {
 
 function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv() }) {
   const app = express();
+  const requestExpiryMinutes = repository.requestExpiryMinutes || DEFAULT_REQUEST_EXPIRY_MINUTES;
+  // E4: end stale work for this caller before answering (the interval sweep in index.js does the rest).
+  const expireStaleFor = (auth) => {
+    const role = auth.profile.role;
+    if (role === 'customer') return repository.expireStaleBookings({ customerId: auth.identity.id });
+    if (role === 'driver') return repository.expireStaleBookings({ driverId: auth.identity.id });
+    return null;
+  };
+  const activeRequestConflict = (res, booking) => res.status(409).json({
+    error: 'You already have an active request. Follow it, or cancel it before requesting again.',
+    code: ACTIVE_REQUEST_CODE, booking,
+  });
+  const expiredRequest = (res) => res.status(409).json({
+    error: `This request expired — no driver accepted it within ${requestExpiryMinutes} minutes, so it's no longer available.`,
+    code: REQUEST_EXPIRED_CODE,
+  });
   app.disable('x-powered-by');
   const allowedOrigins = new Set((Array.isArray(corsOrigin) ? corsOrigin : String(corsOrigin).split(',')).map((origin) => origin.trim()).filter(Boolean));
   app.use(cors({
@@ -224,23 +244,41 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (req.body.vehicleId && !await repository.getVehicle(req.auth.identity.id, req.body.vehicleId)) {
         return res.status(400).json({ error: 'Vehicle is not available for this customer' });
       }
-      const booking = await repository.createBooking({
-        customerId: req.auth.identity.id, vehicleId: req.body.vehicleId || null, service,
-        location: cleanLocation(req.body.location),
-        dropoffLocation: dropoff ? cleanLocation(dropoff) : null, estimatedPrice: quote.price,
-        notes: typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 1000) : null,
-      });
+      // E4: one active request per customer. Stale ones are ended first so they never block a new
+      // request; the unique index catches two requests racing past this check.
+      await expireStaleFor(req.auth);
+      const existing = await repository.getActiveBooking(req.auth.identity.id, 'customer');
+      if (existing) return activeRequestConflict(res, existing);
+      let booking;
+      try {
+        booking = await repository.createBooking({
+          customerId: req.auth.identity.id, vehicleId: req.body.vehicleId || null, service,
+          location: cleanLocation(req.body.location),
+          dropoffLocation: dropoff ? cleanLocation(dropoff) : null, estimatedPrice: quote.price,
+          notes: typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 1000) : null,
+        });
+      } catch (error) {
+        if (error?.code !== ACTIVE_REQUEST_CODE) throw error;
+        return activeRequestConflict(res, await repository.getActiveBooking(req.auth.identity.id, 'customer'));
+      }
       res.status(201).json(booking);
     } catch (error) { next(error); }
   });
   app.get('/api/bookings', authenticate, async (req, res, next) => {
-    try { res.json(await repository.listBookings(req.auth.identity.id, req.auth.profile.role)); } catch (error) { next(error); }
+    try {
+      await expireStaleFor(req.auth);
+      res.json(await repository.listBookings(req.auth.identity.id, req.auth.profile.role));
+    } catch (error) { next(error); }
   });
   app.get('/api/bookings/active', authenticate, async (req, res, next) => {
-    try { res.json(await repository.getActiveBooking(req.auth.identity.id, req.auth.profile.role)); } catch (error) { next(error); }
+    try {
+      await expireStaleFor(req.auth);
+      res.json(await repository.getActiveBooking(req.auth.identity.id, req.auth.profile.role));
+    } catch (error) { next(error); }
   });
   app.get('/api/bookings/:bookingId', authenticate, async (req, res, next) => {
     try {
+      await expireStaleFor(req.auth);
       const booking = await repository.getBooking(req.params.bookingId, req.auth.identity.id, req.auth.profile.role);
       if (!booking) return res.status(404).json({ error: 'Booking not found' });
       res.json(booking);
@@ -257,6 +295,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       // Reject moves this party can never make before loading anything.
       const request = checkRequest({ role, next: nextStatus, reason });
       if (!request.ok) return res.status(request.status).json({ error: request.error });
+      await expireStaleFor(req.auth); // an overdue request answers "expired", not a stale status
       const current = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
       const verdict = checkTransition({ role, booking: current, next: nextStatus, reason });
       if (!verdict.ok) {
@@ -326,12 +365,18 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   });
   app.post('/api/bookings/:bookingId/accept', authenticate, requireVerifiedDriver, requireDriverVehicle, requireOnlineDriver, async (req, res, next) => {
     try {
+      // A job this driver went silent on, or a request past its window, ends first (E4).
+      await repository.expireStaleBookings({ driverId: req.auth.identity.id });
+      await repository.expireStaleBookings({ bookingId: req.params.bookingId });
       // One job at a time (also enforced atomically in acceptBooking); this gives the clearer message.
       const current = await repository.getActiveBooking(req.auth.identity.id, 'driver');
-      if (current) return res.status(409).json({ error: 'Finish or cancel your current job before accepting another' });
+      if (current) return res.status(409).json({ error: 'Finish or cancel your current job before accepting another', code: 'driver_busy' });
       const equipmentType = req.auth.profile.driverVehicle.equipmentType;
       const open = await repository.getAvailableBooking(req.params.bookingId);
-      if (!open) return res.status(409).json({ error: 'Booking is no longer available' });
+      if (!open) {
+        if (await repository.getBookingStatus(req.params.bookingId) === 'expired') return expiredRequest(res);
+        return res.status(409).json({ error: 'Booking is no longer available' });
+      }
       const fit = canPerformService(equipmentType, open);
       if (!fit.ok) return res.status(403).json({ error: fit.error, code: EQUIPMENT_MISMATCH_CODE });
       // Same radius as the request list, checked against the driver's last fresh position. Advisory
@@ -342,7 +387,16 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
         return res.status(403).json({ error: `This job is more than ${requestRadiusMiles} miles from you.`, code: OUT_OF_RANGE_CODE });
       }
       const booking = await repository.acceptBooking(req.params.bookingId, req.auth.identity.id, equipmentCapability(equipmentType));
-      if (!booking) return res.status(409).json({ error: 'Booking is no longer available' });
+      if (!booking) {
+        // Something changed between the checks above and the atomic accept: the request ran out of
+        // time or was taken, or this driver's other accept landed first (one job at a time).
+        await repository.expireStaleBookings({ bookingId: req.params.bookingId });
+        if (await repository.getBookingStatus(req.params.bookingId) === 'expired') return expiredRequest(res);
+        if (await repository.getActiveBooking(req.auth.identity.id, 'driver')) {
+          return res.status(409).json({ error: 'Finish or cancel your current job before accepting another', code: 'driver_busy' });
+        }
+        return res.status(409).json({ error: 'Booking is no longer available' });
+      }
       res.json(booking);
     } catch (error) { next(error); }
   });

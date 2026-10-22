@@ -778,7 +778,8 @@ select:focus-visible {
 .activity-card__copy small { display: flex; align-items: center; gap: 5px; max-width: 210px; margin-top: 4px; overflow: hidden; color: #81798a; font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
 .activity-status { color: #a9a0b2; font-size: .57rem; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
 .activity-status--completed { color: #58d59e; }
-.activity-status--cancelled { color: #ff7771; }
+.activity-status--cancelled,
+.activity-status--expired { color: #ff7771; }
 .activity-status--en_route,
 .activity-status--arrived,
 .activity-status--in_progress { color: #b69af8; }
@@ -1285,6 +1286,7 @@ select:focus-visible {
 .track-ended p { margin-top: 4px; color: var(--aid-muted); font-size: .8125rem; line-height: 1.4; }
 .track-ended__actions { display: flex; align-items: flex-start; gap: 6px; }
 .track-ended__again { padding: 9px 12px; border-radius: 12px; background: #7c3aed; color: #fff; font-size: .8125rem; font-weight: 700; white-space: nowrap; }
+.track-ended--info { border-color: rgba(124,58,237,.38); }
 .track-ended__close { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; color: var(--aid-muted); }
 .track-eta--text h2 { font-size: 1.375rem; letter-spacing: -.01em; }
 .track-sheet--standalone { margin-top: 12px; }

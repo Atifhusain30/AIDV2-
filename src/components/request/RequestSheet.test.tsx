@@ -29,6 +29,7 @@ function open(selectedService: string | null, extra: Record<string, unknown> = {
     pendingReturnModal: null,
     vehicles: [{ id: 'veh-1', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123' }] as never,
     activeVehicleId: 'veh-1',
+    activeBooking: null,
     ...extra,
   })
   render(<RequestSheet />)
@@ -122,6 +123,30 @@ describe('request sheet', () => {
     fireEvent.click(await within(sheet).findByRole('button', { name: /request · \$69/i }))
     expect((await within(sheet).findByRole('alert')).textContent).toMatch(/valid service location/)
     expect(useAppStore.getState().activeModal).toBe('services')
+  })
+
+  it('E4: with a request already in progress, opening the sheet goes to that request', async () => {
+    useAppStore.setState({
+      activeRequestRedirect: false, activeModal: 'services', currentScreen: 'home',
+      serviceFormData: { selectedService: 'battery_jump', problemDescription: '', vehicleType: null, dropoff: null },
+      activeBooking: { id: 'booking-live', status: 'searching' } as never,
+    })
+    render(<RequestSheet />)
+    await waitFor(() => expect(useAppStore.getState().currentScreen).toBe('chat'))
+    expect(useAppStore.getState().activeModal).toBeNull()
+    expect(useAppStore.getState().activeRequestRedirect).toBe(true)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(bookingService.requestAndStartBooking).not.toHaveBeenCalled()
+  })
+
+  it('E4: when the server says one is already active, the customer is taken to it, not shown an error', async () => {
+    useAppStore.setState({ activeRequestRedirect: false })
+    vi.mocked(bookingService.requestAndStartBooking).mockResolvedValueOnce({ booking: { id: 'booking-other-device' }, alreadyActive: true } as never)
+    const sheet = open('battery_jump', { activeBooking: null })
+    fireEvent.click(await within(sheet).findByRole('button', { name: /request · \$69/i }))
+    await waitFor(() => expect(useAppStore.getState().currentScreen).toBe('chat'))
+    expect(useAppStore.getState().activeRequestRedirect).toBe(true)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('does not allow requesting without real prices', async () => {

@@ -1,10 +1,22 @@
 const { types } = require('pg');
 const { estimateArrival } = require('./pricing');
+const {
+  ACTIVE_STATUSES: ACTIVE, EXPIRABLE, STALE_RELEASABLE, DEFAULT_REQUEST_EXPIRY_MINUTES, DEFAULT_STALE_JOB_MINUTES,
+} = require('./lifecycle');
 
 // Keep SQL `date` values as YYYY-MM-DD strings; JS Date conversion shifts them by timezone.
 types.setTypeParser(1082, (value) => value);
 
-const ACTIVE_STATUSES = ['pending', 'searching', 'accepted', 'en_route', 'arrived', 'in_progress'];
+const ACTIVE_STATUSES = [...ACTIVE];
+// The partial unique index that allows one active booking per customer (migration 20261022200000).
+const ONE_ACTIVE_INDEX = 'bookings_one_active_per_customer';
+// ...and one unfinished job per driver.
+const ONE_JOB_PER_DRIVER_INDEX = 'bookings_one_active_job_per_driver';
+
+/** Thrown by createBooking when the customer already has an active booking (the unique index fired). */
+class ActiveBookingExistsError extends Error {
+  constructor() { super('Customer already has an active booking'); this.code = 'active_request_exists'; }
+}
 const ESTIMATED_TIMES = { battery_jump: 30, flat_tire: 35, towing: 60, lockout: 30, fuel_delivery: 35, ev_charging: 45, oil_change: 45, detailing: 120, window_tinting: 180 };
 
 function dollars(cents) {
@@ -130,14 +142,16 @@ function mapBooking(row) {
     startedAt: row.started_at || undefined,
     completedAt: row.completed_at || undefined,
     cancelledAt: row.cancelled_at || undefined,
+    expiredAt: row.expired_at || undefined,
   };
   if (row.cancelled_by) booking.cancelledBy = row.cancelled_by;
+  // Why the server ended it on its own (E4): 'no_driver_found' (expired) or 'driver_unresponsive'.
+  if (row.system_end_reason) booking.endReason = row.system_end_reason;
   if (row.dropoff_address) booking.dropoffLocation = { address: row.dropoff_address, lat: row.dropoff_lat, lng: row.dropoff_lng };
   if (row.vehicle_id) booking.vehicle = { vehicleId: row.vehicle_id, label: row.vehicle_label || 'Saved vehicle', plate: row.vehicle_plate || undefined };
   if (row.customer_name != null) {
     booking.customerName = row.customer_name;
     booking.customerPhone = row.customer_phone || '';
-    booking.expiresAt = new Date(new Date(row.created_at).getTime() + 10 * 60 * 1000);
   }
   return booking;
 }
@@ -153,9 +167,14 @@ const PARTY_SELECT = `
     dp.rating as party_driver_rating, dp.total_jobs as party_driver_total_jobs,
     dp.vehicle_make as party_driver_vehicle_make, dp.vehicle_model as party_driver_vehicle_model,
     dp.vehicle_color as party_driver_vehicle_color, dp.vehicle_plate as party_driver_vehicle_plate,
-    (select case when e.actor_id = b.customer_id then 'customer' when e.actor_id = b.driver_id then 'driver' else 'support' end
+    (select case when e.actor_id = b.customer_id then 'customer' when e.actor_id = b.driver_id then 'driver'
+              when e.actor_id is null and e.metadata->>'role' = 'system' then 'system' else 'support' end
        from public.booking_events e where e.booking_id = b.id and e.to_status = 'cancelled' and e.event_type = 'status_changed'
-       order by e.created_at desc limit 1) as cancelled_by
+       order by e.created_at desc limit 1) as cancelled_by,
+    (select e.metadata->>'reason'
+       from public.booking_events e where e.booking_id = b.id and e.to_status in ('cancelled','expired') and e.event_type = 'status_changed'
+         and e.actor_id is null and e.metadata->>'role' = 'system'
+       order by e.created_at desc limit 1) as system_end_reason
   from public.bookings b
   left join public.vehicles v on v.id = b.vehicle_id
   left join public.profiles c on c.id = b.customer_id
@@ -201,7 +220,25 @@ function mapParticipantBooking(row, role) {
 }
 
 class PostgresRepository {
-  constructor(pool) { this.pool = pool; }
+  /**
+   * `requestExpiryMinutes`: an unaccepted request expires this long after it was made.
+   * `staleJobMinutes`: an accepted/en_route job is released after this long with no word from the driver.
+   * (Both from expiryConfigFromEnv() in lifecycle.js.)
+   */
+  constructor(pool, { requestExpiryMinutes = DEFAULT_REQUEST_EXPIRY_MINUTES, staleJobMinutes = DEFAULT_STALE_JOB_MINUTES } = {}) {
+    this.pool = pool;
+    this.requestExpiryMinutes = requestExpiryMinutes;
+    this.staleJobMinutes = staleJobMinutes;
+  }
+
+  // A participant's view of a booking, plus when an open request will expire.
+  participant(row, role) {
+    const booking = mapParticipantBooking(row, role);
+    if (booking && EXPIRABLE.includes(booking.status)) {
+      booking.expiresAt = new Date(new Date(row.created_at).getTime() + this.requestExpiryMinutes * 60000).toISOString();
+    }
+    return booking;
+  }
 
   async getProfile(userId) {
     const result = await this.pool.query(`
@@ -458,43 +495,107 @@ class PostgresRepository {
     return result.rowCount > 0;
   }
 
+  // One active booking per customer is guaranteed by the partial unique index: if two requests race,
+  // exactly one insert lands and the other gets ActiveBookingExistsError (the API answers 409).
   async createBooking(input) {
     const dropoff = input.dropoffLocation;
-    const result = await this.pool.query(`
-      insert into public.bookings (
-        customer_id, vehicle_id, service_type, service_name, location_address, location_lat, location_lng,
-        dropoff_address, dropoff_lat, dropoff_lng, estimated_price_cents, notes
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *
-    `, [
-      input.customerId, input.vehicleId, input.service.id, input.service.name,
-      input.location.address, input.location.lat, input.location.lng,
-      dropoff?.address || null, dropoff?.lat ?? null, dropoff?.lng ?? null,
-      Math.round(input.estimatedPrice * 100), input.notes,
-    ]);
-    return mapBooking(result.rows[0]);
+    let result;
+    try {
+      result = await this.pool.query(`
+        insert into public.bookings (
+          customer_id, vehicle_id, service_type, service_name, location_address, location_lat, location_lng,
+          dropoff_address, dropoff_lat, dropoff_lng, estimated_price_cents, notes
+        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *
+      `, [
+        input.customerId, input.vehicleId, input.service.id, input.service.name,
+        input.location.address, input.location.lat, input.location.lng,
+        dropoff?.address || null, dropoff?.lat ?? null, dropoff?.lng ?? null,
+        Math.round(input.estimatedPrice * 100), input.notes,
+      ]);
+    } catch (error) {
+      if (error?.code === '23505' && error.constraint === ONE_ACTIVE_INDEX) throw new ActiveBookingExistsError();
+      throw error;
+    }
+    return this.participant(result.rows[0], 'customer');
   }
 
   async listBookings(userId, role) {
     const column = role === 'driver' ? 'b.driver_id' : 'b.customer_id';
     const result = await this.pool.query(`${PARTY_SELECT} where ${column}=$1 order by b.created_at desc limit 100`, [userId]);
-    return result.rows.map((row) => mapParticipantBooking(row, role));
+    return result.rows.map((row) => this.participant(row, role));
   }
 
   async selectParticipantBooking(bookingId, role) {
     const result = await this.pool.query(`${PARTY_SELECT} where b.id=$1`, [bookingId]);
-    return mapParticipantBooking(result.rows[0], role);
+    return this.participant(result.rows[0], role);
   }
 
   async getBooking(bookingId, userId, role) {
     const condition = role === 'admin' ? 'true' : role === 'driver' ? 'b.driver_id=$2' : 'b.customer_id=$2';
     const result = await this.pool.query(`${PARTY_SELECT} where b.id=$1 and ${condition}`, [bookingId, userId]);
-    return mapParticipantBooking(result.rows[0], role);
+    return this.participant(result.rows[0], role);
   }
 
   async getActiveBooking(userId, role) {
     const column = role === 'driver' ? 'b.driver_id' : 'b.customer_id';
     const result = await this.pool.query(`${PARTY_SELECT} where ${column}=$1 and b.status=any($2::text[]) order by b.created_at desc limit 1`, [userId, ACTIVE_STATUSES]);
-    return mapParticipantBooking(result.rows[0], role);
+    return this.participant(result.rows[0], role);
+  }
+
+  /** Just the status of any booking (to explain a refused accept), or null when it doesn't exist. */
+  async getBookingStatus(bookingId) {
+    const result = await this.pool.query('select status from public.bookings where id=$1', [bookingId]);
+    return result.rows[0]?.status || null;
+  }
+
+  /**
+   * E4: end stale work, each change audited (actor null, role 'system') in the same statement.
+   *   • pending/searching older than requestExpiryMinutes → 'expired' (reason no_driver_found)
+   *   • accepted/en_route whose driver has been silent for staleJobMinutes → 'cancelled' (reason
+   *     driver_unresponsive). Silent = the later of acceptance, the last shared location and the last
+   *     status change is older than the window.
+   * Optional scope (customerId / driverId / bookingId) keeps the lazy checks on reads cheap; the
+   * interval sweep passes none. Row locks make this safe against a concurrent accept or status change:
+   * whichever commits first wins and the other re-checks its WHERE clause.
+   * Returns { expired, released } (booking ids).
+   */
+  async expireStaleBookings({ customerId = null, driverId = null, bookingId = null } = {}) {
+    const result = await this.pool.query(`
+      with open_prev as (
+        select b.id, b.status from public.bookings b
+        where b.status = any($4::text[]) and b.created_at <= now() - make_interval(mins => $6::int)
+          and ($1::uuid is null or b.customer_id=$1) and ($2::uuid is null or b.driver_id=$2) and ($3::uuid is null or b.id=$3)
+        for update skip locked
+      ), expired as (
+        update public.bookings b set status='expired', expired_at=now()
+        from open_prev p where b.id=p.id
+        returning b.id, p.status as from_status
+      ), stale_prev as (
+        select b.id, b.status from public.bookings b
+        where b.status = any($5::text[]) and b.driver_id is not null
+          and ($1::uuid is null or b.customer_id=$1) and ($2::uuid is null or b.driver_id=$2) and ($3::uuid is null or b.id=$3)
+          and greatest(b.accepted_at, b.driver_location_at,
+                (select max(e.created_at) from public.booking_events e where e.booking_id=b.id and e.event_type='status_changed'))
+              <= now() - make_interval(mins => $7::int)
+        for update of b skip locked
+      ), released as (
+        update public.bookings b set status='cancelled', cancelled_at=now(), driver_lat=null, driver_lng=null
+        from stale_prev p where b.id=p.id
+        returning b.id, p.status as from_status
+      ), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select id, null::uuid, 'status_changed', from_status, 'expired',
+               jsonb_build_object('role', 'system', 'reason', 'no_driver_found', 'afterMinutes', $6::int) from expired
+        union all
+        select id, null::uuid, 'status_changed', from_status, 'cancelled',
+               jsonb_build_object('role', 'system', 'reason', 'driver_unresponsive', 'afterMinutes', $7::int) from released
+      )
+      select 'expired' as kind, id from expired union all select 'released', id from released
+    `, [customerId, driverId, bookingId, [...EXPIRABLE], [...STALE_RELEASABLE], this.requestExpiryMinutes, this.staleJobMinutes]);
+    return {
+      expired: result.rows.filter((row) => row.kind === 'expired').map((row) => row.id),
+      released: result.rows.filter((row) => row.kind === 'released').map((row) => row.id),
+    };
   }
 
   /**
@@ -511,16 +612,18 @@ class PostgresRepository {
       select b.*, concat_ws(' ', v.year, v.make, v.model) as vehicle_label, v.license_plate as vehicle_plate
       from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
       where b.status='searching' and b.driver_id is null
+        and b.created_at > now() - make_interval(mins => $9::int)
         and b.service_type = any($1::text[])
         and ($2::boolean or b.service_type <> 'towing' or not coalesce(v.is_electric, false))
         and b.location_lat between $3 and $4 and b.location_lng between $5 and $6
       order by power(b.location_lat - $7, 2) + power((b.location_lng - $8) * cos(radians($7)), 2), b.created_at asc
       limit 500
-    `, [serviceTypes, electricTowing, area.minLat, area.maxLat, area.minLng, area.maxLng, center.lat, center.lng]);
+    `, [serviceTypes, electricTowing, area.minLat, area.maxLat, area.minLng, area.maxLng, center.lat, center.lng, this.requestExpiryMinutes]);
     return result.rows.map((row) => {
       const booking = mapBooking(row);
       booking.pickup = { lat: row.location_lat, lng: row.location_lng };
-      booking.expiresAt = new Date(new Date(row.created_at).getTime() + 10 * 60 * 1000);
+      // Requests past their expiry window are never listed, even before the sweep marks them expired.
+      booking.expiresAt = new Date(new Date(row.created_at).getTime() + this.requestExpiryMinutes * 60000);
       delete booking.customerName;
       delete booking.customerPhone;
       delete booking.customerId;
@@ -543,7 +646,8 @@ class PostgresRepository {
       select b.id, b.service_type, b.location_lat, b.location_lng, coalesce(v.is_electric, false) as vehicle_is_electric
       from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
       where b.id=$1 and b.status='searching' and b.driver_id is null
-    `, [bookingId]);
+        and b.created_at > now() - make_interval(mins => $2::int)
+    `, [bookingId, this.requestExpiryMinutes]);
     const row = result.rows[0];
     return row ? {
       id: row.id, serviceType: row.service_type, vehicleIsElectric: Boolean(row.vehicle_is_electric),
@@ -570,11 +674,25 @@ class PostgresRepository {
   // One job at a time: a driver with an unfinished job cannot accept another. The accept is
   // recorded in the booking's audit trail in the same statement. The equipment rules are repeated
   // in the update itself (same as listAvailableBookings), so an incompatible accept can never land.
+  // The unique index on driver_id backs the NOT EXISTS check up: if two accepts by the same driver
+  // race, the loser gets a unique violation, treated as "not accepted" (the API explains why).
   async acceptBooking(bookingId, driverId, { serviceTypes = [], electricTowing = false } = {}) {
-    const result = await this.pool.query(`
+    let result;
+    try {
+      result = await this.acceptBookingQuery(bookingId, driverId, serviceTypes, electricTowing);
+    } catch (error) {
+      if (error?.code === '23505' && error.constraint === ONE_JOB_PER_DRIVER_INDEX) return null;
+      throw error;
+    }
+    return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, 'driver') : null;
+  }
+
+  acceptBookingQuery(bookingId, driverId, serviceTypes, electricTowing) {
+    return this.pool.query(`
       with upd as (
         update public.bookings b set driver_id=$2, status='accepted', accepted_at=now()
         where b.id=$1 and b.status = 'searching' and b.driver_id is null
+          and b.created_at > now() - make_interval(mins => $6::int)
           and not exists (select 1 from public.bookings o where o.driver_id=$2 and o.status = any($3::text[]))
           and b.service_type = any($4::text[])
           and ($5::boolean or b.service_type <> 'towing'
@@ -585,8 +703,7 @@ class PostgresRepository {
         select id, $2, 'status_changed', 'searching', 'accepted', '{"role":"driver"}'::jsonb from upd
       )
       select id from upd
-    `, [bookingId, driverId, [...CONTACT_STATUSES], serviceTypes, electricTowing]);
-    return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, 'driver') : null;
+    `, [bookingId, driverId, [...CONTACT_STATUSES], serviceTypes, electricTowing, this.requestExpiryMinutes]);
   }
 
   /**
@@ -679,4 +796,7 @@ class PostgresRepository {
   }
 }
 
-module.exports = { PostgresRepository, mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, ACTIVE_STATUSES, CONTACT_STATUSES };
+module.exports = {
+  PostgresRepository, ActiveBookingExistsError, ONE_ACTIVE_INDEX, ONE_JOB_PER_DRIVER_INDEX,
+  mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, ACTIVE_STATUSES, CONTACT_STATUSES,
+};

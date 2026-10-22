@@ -20,6 +20,7 @@ export type BookingStatus =
   | 'in_progress'      // Service being performed
   | 'completed'        // Service completed
   | 'cancelled'        // Request cancelled
+  | 'expired'          // No driver accepted in time; closed by the server (E4)
 
 // Payment Status
 export type PaymentStatus = 
@@ -276,8 +277,14 @@ export interface Booking {
   startedAt?: Date
   completedAt?: Date
   cancelledAt?: Date
-  /** Who ended the job, when cancelled. */
-  cancelledBy?: 'customer' | 'driver' | 'support'
+  /** When the server closed an unaccepted request (status 'expired'). */
+  expiredAt?: Date
+  /** While no driver has accepted: when the request expires (ISO, server-set). */
+  expiresAt?: string
+  /** Who ended the job, when cancelled ('system' = the server, e.g. the driver stopped responding). */
+  cancelledBy?: 'customer' | 'driver' | 'support' | 'system'
+  /** Why the server ended it on its own: no driver accepted in time, or the driver went silent. */
+  endReason?: 'no_driver_found' | 'driver_unresponsive'
 }
 
 // Service Request (incoming to driver)

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { PostgresRepository, mapProfile } = require('../repository');
+const { PostgresRepository, ActiveBookingExistsError, mapProfile } = require('../repository');
 
 function poolWith(handler) {
   return { query: handler };
@@ -273,7 +273,8 @@ test('open requests and accepts are limited to what the driver equipment can per
   assert.match(calls[0].text, /b\.service_type = any\(\$1::text\[\]\)/);
   assert.match(calls[0].text, /\$2::boolean or b\.service_type <> 'towing' or not coalesce\(v\.is_electric, false\)/);
   assert.match(calls[0].text, /b\.location_lat between \$3 and \$4 and b\.location_lng between \$5 and \$6/);
-  assert.deepEqual(calls[0].values, [['battery_jump', 'towing'], false, 32, 33, -97, -96, 32.5, -96.5]);
+  assert.deepEqual(calls[0].values, [['battery_jump', 'towing'], false, 32, 33, -97, -96, 32.5, -96.5, 15]);
+  assert.match(calls[0].text, /b\.created_at > now\(\) - make_interval\(mins => \$9::int\)/, 'requests past the expiry window are never listed');
 
   await repository.listAvailableBookings(undefined, area);
   assert.deepEqual(calls[1].values.slice(0, 2), [[], false], 'no capability means no requests');
@@ -286,7 +287,73 @@ test('open requests and accepts are limited to what the driver equipment can per
   assert.equal(await repository.acceptBooking('booking-9', 'driver-1', capability), null);
   assert.match(calls[3].text, /b\.service_type = any\(\$4::text\[\]\)/);
   assert.match(calls[3].text, /\$5::boolean or b\.service_type <> 'towing'\s+or not exists \(select 1 from public\.vehicles v where v\.id = b\.vehicle_id and v\.is_electric\)/);
-  assert.deepEqual(calls[3].values.slice(3), [['battery_jump', 'towing'], false]);
+  assert.deepEqual(calls[3].values.slice(3), [['battery_jump', 'towing'], false, 15]);
+  assert.match(calls[2].text, /b\.created_at > now\(\) - make_interval\(mins => \$2::int\)/);
+  assert.match(calls[3].text, /b\.created_at > now\(\) - make_interval\(mins => \$6::int\)/, 'an overdue request can never be accepted');
+});
+
+// ---- E4: one active request per customer; stale work ends on its own ----
+
+test('a second active request hitting the unique index becomes ActiveBookingExistsError', async () => {
+  const repository = new PostgresRepository(poolWith(async () => {
+    throw Object.assign(new Error('duplicate key value violates unique constraint "bookings_one_active_per_customer"'), {
+      code: '23505', constraint: 'bookings_one_active_per_customer',
+    });
+  }));
+  const input = {
+    customerId: 'customer-1', vehicleId: null, service: { id: 'battery_jump', name: "Won't start" },
+    location: { address: '1 Main', lat: 32.7, lng: -96.8 }, dropoffLocation: null, estimatedPrice: 69, notes: null,
+  };
+  await assert.rejects(repository.createBooking(input), (error) => error instanceof ActiveBookingExistsError && error.code === 'active_request_exists');
+  const other = new PostgresRepository(poolWith(async () => { throw Object.assign(new Error('other unique'), { code: '23505', constraint: 'bookings_pkey' }); }));
+  await assert.rejects(other.createBooking(input), (error) => !(error instanceof ActiveBookingExistsError), 'other conflicts are not hidden');
+});
+
+test('a racing second accept by the same driver (driver unique index) is "not accepted", not a crash', async () => {
+  const repository = new PostgresRepository(poolWith(async () => {
+    throw Object.assign(new Error('duplicate key'), { code: '23505', constraint: 'bookings_one_active_job_per_driver' });
+  }));
+  assert.equal(await repository.acceptBooking('booking-1', 'driver-1', { serviceTypes: ['battery_jump'] }), null);
+  const broken = new PostgresRepository(poolWith(async () => { throw Object.assign(new Error('boom'), { code: '57014' }); }));
+  await assert.rejects(broken.acceptBooking('booking-1', 'driver-1', { serviceTypes: ['battery_jump'] }), /boom/);
+});
+
+test('expiry sweep: one audited statement, configurable windows, optional scope', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => {
+    calls.push({ text, values });
+    return { rows: [{ kind: 'expired', id: 'b-1' }, { kind: 'released', id: 'b-2' }] };
+  }), { requestExpiryMinutes: 7, staleJobMinutes: 45 });
+  assert.deepEqual(await repository.expireStaleBookings({ customerId: 'customer-1' }), { expired: ['b-1'], released: ['b-2'] });
+  const [{ text, values }] = calls;
+  assert.deepEqual(values, ['customer-1', null, null, ['pending', 'searching'], ['accepted', 'en_route'], 7, 45]);
+  assert.match(text, /set status='expired', expired_at=now\(\)/);
+  assert.match(text, /b\.created_at <= now\(\) - make_interval\(mins => \$6::int\)/);
+  assert.match(text, /set status='cancelled', cancelled_at=now\(\), driver_lat=null, driver_lng=null/);
+  assert.match(text, /greatest\(b\.accepted_at, b\.driver_location_at,/, 'silent = no location and no status change');
+  assert.match(text, /for update skip locked/);
+  assert.match(text, /'role', 'system', 'reason', 'no_driver_found'/);
+  assert.match(text, /'role', 'system', 'reason', 'driver_unresponsive'/);
+  await repository.expireStaleBookings();
+  assert.deepEqual(calls[1].values.slice(0, 3), [null, null, null], 'the interval sweep is unscoped');
+});
+
+test('open requests carry their expiry time; system endings say why', async () => {
+  const created = new Date('2026-10-22T12:00:00Z');
+  const repository = new PostgresRepository(poolWith(async () => ({ rows: [{
+    ...PARTY_ROW, status: 'searching', driver_id: null, created_at: created,
+  }] })), { requestExpiryMinutes: 15 });
+  const open = await repository.getBooking('booking-1', 'customer-1', 'customer');
+  assert.equal(open.expiresAt, '2026-10-22T12:15:00.000Z');
+
+  const ended = new PostgresRepository(poolWith(async () => ({ rows: [{
+    ...PARTY_ROW, status: 'expired', driver_id: null, created_at: created, expired_at: new Date('2026-10-22T12:15:30Z'), system_end_reason: 'no_driver_found',
+  }] })));
+  const expired = await ended.getBooking('booking-1', 'customer-1', 'customer');
+  assert.equal(expired.status, 'expired');
+  assert.equal(expired.endReason, 'no_driver_found');
+  assert.ok(expired.expiredAt);
+  assert.equal(expired.expiresAt, undefined);
 });
 
 test('driver position: stored with a timestamp, ignored when stale, forgotten when going offline', async () => {

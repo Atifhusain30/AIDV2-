@@ -55,6 +55,7 @@ const statusConfig: Record<BookingStatus, { label: string; color: string; bgColo
   in_progress: { label: 'In Progress', color: 'text-amber-400', bgColor: 'bg-amber-500/20' },
   completed: { label: 'Completed', color: 'text-emerald-400', bgColor: 'bg-emerald-500/20' },
   cancelled: { label: 'Cancelled', color: 'text-red-400', bgColor: 'bg-red-500/20' },
+  expired: { label: 'No driver found', color: 'text-red-400', bgColor: 'bg-red-500/20' },
 }
 
 // Format date helper
@@ -90,7 +91,7 @@ function BookingStepper({ status }: { status: BookingStatus }) {
   const statusOrder: BookingStatus[] = ['searching', 'accepted', 'en_route', 'arrived', 'in_progress', 'completed']
   const currentIndex = statusOrder.indexOf(status)
   
-  if (status === 'cancelled' || status === 'pending') {
+  if (status === 'cancelled' || status === 'expired' || status === 'pending') {
     return (
       <div className="flex items-center justify-center py-4">
         <span className={`px-4 py-2 rounded-full text-sm font-medium ${statusConfig[status].bgColor} ${statusConfig[status].color}`}>
@@ -224,7 +225,7 @@ export default function BookingDetailModal() {
 
   const ServiceIcon = serviceIcons[booking.service.id] || Wrench
   const statusInfo = statusConfig[booking.status]
-  const isTerminal = booking.status === 'cancelled' || booking.status === 'completed'
+  const isTerminal = booking.status === 'cancelled' || booking.status === 'completed' || booking.status === 'expired'
   const isActiveRequest = !isTerminal && activeBooking?.id === booking.id
   const driver = booking.driver
   const driverVehicle = driver?.vehicle ? [driver.vehicle.color, driver.vehicle.make, driver.vehicle.model].filter(Boolean).join(' ') : ''

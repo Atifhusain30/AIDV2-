@@ -144,8 +144,10 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
       {jobEndedNotice && !activeBooking && (
         <div className="job-ended-banner" role="alert">
           <div>
-            <strong>{jobEndedNotice.serviceName} job cancelled</strong>
-            <p>{jobEndedNotice.customerName || 'The customer'} cancelled before you arrived. You're free for your next request.</p>
+            <strong>{jobEndedNotice.serviceName} job {jobEndedNotice.bySystem ? 'released' : 'cancelled'}</strong>
+            <p>{jobEndedNotice.bySystem
+              ? "AID didn't get your location or a status update for a long time, so the job was cancelled and the customer told. Keep AID open while you drive to a job."
+              : `${jobEndedNotice.customerName || 'The customer'} cancelled before you arrived. You're free for your next request.`}</p>
           </div>
           <button type="button" aria-label="Dismiss" onClick={dismissJobEndedNotice}><X size={18} /></button>
         </div>

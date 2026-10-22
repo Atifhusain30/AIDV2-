@@ -13,7 +13,10 @@ import type { Booking, BookingStatus } from '../types'
 export const CUSTOMER_CANCELLABLE: ReadonlySet<BookingStatus> = new Set<BookingStatus>(['pending', 'searching', 'accepted', 'en_route'])
 export const DRIVER_CANCELLABLE: ReadonlySet<BookingStatus> = new Set<BookingStatus>(['accepted', 'en_route', 'arrived'])
 export const REPORTABLE: ReadonlySet<BookingStatus> = new Set<BookingStatus>(['accepted', 'en_route', 'arrived', 'in_progress'])
-export const isJobOver = (status: BookingStatus) => status === 'completed' || status === 'cancelled'
+export const isJobOver = (status: BookingStatus) => status === 'completed' || status === 'cancelled' || status === 'expired'
+/** Server answer codes (server/app.js). */
+export const ACTIVE_REQUEST_CODE = 'active_request_exists'
+export const REQUEST_EXPIRED_CODE = 'request_expired'
 
 export interface Choice { id: string; label: string }
 
@@ -89,6 +92,7 @@ export function customerStatusLine(job: JobLike & { driver?: { firstName?: strin
       : (name ? `${name} is working on your vehicle` : 'Service in progress')
     case 'completed': return 'Service complete'
     case 'cancelled': return 'Request cancelled'
+    case 'expired': return 'No drivers were available'
   }
 }
 

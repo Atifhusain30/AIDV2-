@@ -37,7 +37,7 @@ export function driverTracking(booking: Pick<Booking, 'status' | 'driverLocation
   // Clamp small clock differences between phone and server.
   const ageMs = location && Number.isFinite(takenAt) ? Math.max(0, now - takenAt) : null
 
-  if (booking.status === 'completed' || booking.status === 'cancelled') return { phase: 'ended', location: null, ageMs: null, eta: null }
+  if (booking.status === 'completed' || booking.status === 'cancelled' || booking.status === 'expired') return { phase: 'ended', location: null, ageMs: null, eta: null }
   if (booking.status === 'arrived') return { phase: 'arrived', location, ageMs, eta: null }
   if (booking.status === 'in_progress') return { phase: 'in_service', location, ageMs, eta: null }
   if (!HEADING_OVER.has(booking.status) || !location) return { phase: 'waiting_location', location: null, ageMs: null, eta: null }

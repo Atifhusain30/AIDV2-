@@ -18,6 +18,7 @@ function parseBooking(booking: Booking): Booking {
     startedAt: booking.startedAt ? new Date(booking.startedAt) : undefined,
     completedAt: booking.completedAt ? new Date(booking.completedAt) : undefined,
     cancelledAt: booking.cancelledAt ? new Date(booking.cancelledAt) : undefined,
+    expiredAt: booking.expiredAt ? new Date(booking.expiredAt) : undefined,
   }
 }
 

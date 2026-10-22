@@ -45,3 +45,28 @@ test('rejections explain what to do instead', () => {
   assert.match(done.error, /already completed/);
   assert.equal(checkTransition({ role: 'driver', booking: null, next: 'en_route' }).status, 404);
 });
+
+// ---- E4: the server ends stale work on its own ----
+const { TERMINAL, EXPIRABLE, STALE_RELEASABLE, ACTIVE_STATUSES, expiryConfigFromEnv } = require('../lifecycle');
+
+test('expired is terminal: nobody can move or cancel an expired request', () => {
+  assert.ok(TERMINAL.has('expired'));
+  assert.deepEqual(EXPIRABLE, ['pending', 'searching'], 'only requests no driver has accepted expire');
+  assert.deepEqual(STALE_RELEASABLE, ['accepted', 'en_route'], 'arrived/in_progress are never ended automatically');
+  assert.deepEqual(ACTIVE_STATUSES, ['pending', 'searching', 'accepted', 'en_route', 'arrived', 'in_progress']);
+  const booking = { status: 'expired' };
+  const cancel = checkTransition({ role: 'customer', booking, next: 'cancelled' });
+  assert.equal(cancel.status, 409);
+  assert.match(cancel.error, /expired because no driver accepted it in time/);
+  assert.equal(checkTransition({ role: 'driver', booking, next: 'en_route' }).status, 409);
+});
+
+test('expiry timing comes from the environment with safe defaults', () => {
+  assert.deepEqual(expiryConfigFromEnv({}), { requestExpiryMinutes: 15, staleJobMinutes: 60, sweepSeconds: 60 });
+  assert.deepEqual(expiryConfigFromEnv({ REQUEST_EXPIRY_MINUTES: '10', STALE_JOB_MINUTES: '30', EXPIRY_SWEEP_SECONDS: '15' }),
+    { requestExpiryMinutes: 10, staleJobMinutes: 30, sweepSeconds: 15 });
+  // Nonsense falls back to the default instead of expiring everything (or nothing).
+  assert.deepEqual(expiryConfigFromEnv({ REQUEST_EXPIRY_MINUTES: '0', STALE_JOB_MINUTES: '5', EXPIRY_SWEEP_SECONDS: 'abc' }),
+    { requestExpiryMinutes: 15, staleJobMinutes: 60, sweepSeconds: 60 });
+  assert.equal(expiryConfigFromEnv({ REQUEST_EXPIRY_MINUTES: '2.5' }).requestExpiryMinutes, 15);
+});

@@ -16,6 +16,7 @@ import EndedBookingNotice from './components/tracking/EndedBookingNotice'
 import { initNotifications, registerNotificationTapHandler } from './lib/notifications'
 import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
+import { settleStaleActiveBooking } from './services/bookingService'
 import { driverVehicleSummary } from './lib/driverVehicle'
 import type { Driver } from './types'
 import { App as CapacitorApp } from '@capacitor/app'
@@ -423,11 +424,14 @@ function App() {
       const [history, active] = await Promise.all([apiService.listBookings(), apiService.getActiveBooking()])
       if (cancelled) return
       const store = useAppStore.getState()
+      const previous = store.activeBooking
       if (history.success && history.data) {
         store.clearBookings()
         history.data.slice().reverse().forEach((booking) => store.addToBookingHistory(booking))
       }
-      if (active.success) store.setActiveBooking(active.data || null)
+      // If the request this device was following ended while the app was closed (e.g. it expired
+      // with no driver), say so rather than silently dropping it.
+      if (active.success) await settleStaleActiveBooking(previous, active.data || null)
     })()
 
     return () => { cancelled = true }

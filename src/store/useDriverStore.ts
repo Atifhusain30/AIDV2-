@@ -10,7 +10,7 @@ import { useAuthStore } from './useAuthStore'
 import { apiService } from '../services/api'
 import { documentService } from '../services/documents'
 import type { SharingStatus } from '../lib/jobLocationSharing'
-import { isJobOver } from '../lib/jobLifecycle'
+import { isJobOver, REQUEST_EXPIRED_CODE } from '../lib/jobLifecycle'
 import { locateDriver, requestDriverLocationPermission, type LocationProblem, type NearbyStatus } from '../lib/nearbyRequests'
 
 interface DriverStore {
@@ -44,8 +44,11 @@ interface DriverStore {
   /** `reason` is required by the server when cancelling (see DRIVER_CANCEL_REASONS). */
   updateJobStatus: (status: Booking['status'], reason?: string) => Promise<boolean>
   syncActiveJob: () => Promise<void>
-  /** Set when the customer cancelled the driver's active job. */
-  jobEndedNotice: { bookingId: string; serviceName: string; customerName?: string } | null
+  /**
+   * Set when the driver's active job ended from elsewhere: the customer cancelled, or the server
+   * released it because AID heard nothing from the driver for too long (bySystem — E4).
+   */
+  jobEndedNotice: { bookingId: string; serviceName: string; customerName?: string; bySystem?: boolean } | null
   dismissJobEndedNotice: () => void
   fetchActiveBooking: (driverId: string) => Promise<void>
   
@@ -174,7 +177,11 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
     
     // Refused (e.g. the equipment can't do this job, or another driver took it): show the server's
     // message and refresh the list so it matches what the server will let this driver take.
-    set({ isLoading: false, error: result.error || 'Unable to accept this request.' })
+    set({
+      isLoading: false, error: result.error || 'Unable to accept this request.',
+      // E4: an expired request is gone for good — drop it now rather than waiting for the refresh.
+      ...(result.code === REQUEST_EXPIRED_CODE ? { incomingRequests: get().incomingRequests.filter(r => r.id !== requestId) } : {}),
+    })
     await get().fetchIncomingRequests()
     return false
   },
@@ -219,7 +226,10 @@ export const useDriverStore = create<DriverStore>((set, get) => ({
         activeBooking: null,
         error: null,
         jobEndedNotice: latest.status === 'cancelled' && latest.cancelledBy !== 'driver'
-          ? { bookingId: latest.id, serviceName: latest.service.name, customerName: latest.customer?.firstName }
+          ? {
+            bookingId: latest.id, serviceName: latest.service.name, customerName: latest.customer?.firstName,
+            ...(latest.cancelledBy === 'system' ? { bySystem: true } : {}),
+          }
           : null,
       })
       return

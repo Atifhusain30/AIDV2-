@@ -9,6 +9,7 @@ const SERVICE_VAN = Object.freeze({ ...TOW_TRUCK, model: 'Transit', plate: 'VAN-
 const serviceOf = (booking) => booking.service?.id || booking.serviceType;
 const DALLAS = Object.freeze({ lat: 32.7767, lng: -96.797 });
 const pickupOf = (booking) => (booking.location ? { lat: booking.location.lat, lng: booking.location.lng } : DALLAS);
+const ACTIVE = ['pending', 'searching', 'accepted', 'en_route', 'arrived', 'in_progress'];
 const fitsCapability = (booking, capability) => Boolean(capability) && capability.serviceTypes.includes(serviceOf(booking)) &&
   (capability.electricTowing || serviceOf(booking) !== 'towing' || !booking.vehicleIsElectric);
 
@@ -33,10 +34,44 @@ function buildHarness(stripe = null, accountAdmin = null) {
     async getProfile(userId) {
       return Object.values(users).find((user) => user.id === userId) || null;
     },
+    // Mirrors the partial unique index: a second active booking for the same customer is refused.
     async createBooking(input) {
-      const booking = { id: `booking-${bookings.size + 1}`, status: 'searching', ...input };
+      if ([...bookings.values()].some((item) => item.customerId === input.customerId && ACTIVE.includes(item.status))) {
+        throw Object.assign(new Error('duplicate key value violates unique constraint'), { code: 'active_request_exists' });
+      }
+      const booking = { id: `booking-${bookings.size + 1}`, status: 'searching', createdAt: new Date(this.clock()), ...input };
       bookings.set(booking.id, booking);
       return booking;
+    },
+    // E4 mirror of the SQL sweep. Fixtures without createdAt / lastDriverActivityAt never go stale.
+    requestExpiryMinutes: 15,
+    staleJobMinutes: 60,
+    clock: () => Date.now(),
+    expireCalls: [],
+    isOverdue(booking) {
+      return Boolean(booking.createdAt) && this.clock() - new Date(booking.createdAt).getTime() >= this.requestExpiryMinutes * 60000;
+    },
+    async expireStaleBookings(scope = {}) {
+      this.expireCalls.push(scope);
+      const result = { expired: [], released: [] };
+      for (const booking of [...bookings.values()]) {
+        if ((scope.customerId && booking.customerId !== scope.customerId) || (scope.driverId && booking.driverId !== scope.driverId) ||
+          (scope.bookingId && booking.id !== scope.bookingId)) continue;
+        if (['pending', 'searching'].includes(booking.status) && this.isOverdue(booking)) {
+          bookings.set(booking.id, { ...booking, status: 'expired', endReason: 'no_driver_found' });
+          this.events.push({ bookingId: booking.id, actorId: null, from: booking.status, to: 'expired', role: 'system', reason: 'no_driver_found' });
+          result.expired.push(booking.id);
+        } else if (['accepted', 'en_route'].includes(booking.status) && booking.driverId && booking.lastDriverActivityAt &&
+          this.clock() - new Date(booking.lastDriverActivityAt).getTime() >= this.staleJobMinutes * 60000) {
+          bookings.set(booking.id, { ...booking, status: 'cancelled', cancelledBy: 'system', endReason: 'driver_unresponsive' });
+          this.events.push({ bookingId: booking.id, actorId: null, from: booking.status, to: 'cancelled', role: 'system', reason: 'driver_unresponsive' });
+          result.released.push(booking.id);
+        }
+      }
+      return result;
+    },
+    async getBookingStatus(bookingId) {
+      return bookings.get(bookingId)?.status ?? null;
     },
     // Mirrors the SQL filter: allowed service types, electric tows only with electricTowing, inside the
     // driver's lat/lng box; returns the exact pickup for the API's distance check. No area → nothing.
@@ -45,13 +80,13 @@ function buildHarness(stripe = null, accountAdmin = null) {
       this.listedArea = area;
       if (!area) return [];
       return [...bookings.values()]
-        .filter((booking) => booking.status === 'searching' && !booking.driverId && fitsCapability(booking, capability))
+        .filter((booking) => booking.status === 'searching' && !booking.driverId && !this.isOverdue(booking) && fitsCapability(booking, capability))
         .map((booking) => ({ ...booking, pickup: pickupOf(booking) }))
         .filter(({ pickup }) => pickup.lat >= area.minLat && pickup.lat <= area.maxLat && pickup.lng >= area.minLng && pickup.lng <= area.maxLng);
     },
     async getAvailableBooking(bookingId) {
       const booking = bookings.get(bookingId);
-      if (!booking || booking.status !== 'searching' || booking.driverId) return null;
+      if (!booking || booking.status !== 'searching' || booking.driverId || this.isOverdue(booking)) return null;
       return { id: booking.id, serviceType: serviceOf(booking), vehicleIsElectric: Boolean(booking.vehicleIsElectric), pickup: pickupOf(booking) };
     },
     // Online drivers start with a fresh position in downtown Dallas (tests move or clear it).
@@ -65,7 +100,7 @@ function buildHarness(stripe = null, accountAdmin = null) {
     },
     async acceptBooking(bookingId, driverId, capability) {
       const booking = bookings.get(bookingId);
-      if (!booking || booking.status !== 'searching' || booking.driverId || !fitsCapability(booking, capability)) return null;
+      if (!booking || booking.status !== 'searching' || booking.driverId || this.isOverdue(booking) || !fitsCapability(booking, capability)) return null;
       const accepted = { ...booking, status: 'accepted', driverId };
       bookings.set(bookingId, accepted);
       return accepted;
@@ -736,7 +771,7 @@ test('service catalog lists which equipment can perform each service', async () 
 // B8: drivers only see open requests near where they are now, nearest first, with the distance.
 const at = (dLat, dLng = 0) => ({ address: 'x', lat: DALLAS.lat + dLat, lng: DALLAS.lng + dLng });
 function seedNearbyJobs(bookings) {
-  const open = (id, serviceType, location, extra = {}) => bookings.set(id, { id, status: 'searching', customerId: 'customer-1', serviceType, location, createdAt: new Date('2026-10-22T12:00:00Z'), ...extra });
+  const open = (id, serviceType, location, extra = {}) => bookings.set(id, { id, status: 'searching', customerId: 'customer-1', serviceType, location, createdAt: new Date(), ...extra });
   open('mid', 'battery_jump', at(0.1)); // ≈ 8.6 road mi
   open('far', 'battery_jump', at(1)); // ≈ 86 road mi
   open('near', 'flat_tire', at(0.05)); // ≈ 4.3 road mi
@@ -831,4 +866,160 @@ test('nearby helpers: radius env is clamped with a sane default', () => {
   assert.equal(radiusFromEnv({ DRIVER_REQUEST_RADIUS_MILES: '5000' }), 100);
   assert.deepEqual(parsePosition('32.5', '-96.1'), { lat: 32.5, lng: -96.1 });
   assert.equal(parsePosition(null, 1), null);
+});
+
+// ---- E4: one active request per customer; stale requests expire ----
+const BATTERY = Object.freeze({ serviceType: 'battery_jump', location: { address: '100 Main St', lat: 32.7767, lng: -96.797 } });
+
+test('E4: a customer with an active request is refused a second one and pointed at it', async () => {
+  const { app, bookings } = buildHarness();
+  const first = await request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send(BATTERY);
+  assert.equal(first.status, 201);
+  for (const status of ['searching', 'accepted', 'en_route', 'arrived', 'in_progress']) {
+    bookings.set(first.body.id, { ...bookings.get(first.body.id), status });
+    const second = await request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send({ ...BATTERY, serviceType: 'flat_tire' });
+    assert.equal(second.status, 409, `refused while the first is ${status}`);
+    assert.equal(second.body.code, 'active_request_exists');
+    assert.equal(second.body.booking.id, first.body.id, 'the answer carries the active request');
+    assert.match(second.body.error, /already have an active request/);
+  }
+  assert.equal(bookings.size, 1, 'nothing extra was created');
+  const other = await request(app).post('/api/bookings').set('Authorization', 'Bearer otherCustomerToken').send(BATTERY);
+  assert.equal(other.status, 201, 'other customers are unaffected');
+  for (const status of ['completed', 'cancelled', 'expired']) {
+    bookings.set(first.body.id, { ...bookings.get(first.body.id), status });
+    const again = await request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send(BATTERY);
+    assert.equal(again.status, 201, `a new request is fine once the last one is ${status}`);
+    bookings.delete(again.body.id);
+  }
+});
+
+test('E4: two simultaneous requests — exactly one is created (the database index decides)', async () => {
+  const { app, repository, bookings } = buildHarness();
+  // Hold both requests at the pre-check until both have passed it, so only the index can stop the second.
+  const original = repository.getActiveBooking.bind(repository);
+  let waiting = [];
+  repository.getActiveBooking = async (...args) => {
+    const result = await original(...args);
+    if (waiting) {
+      await new Promise((resolve) => { waiting.push(resolve); if (waiting.length === 2) { waiting.forEach((go) => go()); waiting = null; } });
+    }
+    return result;
+  };
+  const [a, b] = await Promise.all([
+    request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send(BATTERY),
+    request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send({ ...BATTERY, serviceType: 'flat_tire' }),
+  ]);
+  assert.deepEqual([a.status, b.status].sort(), [201, 409]);
+  const refused = a.status === 409 ? a : b;
+  const created = a.status === 201 ? a : b;
+  assert.equal(refused.body.code, 'active_request_exists');
+  assert.equal(refused.body.booking.id, created.body.id);
+  assert.equal([...bookings.values()].filter((item) => item.customerId === 'customer-1').length, 1);
+});
+
+test('E4: an unaccepted request expires after the window, with a system audit event', async () => {
+  const { app, repository, bookings } = buildHarness();
+  const created = await request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send(BATTERY);
+  const id = created.body.id;
+  repository.clock = () => Date.now() + 14 * 60000;
+  assert.equal((await request(app).get('/api/bookings/active').set('Authorization', 'Bearer customerToken')).body.status, 'searching', 'still open at 14 minutes');
+  repository.clock = () => Date.now() + 15 * 60000;
+  const active = await request(app).get('/api/bookings/active').set('Authorization', 'Bearer customerToken');
+  assert.equal(active.body, null, 'expired on read: no active request any more');
+  const ended = await request(app).get(`/api/bookings/${id}`).set('Authorization', 'Bearer customerToken');
+  assert.equal(ended.body.status, 'expired');
+  assert.equal(ended.body.endReason, 'no_driver_found');
+  assert.deepEqual(repository.events.filter((event) => event.bookingId === id),
+    [{ bookingId: id, actorId: null, from: 'searching', to: 'expired', role: 'system', reason: 'no_driver_found' }]);
+  assert.equal(bookings.get(id).status, 'expired');
+  const cancel = await request(app).patch(`/api/bookings/${id}/status`).set('Authorization', 'Bearer customerToken').send({ status: 'cancelled' });
+  assert.equal(cancel.status, 409);
+  assert.match(cancel.body.error, /expired because no driver accepted it in time/);
+});
+
+test('E4: an overdue request never blocks a new one — it expires first', async () => {
+  const { app, repository, bookings } = buildHarness();
+  const first = await request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send(BATTERY);
+  repository.clock = () => Date.now() + 16 * 60000;
+  const second = await request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send(BATTERY);
+  assert.equal(second.status, 201);
+  assert.equal(bookings.get(first.body.id).status, 'expired');
+  assert.deepEqual(repository.expireCalls.at(-1), { customerId: 'customer-1' });
+});
+
+test('E4: drivers never see expired requests, and accepting one says it expired', async () => {
+  const { app, repository, bookings } = buildHarness();
+  bookings.set('old', { id: 'old', status: 'searching', customerId: 'customer-2', serviceType: 'battery_jump', createdAt: new Date(Date.now() - 20 * 60000) });
+  bookings.set('fresh', { id: 'fresh', status: 'searching', customerId: 'customer-1', serviceType: 'battery_jump', createdAt: new Date() });
+  const list = await request(app).get('/api/drivers/requests').set('Authorization', 'Bearer driverToken');
+  assert.deepEqual(list.body.requests.map((job) => job.id), ['fresh'], 'overdue requests are not listed, even before the sweep');
+  const accept = await request(app).post('/api/bookings/old/accept').set('Authorization', 'Bearer driverToken');
+  assert.equal(accept.status, 409);
+  assert.equal(accept.body.code, 'request_expired');
+  assert.match(accept.body.error, /expired — no driver accepted it within 15 minutes/);
+  assert.equal(bookings.get('old').status, 'expired', 'and it is marked expired');
+  assert.ok(repository.events.some((event) => event.bookingId === 'old' && event.to === 'expired' && event.actorId === null));
+  // A request already marked expired gets the same answer.
+  const again = await request(app).post('/api/bookings/old/accept').set('Authorization', 'Bearer driverToken');
+  assert.equal(again.body.code, 'request_expired');
+  assert.equal((await request(app).post('/api/bookings/fresh/accept').set('Authorization', 'Bearer driverToken')).status, 200);
+});
+
+test('E4: one job per driver — a second accept is refused while a job is open', async () => {
+  const { app, bookings } = buildHarness();
+  bookings.set('mine', { id: 'mine', status: 'en_route', driverId: 'driver-1', customerId: 'customer-2', serviceType: 'battery_jump' });
+  bookings.set('next', { id: 'next', status: 'searching', customerId: 'customer-1', serviceType: 'battery_jump', createdAt: new Date() });
+  const accept = await request(app).post('/api/bookings/next/accept').set('Authorization', 'Bearer driverToken');
+  assert.equal(accept.status, 409);
+  assert.equal(accept.body.code, 'driver_busy');
+  assert.equal(bookings.get('next').status, 'searching');
+});
+
+test('E4: two simultaneous accepts by one driver — one job lands, the other is told to finish it first', async () => {
+  const { app, repository, bookings } = buildHarness();
+  bookings.set('a', { id: 'a', status: 'searching', customerId: 'customer-1', serviceType: 'battery_jump', createdAt: new Date() });
+  bookings.set('b', { id: 'b', status: 'searching', customerId: 'customer-2', serviceType: 'battery_jump', createdAt: new Date() });
+  // Both pass the "no current job" pre-check; the database (unique index on driver_id) lets only one land.
+  const originalActive = repository.getActiveBooking.bind(repository);
+  let gate = [];
+  repository.getActiveBooking = async (...args) => {
+    const result = await originalActive(...args);
+    if (gate) await new Promise((resolve) => { gate.push(resolve); if (gate.length === 2) { gate.forEach((go) => go()); gate = null; } });
+    return result;
+  };
+  const originalAccept = repository.acceptBooking.bind(repository);
+  repository.acceptBooking = async (id, driverId, capability) => {
+    if ([...bookings.values()].some((item) => item.driverId === driverId && ['accepted', 'en_route', 'arrived', 'in_progress'].includes(item.status))) return null;
+    return originalAccept(id, driverId, capability);
+  };
+  const [first, second] = await Promise.all(['a', 'b'].map((id) => request(app).post(`/api/bookings/${id}/accept`).set('Authorization', 'Bearer driverToken')));
+  assert.deepEqual([first.status, second.status].sort(), [200, 409]);
+  assert.equal((first.status === 409 ? first : second).body.code, 'driver_busy');
+  assert.equal([...bookings.values()].filter((item) => item.driverId === 'driver-1').length, 1);
+});
+
+test('E4: a job whose driver went silent is released (cancelled by the system, audited)', async () => {
+  const { app, repository, bookings } = buildHarness();
+  const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000);
+  bookings.set('quiet', { id: 'quiet', status: 'en_route', driverId: 'driver-1', customerId: 'customer-1', serviceType: 'battery_jump', lastDriverActivityAt: at(61) });
+  bookings.set('busy', { id: 'busy', status: 'accepted', driverId: 'driver-6', customerId: 'customer-2', serviceType: 'battery_jump', lastDriverActivityAt: at(20) });
+  bookings.set('onsite', { id: 'onsite', status: 'arrived', driverId: 'driver-7', customerId: 'customer-3', serviceType: 'battery_jump', lastDriverActivityAt: at(300) });
+  const result = await repository.expireStaleBookings();
+  assert.deepEqual(result, { expired: [], released: ['quiet'] });
+  assert.equal(bookings.get('busy').status, 'accepted', 'a driver heard from recently keeps the job');
+  assert.equal(bookings.get('onsite').status, 'arrived', 'arrived jobs are never ended automatically');
+  const seen = await request(app).get('/api/bookings/quiet').set('Authorization', 'Bearer customerToken');
+  assert.equal(seen.body.status, 'cancelled');
+  assert.equal(seen.body.cancelledBy, 'system');
+  assert.equal(seen.body.endReason, 'driver_unresponsive');
+  assert.ok(repository.events.some((event) => event.bookingId === 'quiet' && event.actorId === null && event.reason === 'driver_unresponsive'));
+});
+
+test('E4: reads and status changes run the expiry check for the caller first', async () => {
+  const { app, repository } = buildHarness();
+  await request(app).get('/api/bookings').set('Authorization', 'Bearer customerToken');
+  await request(app).get('/api/bookings/active').set('Authorization', 'Bearer driverToken');
+  await request(app).patch('/api/bookings/x/status').set('Authorization', 'Bearer customerToken').send({ status: 'cancelled' });
+  assert.deepEqual(repository.expireCalls, [{ customerId: 'customer-1' }, { driverId: 'driver-1' }, { customerId: 'customer-1' }]);
 });

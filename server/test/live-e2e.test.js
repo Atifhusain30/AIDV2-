@@ -19,6 +19,7 @@ test('live Supabase customer → verified driver → document → completed book
   let bookingId;
   let secondBookingId;
   let farBookingId;
+  const e4BookingIds = [];
 
   async function createUser(email, role) {
     const { data, error } = await supabase.auth.admin.createUser({
@@ -43,6 +44,7 @@ test('live Supabase customer → verified driver → document → completed book
     const customer = await createUser(customerEmail, 'customer');
     const driver = await createUser(driverEmail, 'driver');
     const reviewer = await createUser(`e2e-admin-${suffix}@example.com`, 'customer');
+    const otherCustomer = await createUser(`e2e-customer2-${suffix}@example.com`, 'customer');
     await pool.query("update public.profiles set role='admin' where id=$1", [reviewer.id]);
 
     // Individual-provider onboarding: upload every required document, submit, admin reviews.
@@ -90,6 +92,17 @@ test('live Supabase customer → verified driver → document → completed book
     const booking = await bookingResponse.json();
     bookingId = booking.id;
     assert.equal(booking.estimatedPrice, 95); // short tow: hook-up fee covers the first 5 miles
+    assert.ok(booking.expiresAt, 'an open request says when it expires');
+
+    // E4: one active request per customer — a second one is refused and points at the first.
+    const duplicate = await api('/bookings', customer.token, { method: 'POST', body: JSON.stringify({ serviceType: 'battery_jump', location: { address: '1 Elm', lat: 32.7767, lng: -96.797 } }) });
+    assert.equal(duplicate.status, 409);
+    const duplicateBody = await duplicate.json();
+    assert.equal(duplicateBody.code, 'active_request_exists');
+    assert.equal(duplicateBody.booking.id, bookingId);
+    // The database itself refuses a second active row, even bypassing the API's pre-check.
+    await assert.rejects(pool.query(`insert into public.bookings (customer_id, service_type, service_name, location_address, location_lat, location_lng, estimated_price_cents)
+      values ($1, 'battery_jump', 'x', 'x', 32.7, -96.8, 6900)`, [customer.id]), (error) => error.code === '23505' && error.constraint === 'bookings_one_active_per_customer');
 
     // D5: a verified driver still needs vehicle + equipment details before going online; offline always works.
     const blockedOnline = await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: true }) });
@@ -143,7 +156,8 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal((await api(`/bookings/${bookingId}/accept`, driver.token, { method: 'POST' })).status, 409, 'accept needs a known position');
     assert.equal((await api('/drivers/requests?lat=999&lng=-96.8', driver.token)).status, 400, 'absurd coordinates are refused');
     // A far request (Austin, ~180 mi away) is hidden and can't be accepted; the near one is listed with its distance.
-    const farResponse = await api('/bookings', customer.token, { method: 'POST', body: JSON.stringify({ serviceType: 'battery_jump', location: { address: '1 Congress Ave, Austin', lat: 30.2672, lng: -97.7431 } }) });
+    // (Another customer: the first customer's tow is still open, and one active request each — E4.)
+    const farResponse = await api('/bookings', otherCustomer.token, { method: 'POST', body: JSON.stringify({ serviceType: 'battery_jump', location: { address: '1 Congress Ave, Austin', lat: 30.2672, lng: -97.7431 } }) });
     assert.equal(farResponse.status, 201);
     farBookingId = (await farResponse.json()).id;
     const requestsResponse = await api(`/drivers/requests?lat=32.78&lng=-96.8`, driver.token);
@@ -236,6 +250,85 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(issueEvent.rows[0].actor_id, customer.id);
     assert.equal(issueEvent.rows[0].metadata.details, 'E2E issue report');
 
+    // ---- E4 against the real database ----
+    const jump = (address) => JSON.stringify({ serviceType: 'battery_jump', location: { address, lat: 32.7767, lng: -96.797 } });
+    // Two simultaneous requests from one customer: exactly one is created.
+    const racing = await Promise.all([1, 2].map((n) => api('/bookings', customer.token, { method: 'POST', body: jump(`E4 race ${n}`) })));
+    assert.deepEqual(racing.map((response) => response.status).sort(), [201, 409]);
+    const raceBodies = await Promise.all(racing.map((response) => response.json()));
+    const expiring = raceBodies.find((body) => body.id);
+    e4BookingIds.push(expiring.id);
+    assert.equal(raceBodies.find((body) => body.code).code, 'active_request_exists');
+    assert.equal((await pool.query("select count(*)::int as n from public.bookings where customer_id=$1 and status='searching'", [customer.id])).rows[0].n, 1);
+
+    // Past the 15-minute window (created_at moved back): drivers no longer see it, even before anything
+    // marks it expired, and accepting it says it expired.
+    await pool.query("update public.bookings set created_at = now() - interval '16 minutes' where id=$1", [expiring.id]);
+    const afterWindow = await (await api('/drivers/requests?lat=32.78&lng=-96.8', driver.token)).json();
+    assert.equal(afterWindow.requests.some((item) => item.id === expiring.id), false, 'an overdue request is not listed');
+    const lateAccept = await api(`/bookings/${expiring.id}/accept`, driver.token, { method: 'POST' });
+    assert.equal(lateAccept.status, 409);
+    assert.equal((await lateAccept.json()).code, 'request_expired');
+    const expiredView = await (await api(`/bookings/${expiring.id}`, customer.token)).json();
+    assert.equal(expiredView.status, 'expired');
+    assert.equal(expiredView.endReason, 'no_driver_found');
+    assert.ok(expiredView.expiredAt);
+    assert.equal(await (await api('/bookings/active', customer.token)).json(), null, 'the customer is free to request again');
+    const expiryEvent = await pool.query("select actor_id, from_status, metadata from public.booking_events where booking_id=$1 and to_status='expired'", [expiring.id]);
+    assert.equal(expiryEvent.rowCount, 1);
+    assert.deepEqual(expiryEvent.rows[0], { actor_id: null, from_status: 'searching', metadata: { role: 'system', reason: 'no_driver_found', afterMinutes: 15 } });
+    assert.equal((await api(`/bookings/${expiring.id}/status`, customer.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) })).status, 409, 'an expired request cannot be cancelled');
+
+    // Lazy check on create: an overdue request never blocks a new one.
+    const overdueResponse = await api('/bookings', customer.token, { method: 'POST', body: jump('E4 overdue') });
+    assert.equal(overdueResponse.status, 201);
+    const overdue = await overdueResponse.json();
+    e4BookingIds.push(overdue.id);
+    await pool.query("update public.bookings set created_at = now() - interval '16 minutes' where id=$1", [overdue.id]);
+    const replacement = await api('/bookings', customer.token, { method: 'POST', body: jump('E4 replacement') });
+    assert.equal(replacement.status, 201);
+    const replacementBooking = await replacement.json();
+    e4BookingIds.push(replacementBooking.id);
+    assert.equal((await pool.query('select status from public.bookings where id=$1', [overdue.id])).rows[0].status, 'expired');
+
+    // The interval sweep's statement, with a per-test 1-minute window: no read needed.
+    const { PostgresRepository } = require('../repository');
+    await pool.query("update public.bookings set created_at = now() - interval '2 minutes' where id=$1", [replacementBooking.id]);
+    const swept = await new PostgresRepository(pool, { requestExpiryMinutes: 1 }).expireStaleBookings();
+    assert.ok(swept.expired.includes(replacementBooking.id), 'the sweep expires it');
+    assert.equal((await pool.query('select status from public.bookings where id=$1', [replacementBooking.id])).rows[0].status, 'expired');
+
+    // A job whose driver went silent for over an hour is released, audited as the system.
+    const silentResponse = await api('/bookings', customer.token, { method: 'POST', body: jump('E4 silent driver') });
+    assert.equal(silentResponse.status, 201);
+    const silentId = (await silentResponse.json()).id;
+    e4BookingIds.push(silentId);
+    assert.equal((await api(`/drivers/requests?lat=32.78&lng=-96.8`, driver.token)).status, 200);
+    assert.equal((await api(`/bookings/${silentId}/accept`, driver.token, { method: 'POST' })).status, 200);
+    await pool.query("update public.bookings set accepted_at = now() - interval '61 minutes', driver_location_at = null where id=$1", [silentId]);
+    await pool.query("update public.booking_events set created_at = now() - interval '61 minutes' where booking_id=$1", [silentId]);
+    const released = await (await api(`/bookings/${silentId}`, customer.token)).json();
+    assert.equal(released.status, 'cancelled');
+    assert.equal(released.cancelledBy, 'system');
+    assert.equal(released.endReason, 'driver_unresponsive');
+    assert.equal(await (await api('/bookings/active', driver.token)).json(), null, 'the driver no longer holds the job');
+    const releaseEvent = await pool.query("select actor_id, from_status, metadata from public.booking_events where booking_id=$1 and to_status='cancelled'", [silentId]);
+    assert.deepEqual(releaseEvent.rows[0], { actor_id: null, from_status: 'accepted', metadata: { role: 'system', reason: 'driver_unresponsive', afterMinutes: 60 } });
+
+    // One job per driver, guaranteed by the database too: a second job can't be attached, even directly.
+    const holdResponse = await api('/bookings', otherCustomer.token, { method: 'POST', body: jump('E4 driver hold') });
+    const holdId = (await holdResponse.json()).id;
+    e4BookingIds.push(holdId);
+    const spareResponse = await api('/bookings', customer.token, { method: 'POST', body: jump('E4 spare') });
+    const spareId = (await spareResponse.json()).id;
+    e4BookingIds.push(spareId);
+    assert.equal((await api(`/bookings/${holdId}/accept`, driver.token, { method: 'POST' })).status, 200);
+    const busy = await api(`/bookings/${spareId}/accept`, driver.token, { method: 'POST' });
+    assert.equal(busy.status, 409);
+    assert.equal((await busy.json()).code, 'driver_busy');
+    await assert.rejects(pool.query("update public.bookings set driver_id=$1, status='accepted' where id=$2", [driver.id, spareId]),
+      (error) => error.code === '23505' && error.constraint === 'bookings_one_active_job_per_driver');
+
     const form = new FormData();
     form.append('type', 'identification');
     form.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00])], { type: 'image/png' }), 'license.png');
@@ -257,6 +350,7 @@ test('live Supabase customer → verified driver → document → completed book
     if (bookingId) await pool.query('delete from public.bookings where id=$1', [bookingId]).catch(() => {});
     if (secondBookingId) await pool.query('delete from public.bookings where id=$1', [secondBookingId]).catch(() => {});
     if (farBookingId) await pool.query('delete from public.bookings where id=$1', [farBookingId]).catch(() => {});
+    if (e4BookingIds.length) await pool.query('delete from public.bookings where id = any($1::uuid[])', [e4BookingIds]).catch(() => {});
     for (const id of createdIds.reverse()) await supabase.auth.admin.deleteUser(id).catch(() => {});
     await pool.end();
   }

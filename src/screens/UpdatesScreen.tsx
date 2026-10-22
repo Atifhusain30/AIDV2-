@@ -22,6 +22,11 @@ function FindingDriver({ booking }: { booking: Booking }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Server-set: an unaccepted request expires after the server's window (E4).
+  const expiresAt = booking.expiresAt ? new Date(booking.expiresAt) : null
+  const searchUntil = expiresAt && !Number.isNaN(expiresAt.getTime())
+    ? expiresAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    : null
 
   const cancel = async (reason: string | null) => {
     setBusy(true)
@@ -49,6 +54,7 @@ function FindingDriver({ booking }: { booking: Booking }) {
         <div className="track-eta track-eta--text" role="status">
           <h2><Loader2 size={20} className="animate-spin track-searching-icon" aria-hidden="true" /> Looking for a driver</h2>
           <p>Your request is open to verified drivers near you. Their name, vehicle and live location appear here as soon as one accepts.</p>
+          {searchUntil && <small>If no driver accepts by {searchUntil}, we'll stop looking and let you know.</small>}
         </div>
 
         <div className="track-stops">

@@ -7,6 +7,12 @@
  *                                      └── driver cancel ──────┘   (driver: with a reason, before service starts)
  *
  * After in_progress nobody can cancel: the driver completes the job, or either side reports an issue.
+ *
+ * The server itself (E4, never a person) ends stale work, with an audit event (actor null, role 'system'):
+ *   pending/searching ──no driver within REQUEST_EXPIRY_MINUTES (default 15)──▶ expired   (reason no_driver_found)
+ *   accepted/en_route ──driver silent for STALE_JOB_MINUTES (default 60)───────▶ cancelled (reason driver_unresponsive)
+ * "Silent" = no location update and no status change. arrived/in_progress are never ended automatically:
+ * the driver is with the customer, and either side can report an issue.
  * Towing uses in_progress for "vehicle loaded, heading to the drop-off".
  * Cancellation fees are not charged anywhere (no policy yet — see LAUNCH_CHECKLIST A9/C3).
  */
@@ -14,7 +20,32 @@
 const DRIVER_STEPS = Object.freeze({ accepted: 'en_route', en_route: 'arrived', arrived: 'in_progress', in_progress: 'completed' });
 const CUSTOMER_CANCELLABLE = Object.freeze(['pending', 'searching', 'accepted', 'en_route']);
 const DRIVER_CANCELLABLE = Object.freeze(['accepted', 'en_route', 'arrived']);
-const TERMINAL = new Set(['completed', 'cancelled']);
+const TERMINAL = new Set(['completed', 'cancelled', 'expired']);
+// Statuses in which a customer has an open request (one at a time; see E4) — also the partial unique index.
+const ACTIVE_STATUSES = Object.freeze(['pending', 'searching', 'accepted', 'en_route', 'arrived', 'in_progress']);
+// What the server may end on its own, and why (stored as metadata.reason on the audit event).
+const EXPIRABLE = Object.freeze(['pending', 'searching']);
+const STALE_RELEASABLE = Object.freeze(['accepted', 'en_route']);
+const SYSTEM_END_REASONS = Object.freeze({
+  no_driver_found: 'No driver accepted the request in time',
+  driver_unresponsive: 'The driver stopped responding',
+});
+
+const DEFAULT_REQUEST_EXPIRY_MINUTES = 15;
+const DEFAULT_STALE_JOB_MINUTES = 60;
+const DEFAULT_EXPIRY_SWEEP_SECONDS = 60;
+function intFromEnv(value, fallback, min, max) {
+  const number = Number(value);
+  return value != null && value !== '' && Number.isInteger(number) && number >= min && number <= max ? number : fallback;
+}
+/** E4 timing from the environment, with safe defaults (missing or out-of-range values use the default). */
+function expiryConfigFromEnv(env = process.env) {
+  return {
+    requestExpiryMinutes: intFromEnv(env.REQUEST_EXPIRY_MINUTES, DEFAULT_REQUEST_EXPIRY_MINUTES, 1, 240),
+    staleJobMinutes: intFromEnv(env.STALE_JOB_MINUTES, DEFAULT_STALE_JOB_MINUTES, 15, 1440),
+    sweepSeconds: intFromEnv(env.EXPIRY_SWEEP_SECONDS, DEFAULT_EXPIRY_SWEEP_SECONDS, 5, 3600),
+  };
+}
 // Statuses where either party can file an issue report on the job.
 const REPORTABLE = Object.freeze(['accepted', 'en_route', 'arrived', 'in_progress']);
 
@@ -57,6 +88,7 @@ function allowedFrom(role, next) {
 /** A plain-language reason the move from `current` to `next` is not allowed (status 409). */
 function rejection(role, current, next) {
   if (current === next) return `This job is already ${label(current)}.`;
+  if (current === 'expired') return 'This request expired because no driver accepted it in time. Request again to keep looking.';
   if (TERMINAL.has(current)) return `This job was already ${label(current)}.`;
   if (next === 'cancelled') {
     if (role === 'customer') {
@@ -75,7 +107,7 @@ function rejection(role, current, next) {
 
 const LABELS = {
   pending: 'pending', searching: 'waiting for a driver', accepted: 'accepted', en_route: 'on the way', arrived: 'arrived',
-  in_progress: 'in service', completed: 'completed', cancelled: 'cancelled',
+  in_progress: 'in service', completed: 'completed', cancelled: 'cancelled', expired: 'expired',
 };
 const label = (status) => LABELS[status] || String(status);
 
@@ -111,6 +143,8 @@ function checkTransition({ role, booking, next, reason }) {
 
 module.exports = {
   DRIVER_STEPS, CUSTOMER_CANCELLABLE, DRIVER_CANCELLABLE, REPORTABLE, TERMINAL,
+  ACTIVE_STATUSES, EXPIRABLE, STALE_RELEASABLE, SYSTEM_END_REASONS, expiryConfigFromEnv,
+  DEFAULT_REQUEST_EXPIRY_MINUTES, DEFAULT_STALE_JOB_MINUTES, DEFAULT_EXPIRY_SWEEP_SECONDS,
   DRIVER_CANCEL_REASONS, CUSTOMER_CANCEL_REASONS, ISSUE_CATEGORIES,
   allowedFrom, checkRequest, checkTransition,
 };

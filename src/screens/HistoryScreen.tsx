@@ -42,6 +42,7 @@ const statusLabels: Record<BookingStatus, string> = {
   in_progress: 'In progress',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  expired: 'No driver found',
 }
 
 type Filter = 'all' | 'completed' | 'cancelled'
@@ -80,7 +81,8 @@ export default function HistoryScreen() {
 
   const activities = useMemo(() => {
     const sorted = [...bookingHistory].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-    return filter === 'all' ? sorted : sorted.filter((booking) => booking.status === filter)
+    // Expired requests (no driver found) are listed with the cancelled ones.
+    return filter === 'all' ? sorted : sorted.filter((booking) => booking.status === filter || (filter === 'cancelled' && booking.status === 'expired'))
   }, [bookingHistory, filter])
 
   return (

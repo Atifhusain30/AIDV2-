@@ -120,9 +120,19 @@ interface AppState {
   setActiveBooking: (booking: Booking | null) => void
   updateActiveBookingStatus: (status: Booking['status'], updates?: Partial<Booking>) => void
   clearActiveBooking: () => void
-  /** Shown once when the server reports the active job was cancelled by the other side (not persisted). */
-  endedBookingNotice: { bookingId: string; serviceName: string; driverName?: string; byCustomer?: boolean } | null
+  /**
+   * Shown once when the server reports the active request ended without the customer doing it here
+   * (not persisted): the driver cancelled, no driver accepted in time ('expired'), or the driver
+   * stopped responding and the server released the job ('driver_unresponsive').
+   */
+  endedBookingNotice: {
+    bookingId: string; serviceName: string; driverName?: string; byCustomer?: boolean
+    reason?: 'expired' | 'driver_unresponsive'
+  } | null
   setEndedBookingNotice: (notice: AppState['endedBookingNotice']) => void
+  /** Set when the customer tried to request while a request was already active and was taken to it (E4). */
+  activeRequestRedirect: boolean
+  setActiveRequestRedirect: (value: boolean) => void
   bookingHistory: Booking[]
   addToBookingHistory: (booking: Booking) => void
   updateBookingInHistory: (id: string, updates: Partial<Booking>) => void
@@ -360,6 +370,8 @@ export const useAppStore = create<AppState>()(
       clearActiveBooking: () => set({ activeBooking: null }),
       endedBookingNotice: null,
       setEndedBookingNotice: (endedBookingNotice) => set({ endedBookingNotice }),
+      activeRequestRedirect: false,
+      setActiveRequestRedirect: (activeRequestRedirect) => set({ activeRequestRedirect }),
       bookingHistory: [],
       addToBookingHistory: (booking) => set((state) => ({
         bookingHistory: [booking, ...state.bookingHistory]

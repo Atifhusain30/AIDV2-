@@ -66,6 +66,17 @@ test('remote database has the AID marketplace schema', { timeout: 30000 }, async
     assert.equal(grants.rows[0].dangerous_grants, 0, 'signed-in clients must not hold TRUNCATE/TRIGGER/REFERENCES');
     assert.deepEqual(grants.rows[0].profile_update_columns, ['first_name', 'last_name', 'phone'], 'clients may only edit display fields');
     assert.equal(grants.rows[0].guard_trigger, true, 'privileged profile columns must be trigger-guarded');
+    // E4: 'expired' status, expired_at, and one active booking per customer enforced by the database.
+    const e4 = await pool.query(`
+      select pg_get_constraintdef((select oid from pg_constraint where conname = 'bookings_status_check')) as status_check,
+        exists(select 1 from information_schema.columns where table_schema='public' and table_name='bookings' and column_name='expired_at') as expired_at,
+        (select indexdef from pg_indexes where schemaname='public' and indexname='bookings_one_active_per_customer') as one_active,
+        (select indexdef from pg_indexes where schemaname='public' and indexname='bookings_one_active_job_per_driver') as one_job
+    `);
+    assert.match(e4.rows[0].one_job || '', /UNIQUE INDEX .* \(driver_id\) WHERE .*'accepted'.*'in_progress'/, 'one job per driver must be a unique index');
+    assert.match(e4.rows[0].status_check, /'expired'/);
+    assert.equal(e4.rows[0].expired_at, true);
+    assert.match(e4.rows[0].one_active || '', /UNIQUE INDEX .* \(customer_id\) WHERE .*'searching'.*'in_progress'/, 'one active booking per customer must be a unique index');
     assert.ok(hardenedPolicies.rowCount > 0);
     for (const policy of hardenedPolicies.rows) {
       assert.match(policy.expression, /is_active_account/i, `${policy.tablename}.${policy.policyname} must reject inactive accounts`);

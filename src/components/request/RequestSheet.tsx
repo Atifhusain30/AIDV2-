@@ -13,6 +13,7 @@ import * as bookingService from '../../services/bookingService'
 import { searchAddressSuggestions } from '../../services/locationService'
 import type { ServiceType } from '../../types'
 import { formatPrice } from '../../lib/money'
+import { isJobOver } from '../../lib/jobLifecycle'
 
 const ICONS: Partial<Record<ServiceType, typeof Battery>> = {
   battery_jump: Battery, flat_tire: CircleDot, towing: Truck, lockout: KeyRound,
@@ -103,13 +104,24 @@ export default function RequestSheet() {
   const {
     activeModal, setActiveModal, serviceFormData, setServiceFormData, resetServiceFormData,
     userLocationLabel, userCoords, setPendingReturnModal, setActiveModalPreserveStep,
-    vehicles, activeVehicleId, setCurrentScreen,
+    vehicles, activeVehicleId, setCurrentScreen, activeBooking, setActiveRequestRedirect,
   } = useAppStore()
   const isOpen = activeModal === 'services'
+  // One active request at a time (E4): opening the sheet with one in progress goes to that request.
+  const hasActiveRequest = Boolean(activeBooking && !isJobOver(activeBooking.status))
 
   const [catalog, setCatalog] = useState<ServiceOption[] | null>(null)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    // (Not while submitting: the request just made becomes the active one, and submit navigates.)
+    if (!isOpen || !hasActiveRequest || submitting) return
+    setActiveModal(null)
+    resetServiceFormData()
+    setActiveRequestRedirect(true)
+    setCurrentScreen('chat')
+  }, [hasActiveRequest, isOpen, submitting, resetServiceFormData, setActiveModal, setActiveRequestRedirect, setCurrentScreen])
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<PriceQuote | null>(null)
   const [quoteError, setQuoteError] = useState<string | null>(null)
@@ -162,7 +174,7 @@ export default function RequestSheet() {
     return () => { cancelled = true }
   }, [quoteKey])
 
-  if (!isOpen) return null
+  if (!isOpen || hasActiveRequest) return null
 
   const service = catalog?.find((item) => item.id === serviceFormData.selectedService && item.available) ?? null
   const options = catalog?.filter((item) => item.available) ?? []
@@ -185,7 +197,7 @@ export default function RequestSheet() {
     setSubmitting(true)
     setError(null)
     try {
-      await bookingService.requestAndStartBooking({
+      const outcome = await bookingService.requestAndStartBooking({
         service,
         notes: serviceFormData.problemDescription.trim() || undefined,
         locationLabel: userLocationLabel,
@@ -194,6 +206,8 @@ export default function RequestSheet() {
       })
       setActiveModal(null)
       resetServiceFormData()
+      // Already had one in progress (e.g. from another device): show that request, not an error.
+      setActiveRequestRedirect(outcome.alreadyActive)
       setCurrentScreen('chat')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to request service. Try again.')

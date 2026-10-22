@@ -39,7 +39,9 @@ export default function DriverJobScreen({ onBack }: DriverJobScreenProps) {
         {jobEndedNotice ? <X size={40} aria-hidden="true" /> : <AlertCircle size={40} aria-hidden="true" />}
         <p role={jobEndedNotice ? 'alert' : undefined}>
           {jobEndedNotice
-            ? `${jobEndedNotice.customerName || 'The customer'} cancelled this ${jobEndedNotice.serviceName.toLowerCase()} job. You're free for your next request.`
+            ? jobEndedNotice.bySystem
+              ? `This ${jobEndedNotice.serviceName.toLowerCase()} job was released: AID didn't get your location or a status update for a long time, so it was cancelled and the customer told.`
+              : `${jobEndedNotice.customerName || 'The customer'} cancelled this ${jobEndedNotice.serviceName.toLowerCase()} job. You're free for your next request.`
             : 'No active job right now.'}
         </p>
         <button type="button" className="aid-primary-button" onClick={() => { dismissJobEndedNotice(); onBack() }}>Back to dashboard</button>
