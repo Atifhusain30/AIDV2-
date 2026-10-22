@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
-import { motion } from 'framer-motion'
-import { AlertCircle, Loader2, Lock, X } from 'lucide-react'
+import { AlertCircle, Lock, X } from 'lucide-react'
 import { createPaymentIntent, dollarsToCents, formatAmount, getStripe } from '../../services/payment'
+import Button from '../ui/Button'
+import { ErrorState } from '../ui/States'
+import { Skeleton } from '../ui/Skeleton'
 
 interface PaymentCheckoutProps {
   amount: number
@@ -11,6 +13,16 @@ interface PaymentCheckoutProps {
   onSuccess: (paymentId: string) => void
   onCancel: () => void
   onError: (error: string) => void
+}
+
+function CheckoutHeader({ onCancel }: { onCancel: () => void }) {
+  return (
+    <header className="checkout__header">
+      <button type="button" onClick={onCancel} className="ui-icon-btn ui-icon-btn--plain" aria-label="Close checkout"><X size={22} aria-hidden="true" /></button>
+      <h1>Secure checkout</h1>
+      <span aria-hidden="true" />
+    </header>
+  )
 }
 
 function StripePaymentForm({ amount, serviceName, onSuccess, onCancel, onError }: Omit<PaymentCheckoutProps, 'bookingId'>) {
@@ -45,29 +57,24 @@ function StripePaymentForm({ amount, serviceName, onSuccess, onCancel, onError }
   }
 
   return (
-    <main className="min-h-screen bg-[#0a0a0f] px-6 py-8 safe-top">
-      <header className="flex items-center justify-between mb-8">
-        <button type="button" onClick={onCancel} className="w-11 h-11 -ml-2 grid place-items-center text-gray-400" aria-label="Close checkout"><X size={24} aria-hidden="true" /></button>
-        <h1 className="text-lg font-bold text-white">Secure checkout</h1>
-        <div className="w-6" />
-      </header>
-
-      <section className="p-4 rounded-xl bg-white/5 border border-white/10 mb-6">
-        <div className="flex items-center justify-between mb-3"><span className="text-gray-400">Service</span><span className="text-white font-medium">{serviceName}</span></div>
-        <div className="flex items-center justify-between"><span className="text-gray-400">Total</span><span className="text-2xl font-bold text-white">{formatAmount(dollarsToCents(amount))}</span></div>
+    <div className="checkout ui-screen safe-top">
+      <CheckoutHeader onCancel={onCancel} />
+      <section className="ui-card checkout__summary">
+        <p><span>Service</span><strong>{serviceName}</strong></p>
+        <p><span>Total</span><strong className="checkout__total">{formatAmount(dollarsToCents(amount))}</strong></p>
       </section>
-
-      <section className="p-4 rounded-xl bg-white border border-white/10 mb-6">
+      <section className="checkout__element">
         <PaymentElement options={{ layout: 'tabs' }} />
       </section>
-
-      {message && <div className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2"><AlertCircle size={16} className="text-red-400" /><span className="text-red-400 text-sm">{message}</span></div>}
-      <div className="flex items-center gap-2 justify-center mb-6"><Lock size={14} className="text-gray-400" /><span className="text-gray-400 text-xs">Payment details are handled directly by Stripe</span></div>
-      <motion.button type="button" onClick={() => void submit()} disabled={!stripe || !elements || processing} className="w-full bg-gradient-to-r from-violet-500 to-purple-500 disabled:opacity-50 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-2" whileTap={{ scale: 0.98 }}>
-        {processing ? <><Loader2 size={18} className="animate-spin" /> Processing</> : `Pay ${formatAmount(dollarsToCents(amount))}`}
-      </motion.button>
-      <button type="button" onClick={onCancel} className="w-full py-4 text-gray-400 text-sm mt-3">Cancel</button>
-    </main>
+      {message && <p className="ui-alert ui-alert--danger" role="alert"><AlertCircle size={16} aria-hidden="true" /> {message}</p>}
+      <p className="checkout__note"><Lock size={14} aria-hidden="true" /> Payment details are handled directly by Stripe</p>
+      <div className="checkout__actions">
+        <Button size="lg" block disabled={!stripe || !elements} loading={processing} loadingLabel="Processing" onClick={() => void submit()}>
+          {`Pay ${formatAmount(dollarsToCents(amount))}`}
+        </Button>
+        <Button variant="ghost" block onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
   )
 }
 
@@ -92,10 +99,22 @@ export default function PaymentCheckout(props: PaymentCheckoutProps) {
   }, [props.bookingId, props.amount])
 
   if (error) {
-    return <main className="min-h-screen bg-[#0a0a0f] px-6 py-8 safe-top flex flex-col items-center justify-center text-center"><AlertCircle size={42} className="text-red-400 mb-4" /><h1 className="text-xl font-bold text-white mb-2">Checkout unavailable</h1><p className="text-gray-400 mb-6">{error}</p><button type="button" onClick={props.onCancel} className="px-6 py-3 rounded-xl bg-white/10 text-white">Go back</button></main>
+    return (
+      <div className="checkout ui-screen safe-top">
+        <CheckoutHeader onCancel={props.onCancel} />
+        <ErrorState title="Checkout unavailable" body={error} />
+        <Button variant="secondary" block onClick={props.onCancel}>Go back</Button>
+      </div>
+    )
   }
   if (!clientSecret) {
-    return <main className="min-h-screen bg-[#0a0a0f] flex items-center justify-center"><Loader2 size={42} className="text-violet-400 animate-spin" /></main>
+    return (
+      <div className="checkout ui-screen safe-top" role="status" aria-label="Loading secure checkout">
+        <CheckoutHeader onCancel={props.onCancel} />
+        <Skeleton height={96} radius={16} width="100%" />
+        <Skeleton height={220} radius={16} width="100%" className="checkout__skeleton" />
+      </div>
+    )
   }
   return <Elements stripe={getStripe()} options={{ clientSecret, appearance: { theme: 'night' } }}><StripePaymentForm {...props} /></Elements>
 }

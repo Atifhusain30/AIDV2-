@@ -141,6 +141,8 @@ function CustomerApp() {
   const hasLiveRequest = useAppStore((state) => Boolean(state.activeBooking?.id))
   const signedIn = useAuthStore((state) => Boolean(state.token))
   useRealtimeConnection(signedIn && hasLiveRequest)
+  // While a request is live, its tracking screen is full-screen (map + sheet): no tab bar to cover it.
+  const immersive = currentScreen === 'chat' && hasLiveRequest
   const { user } = useAuthStore()
   const [mounted, setMounted] = useState(false)
 
@@ -180,13 +182,13 @@ function CustomerApp() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="customer-main relative z-10 safe-top min-h-screen"
+            className={`customer-main relative z-10 safe-top min-h-screen${immersive ? ' customer-main--immersive' : ''}`}
           >
             {renderScreen()}
           </motion.main>
         </AnimatePresence>
 
-        <BottomNav />
+        {!immersive && <BottomNav />}
         <EndedBookingNotice />
       </div>
 

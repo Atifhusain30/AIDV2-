@@ -136,8 +136,8 @@ describe('customer live tracking', () => {
   })
 
   it('shows the right headline for every step, including the tow to the drop-off', () => {
-    const cases: [Booking['status'], RegExp][] = [
-      ['accepted', /DRIVER CONFIRMED/], ['en_route', /DRIVER ON THE WAY/], ['arrived', /DRIVER HAS ARRIVED/], ['in_progress', /SERVICE IN PROGRESS/],
+    const cases: [Booking['status'], string][] = [
+      ['accepted', 'Driver confirmed'], ['en_route', 'Driver on the way'], ['arrived', 'Driver has arrived'], ['in_progress', 'Service in progress'],
     ]
     for (const [status, label] of cases) {
       render(<CustomerTrackingScreen booking={job({ status })} />)
@@ -188,6 +188,28 @@ describe('customer live tracking', () => {
     cleanup()
     render(<CustomerTrackingScreen booking={job({ chat: { state: 'blocked', unread: 0, blockedByMe: true, readOnlyUntil: null } })} />)
     expect(screen.getByRole('button', { name: 'Message Marcus' })).toBeTruthy()
+  })
+
+  it('design: map first, one sheet — ETA, compact progress, driver with rating and jobs on one line, quiet help rows', () => {
+    const { container } = render(<CustomerTrackingScreen booking={job()} />)
+    const progress = screen.getByRole('group', { name: 'Request progress' })
+    expect(progress.textContent).toContain('On the way · Step 2 of 5')
+    // Rating and job count share one line (one element), no stray star line.
+    const meta = screen.getByLabelText('Rated 4.9 out of 5 from 150 ratings').parentElement!
+    expect(meta.className).toContain('ui-meta')
+    expect(meta.textContent).toMatch(/4\.9 \(150\) · 212 jobs/)
+    // The old five-circle row is gone; help actions are quiet rows, not four boxed buttons.
+    expect(container.querySelector('.job-steps')).toBeNull()
+    const help = screen.getByRole('group', { name: 'Help with this request' })
+    for (const name of ['Report a problem', 'Safety', 'Call 911', 'Cancel request']) {
+      expect(within(help).getByRole('button', { name }).className).toContain('ui-row')
+    }
+  })
+
+  it('design: Back to Home sits on the map', () => {
+    render(<CustomerTrackingScreen booking={job()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }))
+    expect(useAppStore.getState().currentScreen).toBe('home')
   })
 
   it('offers Safety and Call 911 (confirm first) on the tracking screen', () => {

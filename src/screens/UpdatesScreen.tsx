@@ -1,12 +1,12 @@
 /**
  * Customer "Updates" screen for the active request. Everything shown comes from the server
  * (kept current by useActiveBookingSync): while AID looks for a driver the customer sees the
- * request and can cancel it; once a driver accepts, the live tracking screen takes over.
+ * request on the map and can cancel it; once a driver accepts, the live tracking screen takes over.
  * No driver, message, ETA or status is ever simulated on the device.
  */
 
 import { useState } from 'react'
-import { AlertCircle, Flag, LifeBuoy, Loader2, MapPin } from 'lucide-react'
+import { AlertCircle, LifeBuoy, Loader2, XCircle } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { apiService } from '../services/api'
 import { formatPrice } from '../lib/money'
@@ -14,11 +14,14 @@ import { CUSTOMER_CANCEL_REASONS, CUSTOMER_CANCELLABLE, customerCancelText } fro
 import { ConfirmSheet } from '../components/job/JobSheets'
 import { SafetyActions } from '../components/safety/Safety'
 import CustomerTrackingScreen from './customer/CustomerTrackingScreen'
+import { TrackLayout, TripStops } from '../components/tracking/TrackLayout'
+import { List, ListRow } from '../components/ui/ListRow'
+import { EmptyState } from '../components/ui/States'
 import type { Booking } from '../types'
 
 /** Before a driver accepts: the request as the server has it, with a real cancel. */
 function FindingDriver({ booking }: { booking: Booking }) {
-  const { setActiveBooking, updateBookingInHistory } = useAppStore()
+  const { setActiveBooking, updateBookingInHistory, setCurrentScreen } = useAppStore()
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,42 +47,30 @@ function FindingDriver({ booking }: { booking: Booking }) {
   }
 
   return (
-    <div className="track-screen" aria-label="Request status">
-      <header className="job-header track-header">
-        <div><small>FINDING A DRIVER</small><h1>{booking.service.name}</h1></div>
-        <strong className="job-header__price">{formatPrice(booking.estimatedPrice)}</strong>
-      </header>
+    <TrackLayout label="Request status" pickup={{ lat: booking.location.lat, lng: booking.location.lng }} driver={null}
+      mapSummary={`Map of your pickup at ${booking.location.address}. No driver yet.`}
+      chip={<span className="track-chip"><i aria-hidden="true" /> Searching nearby</span>} onBack={() => setCurrentScreen('home')}>
+      <div className="track-eta" role="status">
+        <p className="track-eta__eyebrow">Finding a driver</p>
+        <h1><Loader2 size={22} className="animate-spin track-searching-icon" aria-hidden="true" /> Looking for a driver</h1>
+        <p className="track-eta__detail">Your request is open to verified drivers near you. Their name, vehicle and live location appear here as soon as one accepts.</p>
+        {searchUntil && <small>If no driver accepts by {searchUntil}, we'll stop looking and let you know.</small>}
+      </div>
+      <div className="track-searching-bar" aria-hidden="true"><span /></div>
 
-      <section className="track-sheet track-sheet--standalone">
-        <div className="track-eta track-eta--text" role="status">
-          <h2><Loader2 size={20} className="animate-spin track-searching-icon" aria-hidden="true" /> Looking for a driver</h2>
-          <p>Your request is open to verified drivers near you. Their name, vehicle and live location appear here as soon as one accepts.</p>
-          {searchUntil && <small>If no driver accepts by {searchUntil}, we'll stop looking and let you know.</small>}
-        </div>
+      <div className="track-card">
+        <TripStops pickup={booking.location.address} dropoff={booking.dropoffLocation?.address} />
+        <p className="track-trip__price"><span>{booking.service.name}</span><strong>{formatPrice(booking.estimatedPrice)}</strong></p>
+      </div>
 
-        <div className="track-stops">
-          <div className="job-stop">
-            <span className="job-stop__dot" aria-hidden="true"><MapPin size={14} /></span>
-            <div><small>{booking.dropoffLocation ? 'PICK UP' : 'SERVICE LOCATION'}</small><strong>{booking.location.address}</strong></div>
-          </div>
-          {booking.dropoffLocation && (
-            <div className="job-stop">
-              <span className="job-stop__dot job-stop__dot--end" aria-hidden="true"><Flag size={13} /></span>
-              <div><small>DROP OFF</small><strong>{booking.dropoffLocation.address}</strong></div>
-            </div>
-          )}
-        </div>
+      {error && <p className="ui-alert ui-alert--danger" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
 
-        {error && <p className="job-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
-
-        {CUSTOMER_CANCELLABLE.has(booking.status) && (
-          <div className="job-actions__row track-actions">
-            <button type="button" className="job-cancel" disabled={busy} onClick={() => setConfirming(true)}>Cancel request</button>
-          </div>
-        )}
-
+      <List label="Help with this request" className="track-more">
         <SafetyActions audience="customer" />
-      </section>
+        {CUSTOMER_CANCELLABLE.has(booking.status) && (
+          <ListRow icon={<XCircle size={18} />} title="Cancel request" tone="danger" hasPopup chevron={false} disabled={busy} onClick={() => setConfirming(true)} />
+        )}
+      </List>
 
       {confirming && (
         <ConfirmSheet
@@ -91,7 +82,7 @@ function FindingDriver({ booking }: { booking: Booking }) {
           onConfirm={(reason) => void cancel(reason)} onClose={() => setConfirming(false)}
         />
       )}
-    </div>
+    </TrackLayout>
   )
 }
 
@@ -100,17 +91,11 @@ export default function UpdatesScreen() {
 
   if (!activeBooking) {
     return (
-      <div className="activity-screen">
-        <header className="activity-header">
-          <p>Live status of your request</p>
-          <h1>Updates</h1>
-        </header>
-        <div className="activity-empty">
-          <span><LifeBuoy size={27} /></span>
-          <h2>No active request</h2>
-          <p>When you request help, its status, your driver and their live location show up here.</p>
-          <button type="button" onClick={() => setCurrentScreen('home')}>Request roadside help</button>
-        </div>
+      <div className="ui-screen">
+        <header className="ui-screen-title"><h1>Updates</h1><p>Live status of your request</p></header>
+        <EmptyState icon={<LifeBuoy size={24} />} title="No active request"
+          body="When you request help, its status, your driver and their live location show up here."
+          action={{ label: 'Request roadside help', onClick: () => setCurrentScreen('home') }} />
       </div>
     )
   }

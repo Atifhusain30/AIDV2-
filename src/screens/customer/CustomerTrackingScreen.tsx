@@ -1,10 +1,11 @@
 /**
- * Customer view after a driver accepts: live map, approximate ETA, who is coming and what
- * they drive. Data comes from the server (polled by useActiveBookingSync); nothing is simulated.
+ * Customer view after a driver accepts: full-bleed live map, approximate ETA, who is coming and
+ * what they drive, in a bottom sheet over the map (Uber-style). Data comes from the server
+ * (polled by useActiveBookingSync); nothing is simulated.
  */
 
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { AlertCircle, Car, Check, Clock3, Flag, Info, Loader2, MapPin, Phone, Star } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertCircle, Car, Clock3, Flag, Info, Phone, Star, XCircle } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { apiService } from '../../services/api'
 import { formatPrice } from '../../lib/money'
@@ -19,25 +20,27 @@ import JobChat from '../../components/chat/JobChat'
 import { MessageButton } from '../../components/chat/MessageButton'
 import RealtimeNotice from '../../components/ui/RealtimeNotice'
 import LiveRegion from '../../components/ui/LiveRegion'
+import PersonAvatar from '../../components/ui/PersonAvatar'
+import StepProgress from '../../components/ui/StepProgress'
+import { List, ListRow } from '../../components/ui/ListRow'
+import { TrackLayout, TripStops } from '../../components/tracking/TrackLayout'
 import { useAnnounceOnChange, useAnnouncer, useEtaAnnouncement } from '../../lib/announce'
 
-const LiveDriverMap = lazy(() => import('../../components/tracking/LiveDriverMap'))
-
-const STEPS: { status: BookingStatus; label: string }[] = [
-  { status: 'accepted', label: 'Accepted' },
-  { status: 'en_route', label: 'On the way' },
-  { status: 'arrived', label: 'Arrived' },
-  { status: 'in_progress', label: 'In service' },
-  { status: 'completed', label: 'Done' },
+const STEPS: { id: BookingStatus; label: string }[] = [
+  { id: 'accepted', label: 'Accepted' },
+  { id: 'en_route', label: 'On the way' },
+  { id: 'arrived', label: 'Arrived' },
+  { id: 'in_progress', label: 'In service' },
+  { id: 'completed', label: 'Done' },
 ]
 
 const CLOCK_TICK_MS = 5000
 const HEADER_LABEL: Partial<Record<BookingStatus, string>> = {
-  accepted: 'DRIVER CONFIRMED', en_route: 'DRIVER ON THE WAY', arrived: 'DRIVER HAS ARRIVED', in_progress: 'SERVICE IN PROGRESS',
+  accepted: 'Driver confirmed', en_route: 'Driver on the way', arrived: 'Driver has arrived', in_progress: 'Service in progress',
 }
 
 export default function CustomerTrackingScreen({ booking }: { booking: Booking }) {
-  const { setActiveBooking, updateBookingInHistory } = useAppStore()
+  const { setActiveBooking, updateBookingInHistory, setCurrentScreen } = useAppStore()
   const [now, setNow] = useState(() => Date.now())
   const [sheet, setSheet] = useState<'cancel' | 'report' | null>(null)
   const [busy, setBusy] = useState(false)
@@ -64,10 +67,9 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
   const tracking = driverTracking(booking, now)
   const vehicle = driverVehicleLabel(driver?.vehicle)
   const plate = driver?.vehicle?.plate?.trim()
-  const stepIndex = STEPS.findIndex((step) => step.status === booking.status)
+  const stepIndex = Math.max(0, STEPS.findIndex((step) => step.id === booking.status))
   const isTow = Boolean(booking.dropoffLocation)
   const pickup = { lat: booking.location.lat, lng: booking.location.lng }
-  const hasPickup = Number.isFinite(pickup.lat) && Number.isFinite(pickup.lng)
 
   const canCancel = CUSTOMER_CANCELLABLE.has(booking.status)
   const noCancelText = customerNoCancelText(booking.status, firstName)
@@ -121,109 +123,79 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
       ? `Map: ${firstName} is about ${tracking.eta.miles} miles and ${tracking.eta.minutes} minutes from your pickup at ${booking.location.address}.`
       : `Map: ${firstName}'s ${tracking.phase === 'stale' ? 'last known ' : ''}position and your pickup at ${booking.location.address}.`
 
+  const chip = (
+    <span className={`track-chip${tracking.phase === 'live' ? ' is-live' : tracking.phase === 'stale' ? ' is-stale' : ''}`} role="status">
+      <i aria-hidden="true" />
+      {tracking.phase === 'live' && 'Live'}
+      {tracking.phase === 'stale' && tracking.ageMs != null && `Last seen ${formatAge(tracking.ageMs)}`}
+      {tracking.phase === 'stale' && tracking.ageMs == null && 'Location delayed'}
+      {tracking.phase === 'waiting_location' && 'Waiting for location'}
+      {(tracking.phase === 'arrived' || tracking.phase === 'in_service') && (tracking.location && tracking.ageMs != null ? `Updated ${formatAge(tracking.ageMs)}` : 'At pickup')}
+    </span>
+  )
+
   return (
-    <div className="track-screen" role="region" aria-label="Live tracking">
+    <TrackLayout label="Live tracking" pickup={pickup} driver={tracking.location} stale={tracking.phase === 'stale'}
+      showConnector={tracking.phase === 'live' || tracking.phase === 'stale'} mapSummary={mapSummary} chip={chip} onBack={() => setCurrentScreen('home')}>
       <LiveRegion message={liveText} />
       <RealtimeNotice />
-      <header className="job-header track-header">
-        <div><small>{HEADER_LABEL[booking.status] ?? 'ACTIVE REQUEST'}</small><h1>{booking.service.name}</h1></div>
-        <strong className="job-header__price">{formatPrice(booking.estimatedPrice)}</strong>
-      </header>
 
-      <section className="track-map" aria-label="Map">
-        <p className="sr-only">{hasPickup ? mapSummary : 'Map unavailable.'}</p>
-        {hasPickup ? (
-          <div className="track-map__canvas" aria-hidden="true">
-            <Suspense fallback={<div className="track-map__loading"><Loader2 size={22} className="animate-spin" /></div>}>
-              <LiveDriverMap pickup={pickup} driver={tracking.location} stale={tracking.phase === 'stale'} showConnector={tracking.phase === 'live' || tracking.phase === 'stale'} />
-            </Suspense>
-          </div>
-        ) : <div className="track-map__loading">Map unavailable</div>}
-        <span className={`track-chip${tracking.phase === 'live' ? ' is-live' : tracking.phase === 'stale' ? ' is-stale' : ''}`} role="status">
-          <i aria-hidden="true" />
-          {tracking.phase === 'live' && 'Live'}
-          {tracking.phase === 'stale' && tracking.ageMs != null && `Last seen ${formatAge(tracking.ageMs)}`}
-          {tracking.phase === 'stale' && tracking.ageMs == null && 'Location delayed'}
-          {tracking.phase === 'waiting_location' && 'Waiting for location'}
-          {(tracking.phase === 'arrived' || tracking.phase === 'in_service') && (tracking.location && tracking.ageMs != null ? `Updated ${formatAge(tracking.ageMs)}` : 'At pickup')}
-        </span>
-      </section>
+      <div className="track-eta">
+        <p className="track-eta__eyebrow">{HEADER_LABEL[booking.status] ?? 'Active request'}</p>
+        <h1>{headline}</h1>
+        {detail && <p className="track-eta__detail">{detail}</p>}
+        {tracking.eta && <small><Clock3 size={13} aria-hidden="true" /> Approximate — based on distance, not live traffic</small>}
+      </div>
 
-      <section className="track-sheet">
-        <div className={`track-eta${tracking.eta ? "" : " track-eta--text"}`}>
-          <h2>{headline}</h2>
-          {detail && <p>{detail}</p>}
-          {tracking.eta && <small><Clock3 size={12} aria-hidden="true" /> Approximate — based on distance, not live traffic</small>}
+      <StepProgress label="Request progress" current={stepIndex} steps={STEPS} />
+
+      {tracking.phase === 'stale' && (
+        <div className="ui-alert ui-alert--warning" role="alert">
+          <AlertCircle size={17} aria-hidden="true" />
+          <span>{`${firstName}'s location ${tracking.ageMs != null ? `was last updated ${formatAge(tracking.ageMs)}` : 'is delayed'}. They may have lost signal${driver?.phone ? ' — you can call them' : ''}.`}{!tracking.eta && ' ETA is hidden until it updates.'}</span>
         </div>
+      )}
 
-        {tracking.phase === 'stale' && (
-          <div className="job-banner job-banner--warn" role="alert">
-            <AlertCircle size={17} aria-hidden="true" />
-            <span>{`${firstName}'s location ${tracking.ageMs != null ? `was last updated ${formatAge(tracking.ageMs)}` : 'is delayed'}. They may have lost signal${driver?.phone ? ' — you can call them' : ''}.`}{!tracking.eta && ' ETA is hidden until it updates.'}</span>
-          </div>
-        )}
-
-        <div className="job-person track-driver" aria-label="Your driver">
-          <span className="job-person__avatar" aria-hidden="true">{firstName.charAt(0).toUpperCase()}</span>
-          <div className="job-person__text">
+      <div className="track-card">
+        <div className="track-person" aria-label="Your driver" role="group">
+          <PersonAvatar name={driver?.name || firstName} />
+          <div className="track-person__text">
             <strong>{driver?.name || 'Your driver'}</strong>
-            <small>
+            <span className="ui-meta">
               {driverRating
-                ? <><span aria-label={driverRating.label}><Star size={13} className="track-star" aria-hidden="true" /> {driverRating.value} ({driverRating.count})</span>{driverJobs && <> · {driverJobs}</>}</>
-                : <>New on AID{driverJobs && <> · {driverJobs}</>}</>}
-            </small>
+                ? <><span className="ui-rating" aria-label={driverRating.label}><Star size={13} aria-hidden="true" /> {driverRating.value} ({driverRating.count})</span>{driverJobs && <> · {driverJobs}</>}</>
+                : <span>New on AID{driverJobs && <> · {driverJobs}</>}</span>}
+            </span>
           </div>
-          <div className="job-person__actions">
+          <div className="track-person__actions">
             {showChatEntry(booking.chat) && (
               <MessageButton name={firstName} unread={chatOpen ? 0 : booking.chat?.unread ?? 0} onClick={() => setChatOpen(true)} />
             )}
             {driver?.phone && (
-              <a className="job-call" href={`tel:${driver.phone}`} aria-label={`Call ${firstName}`}><Phone size={19} aria-hidden="true" /></a>
+              <a className="ui-icon-btn" href={`tel:${driver.phone}`} aria-label={`Call ${firstName}`}><Phone size={19} aria-hidden="true" /></a>
             )}
           </div>
         </div>
-
-        <div className="track-vehicle" aria-label="Driver vehicle">
-          <span className="track-vehicle__icon" aria-hidden="true"><Car size={18} /></span>
-          <div>
-            <small>LOOK FOR</small>
-            <strong>{vehicle || 'Vehicle details not added yet'}</strong>
-          </div>
-          {plate && <span className="track-plate">{plate}</span>}
+        <div className="track-vehicle" role="group" aria-label="Driver vehicle">
+          <Car size={18} aria-hidden="true" />
+          <span><small>Look for</small><strong>{vehicle || 'Vehicle details not added yet'}</strong></span>
+          {plate && <span className="ui-plate">{plate}</span>}
         </div>
+      </div>
 
-        <div className="track-stops">
-          <div className="job-stop">
-            <span className="job-stop__dot" aria-hidden="true"><MapPin size={14} /></span>
-            <div><small>{isTow ? 'PICK UP' : 'SERVICE LOCATION'}</small><strong>{booking.location.address}</strong></div>
-          </div>
-          {booking.dropoffLocation && (
-            <div className="job-stop">
-              <span className="job-stop__dot job-stop__dot--end" aria-hidden="true"><Flag size={13} /></span>
-              <div><small>DROP OFF</small><strong>{booking.dropoffLocation.address}</strong></div>
-            </div>
-          )}
-        </div>
+      <div className="track-card">
+        <TripStops pickup={booking.location.address} dropoff={booking.dropoffLocation?.address} done={isTow && booking.status === 'in_progress'} />
+        <p className="track-trip__price"><span>{booking.service.name}</span><strong>{formatPrice(booking.estimatedPrice)}</strong></p>
+      </div>
 
-        <ol className="job-steps" aria-label="Request progress">
-          {STEPS.map((step, index) => (
-            <li key={step.status} className={index < stepIndex ? 'is-done' : index === stepIndex ? 'is-current' : ''} aria-current={index === stepIndex ? 'step' : undefined}>
-              <span aria-hidden="true">{index < stepIndex ? <Check size={13} /> : index + 1}</span>{step.label}
-            </li>
-          ))}
-        </ol>
+      {error && <p className="ui-alert ui-alert--danger" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
+      {noCancelText && <p className="ui-alert"><Info size={15} aria-hidden="true" /> {noCancelText}</p>}
 
-        {error && <p className="job-error" role="alert"><AlertCircle size={15} aria-hidden="true" /> {error}</p>}
-
-        {noCancelText && <p className="job-note track-note"><Info size={15} aria-hidden="true" /> {noCancelText}</p>}
-
-        <div className="job-actions__row track-actions">
-          {canCancel && <button type="button" className="job-cancel" disabled={busy} onClick={() => setSheet('cancel')}>Cancel request</button>}
-          {REPORTABLE.has(booking.status) && <button type="button" className="job-report" disabled={busy} onClick={() => setSheet('report')}>Report a problem</button>}
-        </div>
-
+      <List label="Help with this request" className="track-more">
+        {REPORTABLE.has(booking.status) && <ListRow icon={<Flag size={18} />} title="Report a problem" hasPopup disabled={busy} onClick={() => setSheet('report')} />}
         <SafetyActions audience="customer" />
-      </section>
+        {canCancel && <ListRow icon={<XCircle size={18} />} title="Cancel request" tone="danger" hasPopup chevron={false} disabled={busy} onClick={() => setSheet('cancel')} />}
+      </List>
 
       {sheet === 'cancel' && (
         <ConfirmSheet
@@ -242,6 +214,6 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
           initialChat={booking.chat} onClose={() => setChatOpen(false)} onChatChange={updateChat}
         />
       )}
-    </div>
+    </TrackLayout>
   )
 }

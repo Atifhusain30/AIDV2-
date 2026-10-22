@@ -35,7 +35,7 @@ const driverIcon = (stale: boolean) => L.divIcon({
 function FitView({ pickup, driver }: { pickup: Point; driver: Point | null }) {
   const map = useMap()
   useEffect(() => {
-    if (driver) map.fitBounds(L.latLngBounds([pickup.lat, pickup.lng], [driver.lat, driver.lng]), { paddingTopLeft: [40, 60], paddingBottomRight: [40, 64], maxZoom: 16, animate: false }) // room for the status chip and the overlapping sheet
+    if (driver) map.fitBounds(L.latLngBounds([pickup.lat, pickup.lng], [driver.lat, driver.lng]), { paddingTopLeft: [48, 84], paddingBottomRight: [48, 72], maxZoom: 16, animate: false }) // room for the back button / status chip and the sheet's top edge
     else map.setView([pickup.lat, pickup.lng], 15, { animate: false })
   }, [map, pickup.lat, pickup.lng, driver?.lat, driver?.lng])
   return null

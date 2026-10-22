@@ -5,8 +5,9 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronRight, Phone, ShieldCheck } from 'lucide-react'
+import { Phone, ShieldCheck } from 'lucide-react'
 import Dialog from '../ui/Dialog'
+import { ListRow } from '../ui/ListRow'
 
 export type SafetyAudience = 'customer' | 'driver'
 
@@ -103,30 +104,33 @@ export function SafetySheet({ audience, onClose }: { audience: SafetyAudience; o
   )
 }
 
-/** Row on the active-job / tracking screens: safety info + Call 911. */
+/**
+ * Quiet rows on the active-job / tracking screens: Safety info and Call 911 (still behind the
+ * confirm step). Reachable in one tap, but styled as list rows so they never compete with the
+ * screen's one primary action. Render inside a <List>.
+ */
 export function SafetyActions({ audience }: { audience: SafetyAudience }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState<'safety' | '911' | null>(null)
   return (
-    <div className="safety-actions" aria-label="Safety">
-      <button type="button" className="job-report" aria-haspopup="dialog" onClick={() => setOpen(true)}>
-        <ShieldCheck size={17} aria-hidden="true" /> Safety
-      </button>
-      <Call911Button />
-      {open && <SafetySheet audience={audience} onClose={() => setOpen(false)} />}
-    </div>
+    <>
+      <ListRow icon={<ShieldCheck size={19} />} title="Safety" hasPopup onClick={() => setOpen('safety')} />
+      <ListRow icon={<Phone size={18} />} title="Call 911" tone="danger" hasPopup chevron={false} onClick={() => setOpen('911')} />
+      {open === 'safety' && <SafetySheet audience={audience} onClose={() => setOpen(null)} />}
+      {open === '911' && (
+        <SafetyDialog labelledBy="call-911-title" describedBy="call-911-text" role="alertdialog" onClose={() => setOpen(null)}>
+          <Call911Confirm onBack={() => setOpen(null)} backLabel="Cancel" />
+        </SafetyDialog>
+      )}
+    </>
   )
 }
 
 /** Menu row for settings / account screens. */
-export function SafetyMenuItem({ audience, className }: { audience: SafetyAudience; className?: string }) {
+export function SafetyMenuItem({ audience }: { audience: SafetyAudience; className?: string }) {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <button type="button" className={className} aria-haspopup="dialog" onClick={() => setOpen(true)}>
-        <span className="account-menu__icon"><ShieldCheck size={20} aria-hidden="true" /></span>
-        <span><strong>Safety</strong><small>Safety tips and calling 911</small></span>
-        <ChevronRight size={18} aria-hidden="true" />
-      </button>
+      <ListRow icon={<ShieldCheck size={19} />} title="Safety" subtitle="Safety tips and calling 911" hasPopup onClick={() => setOpen(true)} />
       {open && <SafetySheet audience={audience} onClose={() => setOpen(false)} />}
     </>
   )

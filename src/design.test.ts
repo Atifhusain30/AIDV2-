@@ -18,8 +18,6 @@ const tsx = import.meta.glob(['./**/*.tsx', '!./**/*.test.tsx'], { query: '?raw'
 const NOT_YET_MIGRATED: string[] = [
   './App.tsx',
   './screens/ProfileScreen.tsx',
-  './components/payment/PaymentCheckout.tsx',
-  './components/modals/ReceiptModal.tsx',
   './components/modals/BookingDetailModal.tsx',
 ]
 
