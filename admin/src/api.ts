@@ -45,7 +45,8 @@ async function currentAdmin(): Promise<AdminProfile | null> {
   const profile = await call<AdminProfile & { role: string }>('/me')
   if (profile.role !== 'admin') {
     await supabase().auth.signOut()
-    throw new Error('This account does not have admin access.')
+    const kind = profile.role === 'driver' || profile.role === 'customer' ? `a ${profile.role}` : 'not an admin'
+    throw new Error(`This account does not have admin access (${profile.email} is ${kind} account). Sign in with an admin account.`)
   }
   return profile
 }
