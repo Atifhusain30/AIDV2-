@@ -74,12 +74,12 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 4.7 | Driver home: one clear "Finish verification" CTA, time-based greeting, working bell, service icons | ⚠️ |
 | 4.8 | Chat/keyboard layout (`100dvh`, safe area), back navigation | ❌ |
 | 4.9 | Replace `window.alert` with inline errors/toasts; vehicle year validation | ❌ |
-| 4.10 | Remove dead code (~2,700 lines unused UI kit, ActiveServiceScreen, MapView, ~42 unused CSS classes); lazy-load maps/Stripe/driver app | ❌ |
+| 4.10 | Remove dead code (~2,700 lines unused UI kit, ActiveServiceScreen, MapView, ~42 unused CSS classes); lazy-load maps/Stripe/driver app | ❌ ActiveServiceScreen, EmergencySOSModal and `.emergency-panel` CSS removed in `bd1c4d7`; the rest remains |
 
 ## Phase 5 — App Store & Google Play
 | # | Item | Status |
 |---|---|---|
-| 5.1 | **Emergency SOS is fake** ("Call 911" shows success without calling) — remove or make `tel:911` real; fix dead "Roadside support" buttons | ❌ top rejection risk |
+| 5.1 | **Emergency SOS is fake** ("Call 911" shows success without calling) — remove or make `tel:911` real; fix dead "Roadside support" buttons | ✅ `bd1c4d7` — fake SOS modal deleted; real Call 911 (`tel:911`, confirm step first) + Safety sheet ("AID is not an emergency service…") on customer tracking, driver job, customer Account, driver Settings and Home; dead "Roadside support" (Account) and "Support" (booking details) buttons removed; Report an issue labelled non-emergency. Tests guard against fake SOS text returning |
 | 5.2 | Privacy Policy, Terms, Support pages published + linked in app and at sign-up; web account-deletion URL (Play) | ❌ 🔒 |
 | 5.3 | Real app icon + splash (both platforms use Capacitor defaults); Android monochrome icon | ❌ 🔒 design assets |
 | 5.4 | iOS permissions: remove "Always" location, Camera, Photo Library Add strings (unused) | ❌ |

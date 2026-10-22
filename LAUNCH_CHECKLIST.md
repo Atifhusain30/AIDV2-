@@ -44,7 +44,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | B16 | Receipts + booking history with real amounts | 🛠 | 🟡 |
 | B17 | Driver earnings screen (real data) | 🛠 | ⬜ |
 | B18 | Support/help screen + in-app issue reporting | 🛠 | ⬜ |
-| B19 | Emergency: remove fake SOS; real "Call 911" (tel:) + safety info | 🛠 | ⬜ **store blocker** |
+| B19 | Emergency: remove fake SOS; real "Call 911" (tel:) + safety info | 🛠 | ✅ `bd1c4d7` — the fake "Emergency SOS" (countdown, then "Connecting to 911… help is on the way", "priority tow truck dispatched", "emergency contact notified" — none of it real; it was no longer mounted, so the buttons that opened it did nothing) is deleted, along with the unused tracking screen that had an Emergency button. Now: a **Call 911** button that always asks "Call 911?" first, then opens the phone dialer (`tel:911`); on a computer the number 911 is shown to dial from any phone. It's on the customer tracking screen, the driver job screen, customer Account → Help & safety → Safety, driver Settings → Safety, and the Safety link at the bottom of Home. The **Safety** sheet says plainly "AID is not an emergency service and does not contact 911, police or medical help for you" and gives short tips (call 911 if in danger; get away from traffic; on a highway shoulder stay in the car, seatbelt on, hazards on; check the driver's name, vehicle and plate in the app — drivers get their own tips). No "share trip" tip because that feature doesn't exist. Report an issue stays separate and now says it's not for emergencies (reports are reviewed later). The dead "Roadside support"/"Support" buttons that opened the fake SOS are gone and Home no longer claims "Help is available 24/7". No crash detection or share-location-with-911 claims exist. Tested: no fake SOS text left in the code, the only `tel:911` link is behind the confirm step, and Safety opens from every entry point. Checked in a phone-width browser preview only — dialing not yet tried on a real iPhone/Android |
 
 ## C. Payments (Stripe)
 | # | Item | Owner | Status |
@@ -85,7 +85,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 |---|---|---|---|
 | F1 | Request in 2–3 taps; one bottom-sheet style | 🛠 | ⬜ |
 | F2 | One color system (black + restrained purple); remove leftovers | 🛠 | 🟡 |
-| F3 | Remove all fake data (fake providers, earnings, notifications) | 🛠 | ⬜ |
+| F3 | Remove all fake data (fake providers, earnings, notifications) | 🛠 | ⬜ started: `bd1c4d7` deleted the fake SOS success screens and the unused tracking screen with a made-up driver ("Marcus Johnson"); other fake data (see audit 4.4) not yet checked |
 | F4 | Accessibility: text size, contrast, screen reader labels, 44pt targets | 🛠 | ⬜ |
 | F5 | Empty, loading, error and offline states everywhere | 🛠 | 🟡 |
 | F6 | Remove dead code; faster load (lazy maps/payments) | 🛠 | ⬜ |
