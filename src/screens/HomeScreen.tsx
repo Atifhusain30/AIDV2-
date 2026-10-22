@@ -20,6 +20,7 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react'
+import { useState } from 'react'
 import AidBrand from '../components/brand/AidBrand'
 import { useAppStore } from '../store/useAppStore'
 import type { ServiceType } from '../types'
@@ -27,6 +28,7 @@ import { driverTracking } from '../lib/customerTracking'
 import { customerStatusLine } from '../lib/jobLifecycle'
 import { HistoryModal } from '../components/modals'
 import RequestSheet from '../components/request/RequestSheet'
+import { SafetySheet } from '../components/safety/Safety'
 
 const services: Array<{ label: string; icon: typeof Battery; service: ServiceType }> = [
   { label: "Won't start", icon: Battery, service: 'battery_jump' },
@@ -53,6 +55,7 @@ export default function HomeScreen() {
     resetServiceFormData,
     rebookFromHistory,
   } = useAppStore()
+  const [showSafety, setShowSafety] = useState(false)
 
   // Real jobs: the server's approximate ETA (hidden when the driver's location is too old).
   const activeEta = activeBooking
@@ -165,7 +168,8 @@ export default function HomeScreen() {
           </div>
         </section>
 
-        <div className="consumer-safety"><ShieldCheck size={18} /><span><strong>Help is available 24/7</strong><small>If you’re in immediate danger, call 911.</small></span></div>
+        <button type="button" className="consumer-safety" aria-haspopup="dialog" onClick={() => setShowSafety(true)}><ShieldCheck size={18} aria-hidden="true" /><span><strong>Safety</strong><small>AID is not an emergency service. If you’re in danger, call 911.</small></span></button>
+        {showSafety && <SafetySheet audience="customer" onClose={() => setShowSafety(false)} />}
       </main>
 
       <RequestSheet />

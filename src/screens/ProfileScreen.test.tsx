@@ -21,8 +21,18 @@ describe('customer account', () => {
     render(<ProfileScreen />)
     expect(screen.getByRole('heading', { name: 'Account' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Add vehicle' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Roadside support/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Safety/i })).toBeTruthy()
     expect(screen.queryByText('John Doe')).toBeNull()
+  })
+
+  it('opens safety info from Help & safety, with Call 911 behind a confirm step (no one-tap 911 link)', () => {
+    render(<ProfileScreen />)
+    expect(screen.queryByRole('link', { name: /911/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Roadside support/i })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Safety/i }))
+    expect(screen.getByRole('dialog', { name: 'Safety' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
+    expect(screen.getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
   })
 
   it('requires explicit confirmation before deleting an authenticated account', async () => {

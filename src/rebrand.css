@@ -749,7 +749,7 @@ select:focus-visible {
 .care-row button > span { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: auto; border-radius: 50%; background: #1c1524; color: #ae91f4; }
 .care-row strong { font-size: .75rem; }
 .care-row small { margin-top: 4px; color: #837a8c; font-size: .62rem; }
-.consumer-safety { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; margin-top: 24px; padding: 13px 2px 2px; color: #81798a; }
+.consumer-safety { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin-top: 24px; padding: 13px 2px 2px; color: #81798a; text-align: left; }
 .consumer-safety > svg { color: #695f73; }
 .consumer-safety strong,
 .consumer-safety small { display: block; }
@@ -1040,11 +1040,6 @@ select:focus-visible {
 .car-care-list small { margin-top: 3px; color: #8e8698; font-size: .67rem; }
 .car-care-list button > svg { color: #716879; }
 
-.emergency-panel { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; margin-top: 18px; padding: 14px; border: 1px solid rgba(255,107,95,.22); border-radius: 17px; background: rgba(255,107,95,.065); color: #ff8178; }
-.emergency-panel strong { display: block; color: #f8f1fa; font-size: .76rem; }
-.emergency-panel p { margin-top: 3px; color: #9b909f; font-size: .63rem; line-height: 1.35; }
-.emergency-panel a { padding: 9px 11px; border-radius: 10px; background: rgba(255,107,95,.13); color: #ff8f87; font-size: .7rem; font-weight: 760; white-space: nowrap; }
-
 @media (max-width: 360px) {
   .help-screen { padding-inline: 15px; }
   .roadside-grid { grid-template-columns: 1fr; }
@@ -1213,6 +1208,17 @@ select:focus-visible {
 .job-confirm__title { margin-top: 6px; font-size: 1.25rem; font-weight: 750; }
 .job-confirm__text { margin-top: 8px; color: var(--aid-muted); font-size: .9375rem; line-height: 1.45; }
 .job-confirm__actions { display: grid; gap: 10px; margin-top: 18px; }
+/* Safety + Call 911 (B19): restrained red, never alarmist; 50px targets. */
+.safety-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.safety-actions .job-report,
+.safety-call { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 50px; }
+.safety-call { width: 100%; border-radius: 14px; border: 1px solid rgba(255,107,95,.28); background: rgba(255,107,95,.07); color: #ff9a91; font-weight: 650; }
+.safety-call--solid { border-color: transparent; background: #c8383d; color: #fff; text-decoration: none; }
+.safety-statement { margin-top: 8px; padding: 12px 13px; border: 1px solid rgba(160,120,210,.18); border-radius: 13px; background: rgba(120,80,170,.08); color: #e7def0; font-size: .9rem; line-height: 1.45; }
+.safety-tips { margin-top: 12px; padding-left: 18px; color: var(--aid-muted); font-size: .9rem; line-height: 1.5; list-style: disc; }
+.safety-tips li + li { margin-top: 6px; }
+.safety-fallback { margin-top: 12px; color: var(--aid-muted); font-size: .8rem; text-align: center; }
+.safety-fallback strong { color: #f8f1fa; }
 .job-actions__hint { margin-top: -2px; color: #8d8496; font-size: .8125rem; text-align: center; }
 .job-actions__row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .job-actions__row > :only-child { grid-column: 1 / -1; }

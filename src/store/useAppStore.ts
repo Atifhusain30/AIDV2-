@@ -10,7 +10,6 @@ export type ModalType =
   | 'ev_charging' 
   | 'detailing' 
   | 'window_tinting'
-  | 'emergency_sos'
   | 'history'
   | 'search'
   | 'locationConfirm'

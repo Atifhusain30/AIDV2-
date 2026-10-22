@@ -11,6 +11,7 @@ import { formatPrice } from '../../lib/money'
 import { arrivalClock, driverTracking, driverVehicleLabel, formatAge } from '../../lib/customerTracking'
 import { CUSTOMER_CANCEL_REASONS, CUSTOMER_CANCELLABLE, CUSTOMER_ISSUES, REPORTABLE, customerCancelText, customerNoCancelText } from '../../lib/jobLifecycle'
 import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
+import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
 
 const LiveDriverMap = lazy(() => import('../../components/tracking/LiveDriverMap'))
@@ -180,6 +181,8 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
           {canCancel && <button type="button" className="job-cancel" disabled={busy} onClick={() => setSheet('cancel')}>Cancel request</button>}
           {REPORTABLE.has(booking.status) && <button type="button" className="job-report" disabled={busy} onClick={() => setSheet('report')}>Report a problem</button>}
         </div>
+
+        <SafetyActions audience="customer" />
       </section>
 
       {sheet === 'cancel' && (

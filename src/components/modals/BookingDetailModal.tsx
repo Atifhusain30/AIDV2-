@@ -6,7 +6,6 @@ import {
   Star,
   MessageCircle,
   RefreshCw,
-  Headphones,
   Calendar,
   FileText,
   CheckCircle2,
@@ -156,7 +155,6 @@ export default function BookingDetailModal() {
     setActiveBooking,
     setCurrentScreen,
     rebookFromHistory,
-    setActiveModal,
     openReceipt,
   } = useAppStore()
 
@@ -185,12 +183,6 @@ export default function BookingDetailModal() {
     rebookFromHistory(booking.id)
     closeBookingDetail()
     setCurrentScreen('chat')
-  }
-
-  // Support action
-  const handleSupport = () => {
-    closeBookingDetail()
-    setActiveModal('emergency_sos')
   }
 
   // View Receipt action (for completed bookings)
@@ -444,16 +436,6 @@ export default function BookingDetailModal() {
                 Rebook
               </motion.button>
 
-              {/* Support */}
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSupport}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-white/5 border border-white/10 text-gray-300 font-medium rounded-xl hover:bg-white/10 hover:border-amber-500/30 hover:text-amber-400 transition-colors"
-              >
-                <Headphones size={16} strokeWidth={2} />
-                Support
-              </motion.button>
             </div>
           </div>
         </motion.div>

@@ -9,6 +9,7 @@ import { useDriverStore } from '../../store/useDriverStore'
 import { formatPrice } from '../../lib/money'
 import { DRIVER_CANCEL_REASONS, DRIVER_CANCELLABLE, DRIVER_ISSUES, REPORTABLE, driverNextAction } from '../../lib/jobLifecycle'
 import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
+import { SafetyActions } from '../../components/safety/Safety'
 import type { BookingStatus } from '../../types'
 
 interface DriverJobScreenProps {
@@ -156,6 +157,7 @@ export default function DriverJobScreen({ onBack }: DriverJobScreenProps) {
           {canCancel && <button type="button" className="job-cancel" disabled={busy} onClick={() => setSheet('cancel')}>Cancel job</button>}
           {REPORTABLE.has(job.status) && <button type="button" className="job-report" disabled={busy} onClick={() => setSheet('report')}>Report an issue</button>}
         </div>
+        <SafetyActions audience="driver" />
       </div>
 
       {sheet === 'complete' && (

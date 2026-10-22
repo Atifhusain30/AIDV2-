@@ -149,4 +149,17 @@ describe('customer live tracking', () => {
     expect(await screen.findByRole('heading', { name: 'Report saved' })).toBeTruthy()
     expect(apiService.reportBookingIssue).toHaveBeenCalledWith('booking-9', 'vehicle_damage', undefined)
   })
+
+  it('offers Safety and Call 911 (confirm first) on the tracking screen', () => {
+    render(<CustomerTrackingScreen booking={job()} />)
+    expect(screen.queryByRole('link', { name: /911/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
+    const confirm = screen.getByRole('dialog', { name: 'Call 911?' })
+    expect(within(confirm).getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Safety' }))
+    const sheet = screen.getByRole('dialog', { name: 'Safety' })
+    expect(within(sheet).getByText(/driver's name, vehicle and plate/)).toBeTruthy()
+  })
 })

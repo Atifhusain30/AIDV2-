@@ -22,6 +22,7 @@ import { App as CapacitorApp } from '@capacitor/app'
 import { supabase } from './auth/supabase'
 import { completeRecoveryFromUrl } from './auth/recovery'
 import PasswordRecoveryScreen from './components/auth/PasswordRecoveryScreen'
+import { SafetyMenuItem } from './components/safety/Safety'
 
 // Customer Screens
 import HomeScreen from './screens/HomeScreen'
@@ -293,6 +294,10 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
               <p className="text-gray-500 text-sm">{driverVehicleSummary((user as Driver | null)?.vehicle) || 'Add the vehicle customers will look for'}</p>
             </button>
             
+            <div className="account-menu">
+              <SafetyMenuItem audience="driver" />
+            </div>
+
             <button
               onClick={onLogout}
               className="w-full p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400"

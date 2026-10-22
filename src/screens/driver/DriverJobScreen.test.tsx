@@ -156,4 +156,23 @@ describe('driver job screen', () => {
     fireEvent.click(screen.getByRole('button', { name: /back to dashboard/i }))
     expect(onBack).toHaveBeenCalled()
   })
+
+  it('offers Safety and Call 911 (confirm first) separately from Report an issue', () => {
+    show(tow())
+    expect(screen.queryByRole('link', { name: /911/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
+    const confirm = screen.getByRole('dialog', { name: 'Call 911?' })
+    expect(within(confirm).getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Safety' }))
+    expect(screen.getByRole('dialog', { name: 'Safety' })).toBeTruthy()
+    expect(screen.getByText(/does not contact 911/)).toBeTruthy()
+  })
+
+  it('labels Report an issue as non-emergency', () => {
+    show(tow())
+    fireEvent.click(screen.getByRole('button', { name: 'Report an issue' }))
+    expect(screen.getByText(/Not for emergencies/)).toBeTruthy()
+  })
 })

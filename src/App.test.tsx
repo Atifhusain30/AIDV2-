@@ -117,5 +117,12 @@ describe('first-run flow', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Go offline' })).toBeTruthy())
     expect((useAuthStore.getState().user as { verificationStatus?: string }).verificationStatus).toBe('verified')
     expect(useDriverStore.getState().isOnline).toBe(true)
+
+    // Driver settings has a Safety entry with Call 911 behind a confirm step.
+    fireEvent.click(screen.getByRole('button', { name: 'Driver settings' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Safety/ }))
+    expect(screen.getByRole('dialog', { name: 'Safety' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Call 911' }))
+    expect(screen.getByRole('link', { name: 'Call 911 now' }).getAttribute('href')).toBe('tel:911')
   })
 })

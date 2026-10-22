@@ -105,7 +105,7 @@ export function ReportIssueSheet({ bookingId, choices, onClose }: { bookingId: s
         </>
       ) : (
         <>
-          <p className="job-confirm__text">If anyone is in danger, call 911 first.</p>
+          <p className="job-confirm__text">Not for emergencies: reports are saved to this job and reviewed later — no one is alerted right away. If anyone is in danger, call 911 first.</p>
           <ChoiceList name="Issue type" choices={choices} value={category} onChange={setCategory} />
           <label className="job-issue-details">
             <span>Details{category === 'other' ? '' : ' (optional)'}</span>

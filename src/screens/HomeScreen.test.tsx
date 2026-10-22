@@ -84,4 +84,11 @@ describe('consumer roadside home', () => {
     expect(state.activeBooking).toBeNull()
     expect(state.bookingHistory).toHaveLength(1)
   })
+
+  it('does not promise 24/7 help and opens safety info instead', () => {
+    render(<HomeScreen />)
+    expect(screen.queryByText(/24\/7/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Safety/ }))
+    expect(screen.getByRole('dialog', { name: 'Safety' })).toBeTruthy()
+  })
 })

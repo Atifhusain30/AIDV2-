@@ -1,11 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertTriangle,
   Car,
   Check,
   ChevronRight,
-  HelpCircle,
   LogOut,
   Mail,
   MapPin,
@@ -19,6 +17,7 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiService } from '../services/api'
+import { SafetyMenuItem } from '../components/safety/Safety'
 
 const emptyVehicle = { make: '', model: '', year: '', color: '', plate: '' }
 
@@ -139,7 +138,7 @@ export default function ProfileScreen() {
           </div>
         ) : (
           <button type="button" className="account-empty-vehicle" onClick={() => setShowVehicleForm(true)}>
-            <span><Car size={24} /></span><div><strong>Add your first vehicle</strong><p>Skip make, model, and year entry during an emergency.</p></div><ChevronRight size={18} />
+            <span><Car size={24} /></span><div><strong>Add your first vehicle</strong><p>Skip make, model, and year entry when you request help.</p></div><ChevronRight size={18} />
           </button>
         )}
       </section>
@@ -147,9 +146,8 @@ export default function ProfileScreen() {
       <section className="account-section" aria-labelledby="support-title">
         <div className="account-section__heading"><div><p>HELP & SAFETY</p><h2 id="support-title">Support</h2></div></div>
         <div className="account-menu">
-          <button type="button" onClick={() => setActiveModal('emergency_sos')}><span className="account-menu__icon"><HelpCircle size={20} /></span><span><strong>Roadside support</strong><small>Get help with an active or new request</small></span><ChevronRight size={18} /></button>
+          <SafetyMenuItem audience="customer" />
           <button type="button" onClick={() => setActiveModal('locationConfirm')}><span className="account-menu__icon"><MapPin size={20} /></span><span><strong>Location preferences</strong><small>Confirm where assistance should arrive</small></span><ChevronRight size={18} /></button>
-          <a href="tel:911"><span className="account-menu__icon account-menu__icon--danger"><AlertTriangle size={20} /></span><span><strong>Emergency services</strong><small>Call 911 if you are in immediate danger</small></span><ChevronRight size={18} /></a>
         </div>
       </section>
 
