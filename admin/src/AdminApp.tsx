@@ -7,6 +7,7 @@ import { adminApi } from './api'
 import Dialog from '../../src/components/ui/Dialog'
 import FilterTabs, { tabId } from './FilterTabs'
 import ReportsInbox from './Reports'
+import { EmptyState, LoadError, SkeletonDetail, SkeletonTable } from './ui'
 import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverRatings, DriverSummary, QueueFilter, ReportCounts, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
 
 // ---------- Copy & rules ----------
@@ -91,9 +92,24 @@ function inFilter(driver: DriverSummary, filter: QueueFilter): boolean {
 
 // ---------- Shared UI ----------
 
-function StatusBadge({ status }: { status: VerificationStatus | ReviewDocument['status'] }) {
-  const label = status in STATUS_LABELS ? STATUS_LABELS[status as VerificationStatus] : status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Pending'
-  return <span className={`badge badge--${status}`}>{label}</span>
+/** The AID mark (three lanes) + "Admin", same mark as the apps. */
+function Brand() {
+  return (
+    <div className="brand">
+      <span className="brand__mark" aria-hidden="true"><i /><i /><i /></span>
+      <span className="brand__name">AID <span>Admin</span></span>
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: VerificationStatus }) {
+  return <span className={`badge badge--${status}`}>{STATUS_LABELS[status]}</span>
+}
+
+/** A document's own review state — an uploaded document waiting for review is "To review", never "Not submitted". */
+const DOC_STATUS_LABELS: Record<ReviewDocument['status'], string> = { pending: 'To review', approved: 'Approved', rejected: 'Rejected' }
+function DocumentBadge({ status }: { status: ReviewDocument['status'] }) {
+  return <span className={`badge badge--doc-${status}`}>{DOC_STATUS_LABELS[status]}</span>
 }
 
 /** Same accessible dialog as the apps (F4): focus trap, Escape, inert background, focus returns. */
@@ -158,7 +174,7 @@ function SignIn({ onSignedIn, initialError }: { onSignedIn: (admin: AdminProfile
   return (
     <main className="signin">
       <form noValidate onSubmit={(event) => void submit(event)} className="signin__card">
-        <div className="brand brand--dark"><span className="brand__mark">AID</span><span>Admin</span></div>
+        <Brand />
         <div>
           <h1>Sign in</h1>
           <p className="muted">Review drivers and reports.</p>
@@ -228,7 +244,7 @@ function DocumentCard({ type, document, driverVerified, onReview }: { type: Docu
       <div className="doc__body">
         <header className="doc__header">
           <h3>{label}</h3>
-          <StatusBadge status={document.status} />
+          <DocumentBadge status={document.status} />
         </header>
         <dl className="doc__meta">
           <div><dt>Expires</dt><dd className={expired ? 'text-danger' : expiringSoon ? 'text-warn' : undefined}>{document.expiresOn ? `${dateOnly(document.expiresOn)}${expired ? ' · expired' : expiringSoon ? ' · soon' : ''}` : 'No expiration'}</dd></div>
@@ -366,8 +382,8 @@ function DriverReview({ driverId, nextDriverId, onNext, onBack, onChanged, notif
   }, [detail])
 
   const back = <button type="button" className="btn btn--ghost" onClick={onBack}><ArrowLeft size={16} aria-hidden="true" />Back to queue</button>
-  if (loadError) return <div className="page">{back}<p role="alert" className="alert">{loadError}</p></div>
-  if (!detail) return <div className="page">{back}<div className="skeleton" aria-busy="true">Loading driver…</div></div>
+  if (loadError) return <div className="page"><div className="page__nav">{back}</div><LoadError title="Couldn't load this driver" message={loadError} onRetry={() => void load()} /></div>
+  if (!detail) return <div className="page"><div className="page__nav">{back}</div><SkeletonDetail label="Loading driver" /></div>
 
   const { driver, events, readiness } = detail
   const status = driver.verificationStatus
@@ -544,14 +560,15 @@ function Queue({ filter, setFilter, drivers, counts, error, search, setSearch, o
         </div>
 
         <div role="tabpanel" id={panelId} aria-labelledby={tabId(panelId, filter)}>
-        {error && <p role="alert" className="alert alert--inset">{error}</p>}
-        {drivers === null && !error && <div className="skeleton" role="status" aria-busy="true">Loading drivers…</div>}
+        {error && drivers === null && <LoadError title="Couldn't load drivers" message={error} onRetry={onRefresh} retrying={refreshing} />}
+        {error && drivers !== null && <p role="alert" className="alert alert--inset">Couldn't refresh: {error}</p>}
+        {drivers === null && !error && <SkeletonTable rows={6} cols={6} label="Loading drivers" />}
         {drivers?.length === 0 && (
-          <div className="empty-state">
-            <Users size={28} aria-hidden="true" />
-            <strong>{search ? 'No drivers match your search' : filter === 'needs_review' ? 'All caught up' : 'No drivers here'}</strong>
-            <span className="muted">{search ? 'Try a different name or email.' : filter === 'needs_review' ? 'New applications will appear here.' : 'Try another filter.'}</span>
-          </div>
+          <EmptyState
+            icon={filter === 'needs_review' && !search ? <ShieldCheck size={22} /> : <Users size={22} />}
+            title={search ? 'No drivers match your search' : filter === 'needs_review' ? 'All caught up' : 'No drivers here'}
+            body={search ? 'Try a different name or email.' : filter === 'needs_review' ? 'New applications will appear here.' : 'Try another filter.'}
+          />
         )}
         {drivers && drivers.length > 0 && (
           <table className="table">
@@ -648,7 +665,7 @@ function Dashboard({ admin, onSignOut }: { admin: AdminProfile; onSignOut: () =>
   return (
     <div className="shell">
       <nav className="sidebar" aria-label="Admin">
-        <div className="brand"><span className="brand__mark">AID</span><span>Admin</span></div>
+        <Brand />
         <button type="button" className={`nav-item${section === 'drivers' ? ' is-active' : ''}`} aria-current={section === 'drivers' ? 'page' : undefined} onClick={() => { setSection('drivers'); setSelected(null) }}>
           <ShieldCheck size={18} aria-hidden="true" />Driver verification
           {counts && counts.needs_review > 0 && <span className="nav-item__count">{counts.needs_review}</span>}

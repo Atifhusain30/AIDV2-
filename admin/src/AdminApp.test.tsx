@@ -343,6 +343,30 @@ describe('AID admin reports inbox (B18)', () => {
     expect(await seriousA11yViolations()).toEqual([])
   })
 
+  it('F5: the driver queue shows table-shaped loading, then an error with Try again that recovers', async () => {
+    const pending: Array<(ok: boolean) => void> = []
+    api.listDrivers.mockImplementation(() => new Promise((resolve, reject) => {
+      pending.push((ok) => (ok ? resolve([summary, second]) : reject(new Error('Network down'))))
+    }))
+    render(<AdminApp />)
+    expect(await screen.findByRole('status', { name: 'Loading drivers' })).toBeTruthy()
+    pending.splice(0).forEach((settle) => settle(false))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toMatch(/Couldn't load drivers/)
+    api.listDrivers.mockResolvedValue([summary, second])
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('button', { name: /dana driver/i })).toBeTruthy()
+  })
+
+  it('F5: an empty review queue and an empty report inbox say so honestly', async () => {
+    api.listDrivers.mockResolvedValue([])
+    api.listReports.mockResolvedValue({ reports: [], counts: { open: 0, in_review: 0, resolved: 0, safetyActive: 0 } })
+    render(<AdminApp />)
+    expect(await screen.findByText('All caught up')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /reports/i }))
+    expect(await screen.findByText('Nothing needs attention')).toBeTruthy()
+  })
+
   it('offers only the status moves the server allows', () => {
     expect(Object.fromEntries(Object.entries(REPORT_ACTIONS).map(([from, actions]) => [from, actions.map((a) => a.to)])))
       .toEqual({ open: ['in_review', 'resolved'], in_review: ['resolved', 'open'], resolved: ['in_review'] })

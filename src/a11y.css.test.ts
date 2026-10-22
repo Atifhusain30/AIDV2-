@@ -85,10 +85,14 @@ describe('colour contrast (F4, WCAG AA)', () => {
     expect(hits).toEqual([])
   })
 
-  it('admin (light) text colours are 4.5:1 on white', () => {
+  it('admin (dark) text colours are 4.5:1 on every admin surface, and white is 4.5:1 on the filled buttons', () => {
     const vars = Object.fromEntries([...adminCss.matchAll(/--([a-z-0-9]+):\s*(#[0-9a-f]{6})/gi)].map((m) => [m[1], m[2]]))
-    for (const name of ['text', 'muted', 'faint', 'accent', 'ok', 'warn', 'danger']) expect(contrast(vars[name], '#ffffff'), name).toBeGreaterThanOrEqual(4.5)
+    for (const name of ['text', 'muted', 'faint', 'accent', 'ok', 'warn', 'danger']) {
+      for (const bg of ['bg', 'surface', 'surface-2', 'surface-3']) expect(contrast(vars[name], vars[bg]), `${name} on ${bg}`).toBeGreaterThanOrEqual(4.5)
+    }
+    for (const fill of ['accent-fill', 'accent-hover', 'danger-fill']) expect(contrast('#ffffff', vars[fill]), fill).toBeGreaterThanOrEqual(4.5)
     expect(contrast(vars['ink-muted'], vars.ink), 'sidebar muted').toBeGreaterThanOrEqual(4.5)
+    expect(contrast(vars['ink-muted'], vars['ink-2']), 'sidebar muted (hover)').toBeGreaterThanOrEqual(4.5)
   })
 })
 

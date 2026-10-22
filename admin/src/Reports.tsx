@@ -9,6 +9,7 @@ import { useCallback, useEffect, useId, useState } from 'react'
 import { AlertTriangle, ArrowLeft, ArrowRight, Ban, Check, Flag, MessageSquareText, RefreshCw } from 'lucide-react'
 import { adminApi } from './api'
 import FilterTabs, { tabId } from './FilterTabs'
+import { EmptyState, LoadError, SkeletonDetail, SkeletonTable } from './ui'
 import type { ReportCategory, ReportChat, ReportCounts, ReportDetail, ReportFilter, ReportStatus, ReportSummary } from './types'
 
 const STATUS_LABELS: Record<ReportStatus, string> = { open: 'Open', in_review: 'In review', resolved: 'Resolved' }
@@ -146,8 +147,8 @@ function ReportView({ reportId, onBack, onChanged, notify }: { reportId: string;
   }
 
   const back = <button type="button" className="btn btn--ghost" onClick={onBack}><ArrowLeft size={16} aria-hidden="true" />Back to reports</button>
-  if (loadError) return <div className="page">{back}<p role="alert" className="alert">{loadError}</p></div>
-  if (!report) return <div className="page">{back}<div className="skeleton" aria-busy="true">Loading report…</div></div>
+  if (loadError) return <div className="page"><div className="page__nav">{back}</div><LoadError title="Couldn't load this report" message={loadError} onRetry={() => void load()} /></div>
+  if (!report) return <div className="page"><div className="page__nav">{back}</div><SkeletonDetail label="Loading report" /></div>
 
   const job = report.booking
   return (
@@ -309,14 +310,15 @@ export default function ReportsInbox({ notify, onCounts }: { notify: (text: stri
         </div>
 
         <div role="tabpanel" id={panelId} aria-labelledby={tabId(panelId, filter)}>
-        {error && <p role="alert" className="alert alert--inset">{error}</p>}
-        {reports === null && !error && <div className="skeleton" role="status" aria-busy="true">Loading reports…</div>}
+        {error && reports === null && <LoadError title="Couldn't load reports" message={error} onRetry={() => void refresh()} retrying={refreshing} />}
+        {error && reports !== null && <p role="alert" className="alert alert--inset">Couldn't refresh: {error}</p>}
+        {reports === null && !error && <SkeletonTable rows={6} cols={7} label="Loading reports" />}
         {reports?.length === 0 && (
-          <div className="empty-state">
-            <Flag size={28} aria-hidden="true" />
-            <strong>{filter === 'active' && !category ? 'Nothing needs attention' : 'No reports here'}</strong>
-            <span className="muted">{filter === 'active' && !category ? 'New reports from the apps will appear here.' : 'Try another status or category.'}</span>
-          </div>
+          <EmptyState
+            icon={<Flag size={22} />}
+            title={filter === 'active' && !category ? 'Nothing needs attention' : 'No reports here'}
+            body={filter === 'active' && !category ? 'New reports from the apps will appear here.' : 'Try another status or category.'}
+          />
         )}
         {reports && reports.length > 0 && (
           <table className="table">
