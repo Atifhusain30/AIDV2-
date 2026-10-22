@@ -4,16 +4,19 @@
  */
 
 import { useState } from 'react'
-import { AlertCircle, Car, Check, ChevronLeft, Flag, Info, Loader2, MapPin, Navigation, Phone, StickyNote, Wrench, X } from 'lucide-react'
+import { AlertCircle, Car, Check, ChevronLeft, Flag, Info, Loader2, MapPin, Navigation, Phone, Star, StickyNote, Wrench, X } from 'lucide-react'
 import { useDriverStore } from '../../store/useDriverStore'
 import { formatPrice } from '../../lib/money'
 import { DRIVER_CANCEL_REASONS, DRIVER_CANCELLABLE, DRIVER_ISSUES, REPORTABLE, driverNextAction } from '../../lib/jobLifecycle'
 import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
 import { SafetyActions } from '../../components/safety/Safety'
-import type { BookingStatus } from '../../types'
+import type { Booking, BookingStatus } from '../../types'
+import { ratingSummary } from '../../lib/ratings'
 
 interface DriverJobScreenProps {
   onBack: () => void
+  /** The job was just completed (B15: the app then asks the driver to rate the customer). */
+  onCompleted?: (job: Booking) => void
 }
 
 const STEPS: { status: BookingStatus; label: string }[] = [
@@ -28,7 +31,7 @@ const directions = (lat: number, lng: number) => `https://maps.apple.com/?daddr=
 
 type Sheet = 'complete' | 'cancel' | 'report' | null
 
-export default function DriverJobScreen({ onBack }: DriverJobScreenProps) {
+export default function DriverJobScreen({ onBack, onCompleted }: DriverJobScreenProps) {
   const { activeBooking: job, updateJobStatus, locationSharing, error, jobEndedNotice, dismissJobEndedNotice } = useDriverStore()
   const [busy, setBusy] = useState(false)
   const [sheet, setSheet] = useState<Sheet>(null)
@@ -57,12 +60,15 @@ export default function DriverJobScreen({ onBack }: DriverJobScreenProps) {
   const target = headingToDropoff && job.dropoffLocation ? job.dropoffLocation : job.location
   const showDirections = job.status === 'accepted' || job.status === 'en_route' || headingToDropoff
   const canCancel = DRIVER_CANCELLABLE.has(job.status)
+  const customerRating = ratingSummary(job.customer)
 
   const move = async (next: BookingStatus, reason?: string) => {
     setBusy(true)
+    const finished = job
     const ok = await updateJobStatus(next, reason)
     setBusy(false)
     setSheet(null)
+    if (ok && next === 'completed') onCompleted?.(finished)
     // Completed or cancelled: the job is over and the driver is free.
     if (ok && (next === 'completed' || next === 'cancelled')) onBack()
   }
@@ -100,6 +106,7 @@ export default function DriverJobScreen({ onBack }: DriverJobScreenProps) {
           <span className="job-person__avatar" aria-hidden="true">{(job.customer?.firstName || 'C').charAt(0).toUpperCase()}</span>
           <div className="job-person__text">
             <strong>{job.customer?.name || 'Customer'}</strong>
+            {customerRating && <small aria-label={customerRating.label}><Star size={13} className="track-star" aria-hidden="true" /> {customerRating.value} ({customerRating.count})</small>}
             {job.vehicle && <small><Car size={13} aria-hidden="true" /> {job.vehicle.label}</small>}
             {job.vehicle && (job.vehicle.color || job.vehicle.plate) && <small className="job-person__plate">{[job.vehicle.color, job.vehicle.plate].filter(Boolean).join(' · ')}</small>}
           </div>

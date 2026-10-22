@@ -13,6 +13,7 @@ import { CUSTOMER_CANCEL_REASONS, CUSTOMER_CANCELLABLE, CUSTOMER_ISSUES, REPORTA
 import { ConfirmSheet, ReportIssueSheet } from '../../components/job/JobSheets'
 import { SafetyActions } from '../../components/safety/Safety'
 import type { Booking, BookingStatus } from '../../types'
+import { jobCountLabel, ratingSummary } from '../../lib/ratings'
 
 const LiveDriverMap = lazy(() => import('../../components/tracking/LiveDriverMap'))
 
@@ -44,6 +45,9 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
 
   const driver = booking.driver
   const firstName = driver?.firstName || 'Your driver'
+  // B15: real average (count) once there are enough ratings; otherwise "New on AID".
+  const driverRating = ratingSummary(driver)
+  const driverJobs = jobCountLabel(driver?.totalJobs)
   const tracking = driverTracking(booking, now)
   const vehicle = driverVehicleLabel(driver?.vehicle)
   const plate = driver?.vehicle?.plate?.trim()
@@ -133,9 +137,9 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
           <div className="job-person__text">
             <strong>{driver?.name || 'Your driver'}</strong>
             <small>
-              {driver && driver.totalJobs > 0 && driver.rating > 0
-                ? <><Star size={13} className="track-star" aria-hidden="true" /> {driver.rating.toFixed(1)} · {driver.totalJobs} {driver.totalJobs === 1 ? 'job' : 'jobs'}</>
-                : 'New on AID'}
+              {driverRating
+                ? <><span aria-label={driverRating.label}><Star size={13} className="track-star" aria-hidden="true" /> {driverRating.value} ({driverRating.count})</span>{driverJobs && <> · {driverJobs}</>}</>
+                : <>New on AID{driverJobs && <> · {driverJobs}</>}</>}
             </small>
           </div>
           {driver?.phone && (

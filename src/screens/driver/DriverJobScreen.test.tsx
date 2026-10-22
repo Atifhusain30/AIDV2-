@@ -104,6 +104,34 @@ describe('driver job screen', () => {
     await waitFor(() => expect(onBack).toHaveBeenCalled())
   })
 
+  it('B15: completing hands the finished job over so the driver can rate the customer; cancelling does not', async () => {
+    useDriverStore.setState({ activeBooking: tow({ status: 'in_progress' }), updateJobStatus, locationSharing: 'sharing', error: null, jobEndedNotice: null })
+    const onCompleted = vi.fn()
+    render(<DriverJobScreen onBack={vi.fn()} onCompleted={onCompleted} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Complete job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, complete job' }))
+    await waitFor(() => expect(onCompleted).toHaveBeenCalledTimes(1))
+    expect(onCompleted.mock.calls[0][0].id).toBe('booking-9')
+    cleanup()
+
+    useDriverStore.setState({ activeBooking: tow({ status: 'accepted' }) })
+    const notRated = vi.fn()
+    render(<DriverJobScreen onBack={vi.fn()} onCompleted={notRated} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel job' }))
+    fireEvent.click(screen.getAllByRole('radio')[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel job' }))
+    await waitFor(() => expect(updateJobStatus).toHaveBeenLastCalledWith('cancelled', expect.any(String)))
+    expect(notRated).not.toHaveBeenCalled()
+  })
+
+  it('B15: shows the customer\'s real rating only once 3 drivers have rated them', () => {
+    show(tow({ customer: { name: 'Casey C.', firstName: 'Casey', rating: 4.8, ratingCount: 5 } }))
+    expect(screen.getByLabelText('Rated 4.8 out of 5 from 5 ratings').textContent).toContain('4.8 (5)')
+    cleanup()
+    show(tow({ customer: { name: 'Casey C.', firstName: 'Casey', rating: null, ratingCount: 2 } }))
+    expect(screen.queryByLabelText(/Rated/)).toBeNull()
+  })
+
   it('disables the action while the update is pending', async () => {
     let finish: (ok: boolean) => void = () => undefined
     updateJobStatus.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finish = resolve }))

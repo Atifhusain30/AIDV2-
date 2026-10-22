@@ -3,6 +3,7 @@ const { estimateArrival } = require('./pricing');
 const {
   ACTIVE_STATUSES: ACTIVE, EXPIRABLE, STALE_RELEASABLE, DEFAULT_REQUEST_EXPIRY_MINUTES, DEFAULT_STALE_JOB_MINUTES,
 } = require('./lifecycle');
+const { publicRating, RATING_WINDOW_DAYS, LOW_RATING_MAX_STARS } = require('./ratings');
 
 // Keep SQL `date` values as YYYY-MM-DD strings; JS Date conversion shifts them by timezone.
 types.setTypeParser(1082, (value) => value);
@@ -12,6 +13,12 @@ const ACTIVE_STATUSES = [...ACTIVE];
 const ONE_ACTIVE_INDEX = 'bookings_one_active_per_customer';
 // ...and one unfinished job per driver.
 const ONE_JOB_PER_DRIVER_INDEX = 'bookings_one_active_job_per_driver';
+
+// One rating per booking per rater (migration 20261023000000).
+const RATING_UNIQUE = 'ratings_one_per_rater';
+class RatingExistsError extends Error {
+  constructor() { super('Already rated'); this.code = 'already_rated'; }
+}
 
 /** Thrown by createBooking when the customer already has an active booking (the unique index fired). */
 class ActiveBookingExistsError extends Error {
@@ -42,13 +49,14 @@ function mapProfile(row) {
     lastName: row.last_name,
     phone: row.phone,
     createdAt: row.created_at,
+    // B15: ratings this person received (the average only from MIN_RATINGS_TO_SHOW on; see ratings.js).
+    ...publicRating(row.rating_avg, row.rating_count),
     ...(row.role === 'driver' ? {
       verificationStatus: row.verification_status,
       isVerified: row.verification_status === 'verified',
       credentialsValidUntil: row.credentials_valid_until || null,
       isOnline: row.is_online,
-      rating: Number(row.rating || 0),
-      totalJobs: row.total_jobs || 0,
+      totalJobs: row.completed_jobs || 0,
       specializations: row.specializations || [],
       driverVehicle: mapDriverVehicle(row),
     } : {}),
@@ -164,7 +172,8 @@ const PARTY_SELECT = `
   select b.*, concat_ws(' ', v.year, v.make, v.model) as vehicle_label, v.license_plate as vehicle_plate, v.color as vehicle_color,
     c.first_name as party_customer_first_name, c.last_name as party_customer_last_name, c.phone as party_customer_phone,
     d.first_name as party_driver_first_name, d.last_name as party_driver_last_name, d.phone as party_driver_phone,
-    dp.rating as party_driver_rating, dp.total_jobs as party_driver_total_jobs,
+    dr.avg_stars as party_driver_rating_avg, dr.n as party_driver_rating_count, dj.n as party_driver_completed_jobs,
+    cr.avg_stars as party_customer_rating_avg, cr.n as party_customer_rating_count,
     dp.vehicle_make as party_driver_vehicle_make, dp.vehicle_model as party_driver_vehicle_model,
     dp.vehicle_color as party_driver_vehicle_color, dp.vehicle_plate as party_driver_vehicle_plate,
     (select case when e.actor_id = b.customer_id then 'customer' when e.actor_id = b.driver_id then 'driver'
@@ -179,7 +188,16 @@ const PARTY_SELECT = `
   left join public.vehicles v on v.id = b.vehicle_id
   left join public.profiles c on c.id = b.customer_id
   left join public.profiles d on d.id = b.driver_id
-  left join public.driver_profiles dp on dp.profile_id = b.driver_id`;
+  left join public.driver_profiles dp on dp.profile_id = b.driver_id
+  left join lateral (select avg(r.stars) as avg_stars, count(*)::int as n from public.ratings r where r.ratee_id = b.driver_id) dr on true
+  left join lateral (select count(*)::int as n from public.bookings x where x.driver_id = b.driver_id and x.status = 'completed') dj on true
+  left join lateral (select avg(r.stars) as avg_stars, count(*)::int as n from public.ratings r where r.ratee_id = b.customer_id) cr on true`;
+
+// Ratings a profile received (avg + count) and jobs completed as a driver. Both use indexes.
+const PROFILE_RATING_COLUMNS = `
+  (select avg(r.stars) from public.ratings r where r.ratee_id = p.id) as rating_avg,
+  (select count(*)::int from public.ratings r where r.ratee_id = p.id) as rating_count,
+  (select count(*)::int from public.bookings x where x.driver_id = p.id and x.status = 'completed') as completed_jobs`;
 
 const shortName = (first, last) => [first, last && last.trim() ? `${last.trim()[0].toUpperCase()}.` : ''].filter(Boolean).join(' ');
 
@@ -201,8 +219,9 @@ function mapParticipantBooking(row, role) {
       name: shortName(row.party_driver_first_name, row.party_driver_last_name),
       firstName: row.party_driver_first_name,
       ...(live && row.party_driver_phone ? { phone: row.party_driver_phone } : {}),
-      rating: Number(row.party_driver_rating || 0),
-      totalJobs: row.party_driver_total_jobs || 0,
+      // B15: the average only once there are enough ratings; comments are never included.
+      ...publicRating(row.party_driver_rating_avg, row.party_driver_rating_count),
+      totalJobs: row.party_driver_completed_jobs || 0,
       vehicle: row.party_driver_vehicle_make ? {
         make: row.party_driver_vehicle_make, model: row.party_driver_vehicle_model,
         color: row.party_driver_vehicle_color, plate: row.party_driver_vehicle_plate,
@@ -214,6 +233,7 @@ function mapParticipantBooking(row, role) {
       name: shortName(row.party_customer_first_name, row.party_customer_last_name),
       firstName: row.party_customer_first_name,
       ...(live && row.party_customer_phone ? { phone: row.party_customer_phone } : {}),
+      ...publicRating(row.party_customer_rating_avg, row.party_customer_rating_count),
     };
   }
   return booking;
@@ -242,8 +262,9 @@ class PostgresRepository {
 
   async getProfile(userId) {
     const result = await this.pool.query(`
-      select p.*, dp.verification_status, dp.credentials_valid_until, dp.is_online, dp.rating, dp.total_jobs, dp.specializations,
-        dp.vehicle_make, dp.vehicle_model, dp.vehicle_year, dp.vehicle_color, dp.vehicle_plate, dp.vehicle_plate_state, dp.vehicle_equipment_type
+      select p.*, dp.verification_status, dp.credentials_valid_until, dp.is_online, dp.specializations,
+        dp.vehicle_make, dp.vehicle_model, dp.vehicle_year, dp.vehicle_color, dp.vehicle_plate, dp.vehicle_plate_state, dp.vehicle_equipment_type,
+        ${PROFILE_RATING_COLUMNS}
       from public.profiles p left join public.driver_profiles dp on dp.profile_id = p.id
       where p.id = $1
     `, [userId]);
@@ -253,9 +274,10 @@ class PostgresRepository {
   async updateProfile(userId, patch) {
     const result = await this.pool.query(`
       update public.profiles set first_name = $2, last_name = $3, phone = $4
-      where id = $1 returning *
+      where id = $1 returning id
     `, [userId, patch.firstName, patch.lastName, patch.phone]);
-    return mapProfile(result.rows[0]);
+    // Re-read so the answer carries the same derived fields as GET /api/me (vehicle, ratings, job count).
+    return result.rows[0] ? this.getProfile(userId) : null;
   }
 
   async listDriverDocuments(driverId) {
@@ -349,7 +371,8 @@ class PostgresRepository {
   async getDriverForReview(driverId) {
     const driver = await this.pool.query(`
       select p.*, u.email, dp.verification_status, dp.review_notes, dp.submitted_at, dp.reviewed_at,
-             dp.credentials_valid_until, dp.is_online, dp.rating, dp.total_jobs
+             dp.credentials_valid_until, dp.is_online,
+             (select count(*)::int from public.bookings x where x.driver_id = p.id and x.status = 'completed') as completed_jobs
       from public.profiles p
       join public.driver_profiles dp on dp.profile_id = p.id
       left join auth.users u on u.id = p.id
@@ -357,13 +380,14 @@ class PostgresRepository {
     `, [driverId]);
     const row = driver.rows[0];
     if (!row) return null;
-    const [documents, events] = await Promise.all([
+    const [documents, events, ratings] = await Promise.all([
       this.listDriverDocuments(driverId),
       this.pool.query(`
         select e.*, a.first_name as actor_first_name, a.last_name as actor_last_name, a.role as actor_role
         from public.driver_verification_events e left join public.profiles a on a.id = e.actor_id
         where e.driver_id = $1 order by e.created_at desc limit 100
       `, [driverId]),
+      this.getRatingsForAdmin(driverId),
     ]);
     return {
       driver: {
@@ -375,12 +399,14 @@ class PostgresRepository {
         accountStatus: row.status,
         createdAt: row.created_at,
         isOnline: row.is_online,
-        rating: Number(row.rating || 0),
-        totalJobs: row.total_jobs || 0,
+        rating: ratings.average,
+        ratingCount: ratings.count,
+        totalJobs: row.completed_jobs || 0,
         ...mapVerification(row),
         verificationStatus: row.verification_status,
       },
       documents,
+      ratings,
       events: events.rows.map((event) => ({
         id: event.id,
         action: event.action,
@@ -746,6 +772,86 @@ class PostgresRepository {
     return { id: String(row.id), bookingId, category, status, createdAt: new Date(row.created_at).toISOString() };
   }
 
+  /**
+   * B15: store a rating. The insert itself re-checks the rules the API already applied — completed
+   * booking, rater and ratee are its customer and driver, inside the window — so a rating can never
+   * land outside them; returns null when they don't hold. A second rating by the same person for the
+   * same booking violates the unique constraint: RatingExistsError.
+   */
+  async createRating({ bookingId, raterId, raterRole, rateeId, stars, comment, tags }, windowDays = RATING_WINDOW_DAYS) {
+    let result;
+    try {
+      result = await this.pool.query(`
+        insert into public.ratings (booking_id, rater_id, rater_role, ratee_id, stars, comment, tags)
+        select b.id, $2::uuid, $3::text, $4::uuid, $5::smallint, $6::text, $7::text[]
+        from public.bookings b
+        where b.id = $1 and b.status = 'completed' and b.completed_at > now() - make_interval(days => $8::int)
+          and case when $3::text = 'customer' then b.customer_id = $2::uuid and b.driver_id = $4::uuid
+                   else b.driver_id = $2::uuid and b.customer_id = $4::uuid end
+        returning booking_id, rater_role, stars, tags, created_at
+      `, [bookingId, raterId, raterRole, rateeId, stars, comment, tags, windowDays]);
+    } catch (error) {
+      if (error?.code === '23505' && error.constraint === RATING_UNIQUE) throw new RatingExistsError();
+      throw error;
+    }
+    const row = result.rows[0];
+    return row ? { bookingId: row.booking_id, role: row.rater_role, stars: row.stars, tags: row.tags, createdAt: new Date(row.created_at).toISOString() } : null;
+  }
+
+  /** Has this person already rated this booking? */
+  async hasRated(bookingId, raterId) {
+    const result = await this.pool.query('select 1 from public.ratings where booking_id=$1 and rater_id=$2', [bookingId, raterId]);
+    return result.rowCount > 0;
+  }
+
+  /**
+   * Completed jobs this person can still rate (inside the window, the other person still on the job,
+   * not yet rated by them), newest first.
+   */
+  async listPendingRatings(userId, role, windowDays = RATING_WINDOW_DAYS) {
+    const mine = role === 'driver' ? 'b.driver_id' : 'b.customer_id';
+    const theirs = role === 'driver' ? 'b.customer_id' : 'b.driver_id';
+    const result = await this.pool.query(`
+      select b.id, b.service_name, b.completed_at, o.first_name as ratee_first_name
+      from public.bookings b
+      join public.profiles o on o.id = ${theirs}
+      where ${mine} = $1 and b.status = 'completed' and ${theirs} is not null and ${theirs} <> $1
+        and b.completed_at > now() - make_interval(days => $2::int)
+        and not exists (select 1 from public.ratings r where r.booking_id = b.id and r.rater_id = $1)
+      order by b.completed_at desc
+      limit 10
+    `, [userId, windowDays]);
+    return result.rows.map((row) => ({
+      bookingId: row.id, serviceName: row.service_name, completedAt: new Date(row.completed_at).toISOString(),
+      rateeFirstName: row.ratee_first_name || '',
+    }));
+  }
+
+  /** Admin view of the ratings a person received: true average (2 decimals), count, recent low ones with comments. */
+  async getRatingsForAdmin(rateeId) {
+    const [summary, low] = await Promise.all([
+      this.pool.query('select round(avg(stars)::numeric, 2) as average, count(*)::int as n from public.ratings where ratee_id=$1', [rateeId]),
+      this.pool.query(`
+        select r.booking_id, r.stars, r.comment, r.tags, r.created_at, b.service_name, c.first_name as rater_first_name
+        from public.ratings r
+        join public.bookings b on b.id = r.booking_id
+        left join public.profiles c on c.id = r.rater_id
+        where r.ratee_id = $1 and r.stars <= $2
+        order by r.created_at desc limit 10
+      `, [rateeId, LOW_RATING_MAX_STARS]),
+    ]);
+    const row = summary.rows[0] || {};
+    return {
+      average: row.average == null ? null : Number(row.average),
+      count: row.n || 0,
+      lowRatingMaxStars: LOW_RATING_MAX_STARS,
+      recentLow: low.rows.map((item) => ({
+        bookingId: item.booking_id, stars: item.stars, comment: item.comment || null, tags: item.tags || [],
+        serviceName: item.service_name, raterFirstName: item.rater_first_name || '', createdAt: new Date(item.created_at).toISOString(),
+      })),
+    };
+  }
+
   async updateDriverOnlineStatus(driverId, isOnline) {
     // Going offline forgets the driver's position: it's only kept while they're available for work.
     const result = await this.pool.query(`
@@ -797,6 +903,6 @@ class PostgresRepository {
 }
 
 module.exports = {
-  PostgresRepository, ActiveBookingExistsError, ONE_ACTIVE_INDEX, ONE_JOB_PER_DRIVER_INDEX,
+  PostgresRepository, ActiveBookingExistsError, RatingExistsError, RATING_UNIQUE, ONE_ACTIVE_INDEX, ONE_JOB_PER_DRIVER_INDEX,
   mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, ACTIVE_STATUSES, CONTACT_STATUSES,
 };

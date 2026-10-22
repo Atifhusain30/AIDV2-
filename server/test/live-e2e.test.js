@@ -8,7 +8,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const runLive = process.env.LIVE_E2E === '1';
 
-test('live Supabase customer → verified driver → document → completed booking flow', { skip: !runLive, timeout: 60000 }, async () => {
+test('live Supabase customer → verified driver → document → completed booking flow', { skip: !runLive, timeout: 120000 }, async () => {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 1 });
   const suffix = randomUUID();
@@ -220,6 +220,66 @@ test('live Supabase customer → verified driver → document → completed book
     const stored = await pool.query('select driver_lat from public.bookings where id=$1', [bookingId]);
     assert.equal(stored.rows[0].driver_lat, null, 'last shared position is cleared when the job ends');
 
+    // ---- B15: ratings both directions against the real database ----
+    const rateJob = (token, id, body) => api(`/bookings/${id}/rating`, token, { method: 'POST', body: JSON.stringify(body) });
+    const PRIVATE = `E2E-private-${suffix}`;
+    const pendingBefore = await (await api('/ratings/pending', customer.token)).json();
+    const waiting = pendingBefore.find((item) => item.bookingId === bookingId);
+    assert.ok(waiting, 'the completed job waits for the customer to rate it');
+    assert.equal(waiting.rateeRole, 'driver');
+    assert.deepEqual(waiting.tags.map((tag) => tag.label), ['On time', 'Professional', 'Careful with vehicle', 'Friendly']);
+    assert.equal((await rateJob(otherCustomer.token, bookingId, { stars: 1 })).status, 404, 'non-participants cannot rate');
+    assert.equal((await rateJob(customer.token, bookingId, { stars: 9 })).status, 400, 'stars are 1–5');
+    assert.equal((await rateJob(customer.token, bookingId, { stars: 5, tags: ['respectful'] })).status, 400, 'tags are per direction');
+    assert.equal((await rateJob(customer.token, bookingId, { stars: 5, tags: ['on_time', 'careful_with_vehicle'], comment: PRIVATE })).status, 201);
+    const twice = await rateJob(customer.token, bookingId, { stars: 1 });
+    assert.equal(twice.status, 409, 'once per job');
+    assert.equal((await twice.json()).code, 'already_rated');
+    assert.equal((await rateJob(driver.token, bookingId, { stars: 4, tags: ['clear_location'] })).status, 201, 'the driver rates the customer');
+    assert.equal((await (await api('/ratings/pending', customer.token)).json()).some((item) => item.bookingId === bookingId), false, 'no longer pending once rated');
+    assert.equal((await (await api('/ratings/pending', driver.token)).json()).some((item) => item.bookingId === bookingId), false);
+    const storedRatings = await pool.query('select rater_role, rater_id, ratee_id, stars, tags, comment from public.ratings where booking_id=$1 order by rater_role', [bookingId]);
+    assert.deepEqual(storedRatings.rows, [
+      { rater_role: 'customer', rater_id: customer.id, ratee_id: driver.id, stars: 5, tags: ['on_time', 'careful_with_vehicle'], comment: PRIVATE },
+      { rater_role: 'driver', rater_id: driver.id, ratee_id: customer.id, stars: 4, tags: ['clear_location'], comment: null },
+    ]);
+    await assert.rejects(pool.query('insert into public.ratings (booking_id, rater_id, rater_role, ratee_id, stars) values ($1,$2,$3,$4,5)', [bookingId, customer.id, 'customer', driver.id]),
+      (error) => error.code === '23505' && error.constraint === 'ratings_one_per_rater', 'the database refuses a second rating too');
+    // One rating: the count is real but the average stays hidden ("New on AID") until there are 3.
+    const afterOne = await (await api(`/bookings/${bookingId}`, customer.token)).json();
+    assert.deepEqual([afterOne.driver.rating, afterOne.driver.ratingCount, afterOne.driver.totalJobs], [null, 1, 1]);
+    // Two more completed jobs for this driver (made directly), rated 2 (with a comment) and 5 → (5+2+5)/3 = 4.0.
+    const extraJobs = [];
+    for (const [who, stars, comment] of [[otherCustomer, 2, `${PRIVATE}-low`], [customer, 5, null]]) {
+      const extra = await pool.query(`insert into public.bookings (customer_id, driver_id, service_type, service_name, status, location_address, location_lat, location_lng, estimated_price_cents, completed_at)
+        values ($1, $2, 'battery_jump', 'Won''t start', 'completed', 'E2E rating job', 32.7, -96.8, 6900, now()) returning id`, [who.id, driver.id]);
+      extraJobs.push(extra.rows[0].id);
+      e4BookingIds.push(extra.rows[0].id);
+      assert.equal((await rateJob(who.token, extra.rows[0].id, { stars, comment })).status, 201);
+    }
+    const afterThree = await (await api(`/bookings/${bookingId}`, customer.token)).json();
+    assert.deepEqual([afterThree.driver.rating, afterThree.driver.ratingCount, afterThree.driver.totalJobs], [4, 3, 3], 'real average shows from 3 ratings');
+    const driverMe = await (await api('/me', driver.token)).json();
+    assert.deepEqual([driverMe.rating, driverMe.ratingCount, driverMe.totalJobs], [4, 3, 3], 'the driver sees the same on Today');
+    const driverView = await (await api(`/bookings/${bookingId}`, driver.token)).json();
+    assert.deepEqual([driverView.customer.rating, driverView.customer.ratingCount], [null, 1], 'customer aggregate, same minimum');
+    // Comments are private: never in anything the customer or driver can fetch; admins see them.
+    for (const body of [afterThree, driverMe, driverView, await (await api('/bookings', driver.token)).json(), await (await api('/bookings', customer.token)).json(),
+      await (await api('/ratings/pending', driver.token)).json(), await (await api('/me', customer.token)).json()]) {
+      assert.doesNotMatch(JSON.stringify(body), new RegExp(PRIVATE), 'comment leaked to a participant');
+    }
+    const adminDetail = await (await api(`/admin/drivers/${driver.id}`, reviewer.token)).json();
+    assert.equal(adminDetail.driver.rating, 4);
+    assert.equal(adminDetail.ratings.count, 3);
+    assert.deepEqual(adminDetail.ratings.recentLow.map((item) => [item.stars, item.comment]), [[2, `${PRIVATE}-low`]]);
+    // The 7-day window: a job completed 8 days ago can no longer be rated or prompted.
+    await pool.query("update public.bookings set completed_at = now() - interval '8 days' where id=$1", [extraJobs[0]]);
+    const late = await rateJob(driver.token, extraJobs[0], { stars: 5 });
+    assert.equal(late.status, 409);
+    assert.equal((await late.json()).code, 'rating_window_closed');
+    assert.equal((await (await api('/ratings/pending', driver.token)).json()).some((item) => item.bookingId === extraJobs[0]), false);
+    assert.ok((await (await api('/ratings/pending', driver.token)).json()).some((item) => item.bookingId === extraJobs[1]), 'the recent one still waits for the driver');
+
     // B10 cancel rules against the real database.
     const secondResponse = await api('/bookings', customer.token, { method: 'POST', body: JSON.stringify({ serviceType: 'battery_jump', location: { address: '300 Main Street', lat: 32.7767, lng: -96.797 } }) });
     assert.equal(secondResponse.status, 201);
@@ -242,6 +302,9 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(cancelled.cancelledBy, 'driver');
     assert.ok(cancelled.cancelledAt);
+    const ratedCancelled = await api(`/bookings/${secondBookingId}/rating`, customer.token, { method: 'POST', body: JSON.stringify({ stars: 1 }) });
+    assert.equal(ratedCancelled.status, 409, 'a cancelled job cannot be rated');
+    assert.equal((await ratedCancelled.json()).code, 'rating_not_completed');
     assert.equal(await (await api('/bookings/active', driver.token)).json(), null, 'driver is free after cancelling');
     assert.equal((await api(`/bookings/${secondBookingId}/driver-location`, driver.token, { method: 'PATCH', body: JSON.stringify({ location: { lat: 32.79, lng: -96.81 } }) })).status, 404, 'location sharing stops');
     const cancelEvent = await pool.query("select metadata from public.booking_events where booking_id=$1 and to_status='cancelled' and event_type='status_changed'", [secondBookingId]);

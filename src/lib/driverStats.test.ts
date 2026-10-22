@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { completedTodayCount, driverRatingLabel, timeOfDayGreeting } from './driverStats'
+import { completedTodayCount, driverRatingLabel, driverRatingNote, timeOfDayGreeting } from './driverStats'
 
 describe('driver today figures', () => {
   const now = new Date(2026, 9, 22, 15, 0)
@@ -15,11 +15,18 @@ describe('driver today figures', () => {
     expect(completedTodayCount([], now)).toBe(0)
   })
 
-  it('shows a rating only when real ratings exist', () => {
-    expect(driverRatingLabel({ rating: 0, totalJobs: 0 })).toBe('—')
-    expect(driverRatingLabel({ rating: 4.8, totalJobs: 0 })).toBe('—')
+  it('shows the real rating only once 3 customers have rated (B15)', () => {
+    expect(driverRatingLabel({ rating: null, ratingCount: 0 })).toBe('—')
+    expect(driverRatingLabel({ rating: 4.8, ratingCount: 2 })).toBe('—')
     expect(driverRatingLabel(null)).toBe('—')
-    expect(driverRatingLabel({ rating: 4.76, totalJobs: 12 })).toBe('4.8')
+    expect(driverRatingLabel({ rating: 4.76, ratingCount: 12 })).toBe('4.8')
+    expect(driverRatingLabel({ rating: 4, ratingCount: 3 })).toBe('4.0')
+  })
+
+  it('explains when the rating will appear', () => {
+    expect(driverRatingNote({ rating: null, ratingCount: 0 })).toBe('Your rating shows once 3 customers have rated you.')
+    expect(driverRatingNote({ rating: null, ratingCount: 2 })).toBe('Your rating shows once 3 customers have rated you (2 so far).')
+    expect(driverRatingNote({ rating: 4.6, ratingCount: 7 })).toBe('Rating from 7 customer ratings.')
   })
 
   it('greets by time of day', () => {

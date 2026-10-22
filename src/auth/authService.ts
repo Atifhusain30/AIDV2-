@@ -80,7 +80,7 @@ function mapUser(user: ManagedUser, role: PortalRole): Customer | Driver {
       isVerified: false,
       verificationStatus: 'pending',
       documents: [],
-      rating: 0,
+      rating: null,
       totalJobs: 0,
       specializations: [],
     }

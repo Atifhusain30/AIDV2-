@@ -110,7 +110,8 @@ const PARTY_ROW = {
   driver_lat: 33.1, driver_lng: -97.0, driver_location_at: new Date('2026-01-01T00:05:00Z'),
   party_customer_first_name: 'Casey', party_customer_last_name: 'Customer', party_customer_phone: '555-0100',
   party_driver_first_name: 'Marcus', party_driver_last_name: 'Thompson', party_driver_phone: '555-0199',
-  party_driver_rating: '4.90', party_driver_total_jobs: 212,
+  party_driver_rating_avg: '4.8700', party_driver_rating_count: 150, party_driver_completed_jobs: 212,
+  party_customer_rating_avg: '5.0000', party_customer_rating_count: 2,
   party_driver_vehicle_make: 'Ford', party_driver_vehicle_model: 'F-550 Flatbed', party_driver_vehicle_color: 'White', party_driver_vehicle_plate: 'TOW-77',
 };
 
@@ -120,7 +121,7 @@ test('customer sees the assigned driver, their vehicle and live location during 
   const booking = await repository.getBooking('booking-9', 'customer-1', 'customer');
   assert.match(sql, /left join public\.profiles d on d\.id ?= ?b\.driver_id/i);
   assert.deepEqual(booking.driver, {
-    id: 'driver-1', name: 'Marcus T.', firstName: 'Marcus', phone: '555-0199', rating: 4.9, totalJobs: 212,
+    id: 'driver-1', name: 'Marcus T.', firstName: 'Marcus', phone: '555-0199', rating: 4.9, ratingCount: 150, totalJobs: 212,
     vehicle: { make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'TOW-77' },
   });
   assert.deepEqual(booking.driverLocation, { lat: 33.1, lng: -97.0, updatedAt: '2026-01-01T00:05:00.000Z' });
@@ -130,7 +131,8 @@ test('customer sees the assigned driver, their vehicle and live location during 
 test('driver sees the customer contact, notes, tow destination and plate during a job', async () => {
   const repository = new PostgresRepository(poolWith(async () => ({ rows: [PARTY_ROW] })));
   const booking = await repository.getActiveBooking('driver-1', 'driver');
-  assert.deepEqual(booking.customer, { name: 'Casey C.', firstName: 'Casey', phone: '555-0100' });
+  // Two ratings so far: below the 3 needed to show an average (B15), so the count only.
+  assert.deepEqual(booking.customer, { name: 'Casey C.', firstName: 'Casey', phone: '555-0100', rating: null, ratingCount: 2 });
   assert.equal(booking.notes, 'Hazards on');
   assert.equal(booking.dropoffLocation.address, "Joe's Garage");
   assert.equal(booking.vehicle.plate, 'ABC123');
@@ -149,7 +151,7 @@ test('phone numbers and live location are hidden once a job is over', async () =
 });
 
 test('no driver card is shown before a driver accepts', async () => {
-  const row = { ...PARTY_ROW, status: 'searching', driver_id: null, party_driver_first_name: null, party_driver_last_name: null, party_driver_phone: null, party_driver_rating: null, party_driver_total_jobs: null, party_driver_vehicle_make: null, driver_lat: null, driver_lng: null, driver_location_at: null };
+  const row = { ...PARTY_ROW, status: 'searching', driver_id: null, party_driver_first_name: null, party_driver_last_name: null, party_driver_phone: null, party_driver_rating_avg: null, party_driver_rating_count: 0, party_driver_completed_jobs: 0, party_driver_vehicle_make: null, driver_lat: null, driver_lng: null, driver_location_at: null };
   const repository = new PostgresRepository(poolWith(async () => ({ rows: [row] })));
   const booking = await repository.getBooking('booking-9', 'customer-1', 'customer');
   assert.equal(booking.driver, undefined);

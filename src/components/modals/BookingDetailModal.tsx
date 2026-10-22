@@ -26,6 +26,7 @@ import {
 import { useAppStore } from '../../store/useAppStore'
 import { ServiceType, BookingStatus } from '../../types'
 import { formatPrice } from '../../lib/money'
+import { jobCountLabel, ratingSummary } from '../../lib/ratings'
 
 // Generate Google Maps URL
 const getMapsUrl = (lat: number, lng: number): string => {
@@ -229,6 +230,7 @@ export default function BookingDetailModal() {
   const isActiveRequest = !isTerminal && activeBooking?.id === booking.id
   const driver = booking.driver
   const driverVehicle = driver?.vehicle ? [driver.vehicle.color, driver.vehicle.make, driver.vehicle.model].filter(Boolean).join(' ') : ''
+  const driverRating = ratingSummary(driver)
 
   return (
     <AnimatePresence>
@@ -300,8 +302,8 @@ export default function BookingDetailModal() {
                   <div className="flex-1">
                     <p className="text-white font-medium">{driver.name || driver.firstName}</p>
                     <div className="flex items-center gap-1 mt-1 text-sm text-gray-400">
-                      {driver.totalJobs > 0 && driver.rating > 0 ? (
-                        <><Star size={12} className="text-amber-400 fill-amber-400" /><span>{driver.rating.toFixed(1)} · {driver.totalJobs} {driver.totalJobs === 1 ? 'job' : 'jobs'}</span></>
+                      {driverRating ? (
+                        <span aria-label={driverRating.label} className="flex items-center gap-1"><Star size={12} className="text-amber-400 fill-amber-400" aria-hidden="true" />{driverRating.value} ({driverRating.count}){jobCountLabel(driver.totalJobs) ? ` · ${jobCountLabel(driver.totalJobs)}` : ''}</span>
                       ) : (
                         <span>{driverVehicle || 'New on AID'}</span>
                       )}

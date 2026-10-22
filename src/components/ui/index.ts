@@ -22,7 +22,7 @@ export { Input, Textarea, SearchInput, PinInput } from './Input'
 export { StepIndicator, ProgressBar, CircularProgress, Spinner, LoadingOverlay, PulseLoader } from './Progress'
 
 // Avatars
-export { Avatar, AvatarGroup, DriverAvatar, ProviderCard } from './Avatar'
+export { Avatar, AvatarGroup } from './Avatar'
 
 // Skeletons
 export { 

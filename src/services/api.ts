@@ -1,6 +1,7 @@
 import type { Booking, ServiceRequest, Location, ApiResponse, Service, ServiceType, VerificationStatus, DriverVehicle, DriverEquipmentType } from '../types'
 import type { UserVehicle } from '../store/useAppStore'
 import { supabase, managedAuth } from '../auth/supabase'
+import type { PendingRating, RatingInput } from '../lib/ratings'
 
 function normalizeApiBaseUrl(value?: string): string {
   const base = (value || 'http://127.0.0.1:3001').replace(/\/$/, '')
@@ -66,7 +67,10 @@ export interface ApiProfile {
   credentialsValidUntil?: string | null
   isVerified?: boolean
   isOnline?: boolean
-  rating?: number
+  /** Average of ratings received — null until MIN_RATINGS_TO_SHOW ratings exist (B15). */
+  rating?: number | null
+  ratingCount?: number
+  /** Jobs completed as a driver. */
   totalJobs?: number
   specializations?: ServiceType[]
   driverVehicle?: DriverVehicle | null
@@ -197,6 +201,16 @@ export async function reportBookingIssue(bookingId: string, category: string, de
   return apiFetch(`/bookings/${bookingId}/issues`, { method: 'POST', body: JSON.stringify({ category, details }) })
 }
 
+/** B15: completed jobs the signed-in person can still rate, newest first. */
+export async function listPendingRatings(): Promise<ApiResponse<PendingRating[]>> {
+  return apiFetch('/ratings/pending')
+}
+
+/** B15: rate the other person on a completed job (once; the server checks every rule). */
+export async function submitRating(bookingId: string, input: RatingInput): Promise<ApiResponse<{ bookingId: string; stars: number }>> {
+  return apiFetch(`/bookings/${bookingId}/rating`, { method: 'POST', body: JSON.stringify(input) })
+}
+
 export async function updateDriverLocation(bookingId: string, location: Location): Promise<ApiResponse<Booking>> {
   const result = await apiFetch<Booking>(`/bookings/${bookingId}/driver-location`, { method: 'PATCH', body: JSON.stringify({ location }) })
   return result.success && result.data ? { ...result, data: parseBooking(result.data) } : result
@@ -231,6 +245,7 @@ export const apiService = {
   customerLogin, customerRegister, driverLogin, driverRegister, logout, getAuthState,
   getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
   listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, reportBookingIssue, getActiveBooking, getDriverActiveBooking,
+  listPendingRatings, submitRating,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, updateDriverVehicle, createPaymentIntent,
 }
 

@@ -18,12 +18,15 @@ import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
 import { settleStaleActiveBooking } from './services/bookingService'
 import { driverVehicleSummary } from './lib/driverVehicle'
-import type { Driver } from './types'
+import type { Booking, Driver } from './types'
 import { App as CapacitorApp } from '@capacitor/app'
 import { supabase } from './auth/supabase'
 import { completeRecoveryFromUrl } from './auth/recovery'
 import PasswordRecoveryScreen from './components/auth/PasswordRecoveryScreen'
 import { SafetyMenuItem } from './components/safety/Safety'
+import RatingSheet from './components/rating/RatingSheet'
+import PendingRatingReminder from './components/rating/PendingRatingReminder'
+import { markRatingSkipped, type PendingRating } from './lib/ratings'
 
 // Customer Screens
 import HomeScreen from './screens/HomeScreen'
@@ -120,7 +123,7 @@ function CustomerApp() {
   const { currentScreen } = useAppStore()
   // Keep the active request (status, driver, live location, ETA) current on every customer screen.
   useActiveBookingSync()
-  const { logout } = useAuthStore()
+  const { logout, user } = useAuthStore()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -168,6 +171,8 @@ function CustomerApp() {
       <BookingDetailModal />
       <LocationConfirmModal />
       <ReceiptModal />
+      {/* B15: one reminder on open for a job still waiting for a rating (not the one whose receipt is open). */}
+      <PendingRatingReminder userId={user?.id} busyBookingId={() => useAppStore.getState().receiptBookingId} />
     </div>
   )
 }
@@ -184,6 +189,13 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
   useDriverJobSync()
   const { user } = useAuthStore()
   const { activeBooking, fetchDocuments } = useDriverStore()
+  // B15: right after completing a job, the driver rates the customer (skippable; one reminder on next open).
+  const [rateCustomer, setRateCustomer] = useState<PendingRating | null>(null)
+  const askToRate = async (job: Booking) => {
+    const result = await apiService.listPendingRatings()
+    const pending = result.success ? result.data?.find((item) => item.bookingId === job.id) : undefined
+    if (pending) setRateCustomer(pending)
+  }
 
   // Fetch documents on mount
   useEffect(() => {
@@ -202,6 +214,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
   }, [needsOnboarding, currentView])
 
   return (
+    <>
     <AnimatePresence mode="wait">
       {currentView === 'home' && (
         <motion.div
@@ -258,6 +271,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
         >
           <DriverJobScreen
             onBack={() => setCurrentView('home')}
+            onCompleted={(job) => void askToRate(job)}
           />
         </motion.div>
       )}
@@ -309,6 +323,17 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
         </motion.div>
       )}
     </AnimatePresence>
+    {/* Mounted once per app open so the reminder runs once (never re-triggered by the sheet below). */}
+    <PendingRatingReminder userId={user?.id} />
+    {rateCustomer && (
+      <RatingSheet
+        pending={rateCustomer}
+        context="after_job"
+        onRated={() => setRateCustomer(null)}
+        onSkip={() => { if (user) markRatingSkipped(user.id, rateCustomer.bookingId); setRateCustomer(null) }}
+      />
+    )}
+    </>
   )
 }
 
@@ -404,8 +429,9 @@ function App() {
             verificationStatus: profile.verificationStatus,
             credentialsValidUntil: profile.credentialsValidUntil ?? null,
             isOnline: profile.isOnline,
-            rating: profile.rating,
-            totalJobs: profile.totalJobs,
+            rating: profile.rating ?? null,
+            ratingCount: profile.ratingCount ?? 0,
+            totalJobs: profile.totalJobs ?? 0,
             specializations: profile.specializations,
             vehicle: profile.driverVehicle ?? null,
           })

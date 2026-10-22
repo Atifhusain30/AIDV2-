@@ -38,14 +38,23 @@ describe('driver work layout', () => {
       { id: 'b3', status: 'completed', completedAt: yesterday },
       { id: 'b4', status: 'cancelled', cancelledAt: now },
     ] as never })
-    useAuthStore.setState({ user: { ...(useAuthStore.getState().user as object), rating: 0, totalJobs: 0 } as never })
+    useAuthStore.setState({ user: { ...(useAuthStore.getState().user as object), rating: null, ratingCount: 2, totalJobs: 0 } as never })
     render(<DriverHomeScreen onOpenOnboarding={vi.fn()} onOpenVehicle={vi.fn()} onOpenSettings={vi.fn()} onOpenActiveJob={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByLabelText('Jobs completed today').textContent).toContain('2'))
     expect(screen.getByLabelText('Earnings coming soon').textContent).toContain('Soon')
     expect(screen.getByLabelText('Rating').textContent).toContain('—')
+    expect(screen.getByText(/Your rating shows once 3 customers have rated you \(2 so far\)/)).toBeTruthy()
     expect(screen.queryByText('$0.00')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Notifications' })).toBeNull()
+  })
+
+  it('shows the real average on Today once customers have rated (B15)', async () => {
+    vi.spyOn(apiService, 'listBookings').mockResolvedValue({ success: true, data: [] })
+    useAuthStore.setState({ user: { ...(useAuthStore.getState().user as object), rating: 4.7, ratingCount: 12 } as never })
+    render(<DriverHomeScreen onOpenOnboarding={vi.fn()} onOpenVehicle={vi.fn()} onOpenSettings={vi.fn()} onOpenActiveJob={vi.fn()} />)
+    expect(screen.getByLabelText('Rating').textContent).toContain('4.7')
+    await waitFor(() => expect(screen.getByText(/Rating from 12 customer ratings/)).toBeTruthy())
   })
 
   it('says so when today\'s jobs cannot be loaded instead of showing zero', async () => {

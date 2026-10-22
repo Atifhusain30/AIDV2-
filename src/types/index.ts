@@ -81,7 +81,10 @@ export interface Driver extends UserBase {
   /** Earliest expiration among approved license/insurance/registration (YYYY-MM-DD). */
   credentialsValidUntil?: string | null
   documents: DriverDocument[]
-  rating: number
+  /** Average from customers' ratings — null until there are enough to show (B15, MIN_RATINGS_TO_SHOW). */
+  rating: number | null
+  ratingCount?: number
+  /** Jobs completed (from real job history). */
   totalJobs: number
   specializations: ServiceType[]
   currentLocation?: Location
@@ -220,11 +223,14 @@ export interface JobContact {
   name: string        // "Marcus T."
   firstName: string
   phone?: string
+  /** B15: average of ratings this person received — null until there are enough to show. Never comments. */
+  rating?: number | null
+  ratingCount?: number
 }
 
 export interface JobDriver extends JobContact {
   id: string
-  rating: number
+  rating: number | null
   totalJobs: number
   vehicle: JobDriverVehicle | null
 }

@@ -4,7 +4,7 @@ import {
   Maximize2, RefreshCw, Search, ShieldCheck, UserCheck, Users, X,
 } from 'lucide-react'
 import { adminApi } from './api'
-import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverSummary, QueueFilter, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
+import type { AdminProfile, DocumentType, DriverDecision, DriverDetail, DriverRatings, DriverSummary, QueueFilter, ReviewDocument, ReviewEvent, VerificationStatus } from './types'
 
 // ---------- Copy & rules ----------
 
@@ -291,6 +291,39 @@ function Timeline({ events }: { events: ReviewEvent[] }) {
   )
 }
 
+// B15: what customers said about this driver. Admins see the true average (customers see it only
+// from 3 ratings) and recent low ratings with their private notes, which the driver never sees.
+function RatingsCard({ ratings }: { ratings?: DriverRatings }) {
+  if (!ratings) return null
+  return (
+    <div className="card">
+      <h2>Customer ratings</h2>
+      {ratings.count === 0 ? (
+        <p className="muted">No ratings yet.</p>
+      ) : (
+        <p><strong>{ratings.average?.toFixed(2)}</strong> <span className="muted">average from {ratings.count} rating{ratings.count === 1 ? '' : 's'}</span></p>
+      )}
+      {ratings.recentLow.length > 0 && (
+        <>
+          <h3 className="small muted">Recent low ratings ({ratings.lowRatingMaxStars}★ or less)</h3>
+          <ul className="timeline">
+            {ratings.recentLow.map((item) => (
+              <li key={`${item.bookingId}-${item.createdAt}`} className="timeline__item">
+                <span className="timeline__dot" aria-hidden="true" />
+                <div>
+                  <strong aria-label={`${item.stars} out of 5 stars`}>{'★'.repeat(item.stars)}{'☆'.repeat(5 - item.stars)}</strong>
+                  <span className="muted"> · {item.serviceName} · {item.raterFirstName || 'Customer'} · {dateTime(item.createdAt)}</span>
+                  {item.comment ? <p>“{item.comment}”</p> : <p className="muted small">No note</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ---------- Driver review ----------
 
 function DriverReview({ driverId, nextDriverId, onNext, onBack, onChanged, notify }: {
@@ -435,6 +468,8 @@ function DriverReview({ driverId, nextDriverId, onNext, onBack, onChanged, notif
             </div>
             {error && <p role="alert" className="alert">{error}</p>}
           </div>
+
+          <RatingsCard ratings={detail.ratings} />
 
           <div className="card">
             <h2>Activity</h2>

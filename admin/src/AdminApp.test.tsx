@@ -29,7 +29,7 @@ const ALL = ['drivers_license', 'identification', 'insurance', 'vehicle_registra
 
 function detail(extra: Partial<DriverDetail> = {}, docStatus: 'pending' | 'approved' = 'pending'): DriverDetail {
   return {
-    driver: { ...summary, reviewNotes: null, rating: 0, totalJobs: 0, status: 'under_review' },
+    driver: { ...summary, reviewNotes: null, rating: null, ratingCount: 0, totalJobs: 0, status: 'under_review' },
     documents: ALL.map((type) => ({
       id: `${type}-doc`, type, fileName: `${type}.png`, mimeType: 'image/png', status: docStatus, reviewNotes: null,
       expiresOn: type === 'identification' ? null : '2099-01-31', uploadedAt: '2026-10-21T09:00:00Z', fileUrl: `https://signed.example/${type}`,
@@ -85,6 +85,26 @@ describe('AID admin review', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: /search drivers/i }), { target: { value: 'sam@' } })
     expect(screen.queryByRole('button', { name: /dana driver/i })).toBeNull()
     expect(screen.getByRole('button', { name: /sam second/i })).toBeTruthy()
+  })
+
+  it('B15: shows the driver\'s true average and recent low ratings with their private notes', async () => {
+    api.getDriver.mockResolvedValue(detail({
+      ratings: { average: 3.5, count: 2, lowRatingMaxStars: 2, recentLow: [
+        { bookingId: 'b9', stars: 1, comment: 'Scratched my bumper', tags: [], serviceName: 'Towing', raterFirstName: 'Casey', createdAt: '2026-10-21T10:00:00Z' },
+      ] },
+    }))
+    const panel = await openDriver()
+    expect(within(panel).getByRole('heading', { name: 'Customer ratings' })).toBeTruthy()
+    expect(within(panel).getByText('3.50')).toBeTruthy()
+    expect(within(panel).getByText(/average from 2 ratings/)).toBeTruthy()
+    expect(within(panel).getByLabelText('1 out of 5 stars')).toBeTruthy()
+    expect(within(panel).getByText('“Scratched my bumper”')).toBeTruthy()
+  })
+
+  it('B15: says when a driver has no ratings yet', async () => {
+    api.getDriver.mockResolvedValue(detail({ ratings: { average: null, count: 0, lowRatingMaxStars: 2, recentLow: [] } }))
+    const panel = await openDriver()
+    expect(within(panel).getByText('No ratings yet.')).toBeTruthy()
   })
 
   it('shows review progress and approves a document', async () => {

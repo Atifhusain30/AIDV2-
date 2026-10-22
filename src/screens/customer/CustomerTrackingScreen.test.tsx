@@ -22,7 +22,7 @@ const job = (overrides: Partial<Booking> = {}): Booking => ({
   dropoffLocation: { address: "Joe's Garage", lat: 33.05, lng: -96.99 },
   estimatedPrice: 152.15,
   driver: {
-    id: 'driver-1', name: 'Marcus T.', firstName: 'Marcus', phone: '+19405550199', rating: 4.9, totalJobs: 212,
+    id: 'driver-1', name: 'Marcus T.', firstName: 'Marcus', phone: '+19405550199', rating: 4.9, ratingCount: 150, totalJobs: 212,
     vehicle: { make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'TOW-77' },
   },
   driverLocation: { lat: 33.1, lng: -97.0, updatedAt: ago(8000) },
@@ -46,7 +46,9 @@ describe('customer live tracking', () => {
     expect(screen.getByText(/13\.4 mi away/)).toBeTruthy()
     expect(screen.getByText(/Approximate/)).toBeTruthy()
     expect(screen.getByText('Marcus T.')).toBeTruthy()
-    expect(screen.getByText(/4\.9 · 212 jobs/)).toBeTruthy()
+    expect(screen.getByText(/4\.9 \(150\)/)).toBeTruthy()
+    expect(screen.getByLabelText('Rated 4.9 out of 5 from 150 ratings')).toBeTruthy()
+    expect(screen.getByText(/· 212 jobs/)).toBeTruthy()
     expect(screen.getByText('White Ford F-550 Flatbed')).toBeTruthy()
     expect(screen.getByText('TOW-77')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Call Marcus' }).getAttribute('href')).toBe('tel:+19405550199')
@@ -79,11 +81,19 @@ describe('customer live tracking', () => {
   })
 
   it('does not invent a vehicle or rating the driver has not provided', () => {
-    const driver = { ...job().driver!, rating: 0, totalJobs: 0, vehicle: null, phone: undefined }
+    const driver = { ...job().driver!, rating: null, ratingCount: 0, totalJobs: 0, vehicle: null, phone: undefined }
     render(<CustomerTrackingScreen booking={job({ driver })} />)
     expect(screen.getByText('Vehicle details not added yet')).toBeTruthy()
     expect(screen.getByText('New on AID')).toBeTruthy()
     expect(screen.queryByRole('link', { name: /Call/ })).toBeNull()
+  })
+
+  it('B15: fewer than 3 ratings is still "New on AID" — never an average from one or two', () => {
+    // Even if an average slipped through, the client applies the same minimum.
+    const driver = { ...job().driver!, rating: 5, ratingCount: 2, totalJobs: 4 }
+    render(<CustomerTrackingScreen booking={job({ driver })} />)
+    expect(screen.getByText(/New on AID · 4 jobs/)).toBeTruthy()
+    expect(screen.queryByText(/5\.0/)).toBeNull()
   })
 
   it('lets the customer cancel while the driver is on the way, with confirmation and an optional reason', async () => {

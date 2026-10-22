@@ -24,7 +24,7 @@ import { formatCalendarDate } from '../../lib/dates'
 import { formatPrice } from '../../lib/money'
 import { driverVehicleSummary, vehicleComplete, VEHICLE_REQUIRED_COPY } from '../../lib/driverVehicle'
 import { formatDistance, LOCATION_PROMPT_COPY } from '../../lib/nearbyRequests'
-import { completedTodayCount, driverRatingLabel, timeOfDayGreeting } from '../../lib/driverStats'
+import { completedTodayCount, driverRatingLabel, driverRatingNote, timeOfDayGreeting } from '../../lib/driverStats'
 import { apiService } from '../../services/api'
 
 interface DriverHomeScreenProps {
@@ -223,7 +223,7 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenVehicle, onOp
         <p className="driver-metrics__note">
           {completedToday.state === 'error'
             ? "Couldn't load today's jobs. They'll show next time you open Work."
-            : 'Earnings and payouts are coming soon. Ratings appear after customers can rate jobs.'}
+            : `Earnings and payouts are coming soon. ${driverRatingNote(user)}`}
         </p>
       </section>
 

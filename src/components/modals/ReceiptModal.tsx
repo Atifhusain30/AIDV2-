@@ -3,7 +3,7 @@
  * Shows receipt for completed bookings with price breakdown and tip options
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X,
@@ -13,10 +13,15 @@ import {
   Clock,
   CreditCard,
   Check,
+  Star,
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
+import { useAuthStore } from '../../store/useAuthStore'
 import PaymentCheckout from '../payment/PaymentCheckout'
+import RatingSheet from '../rating/RatingSheet'
 import { formatPrice } from '../../lib/money'
+import { apiService } from '../../services/api'
+import { markRatingSkipped, shouldAutoAsk, type PendingRating } from '../../lib/ratings'
 
 export default function ReceiptModal() {
   const {
@@ -26,8 +31,29 @@ export default function ReceiptModal() {
     setCurrentScreen,
     updateBookingInHistory,
   } = useAppStore()
+  const userId = useAuthStore((state) => state.user?.id)
   const [showCheckout, setShowCheckout] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
+  // B15: rate the driver from the receipt. The server says whether this job can still be rated.
+  const [pendingRating, setPendingRating] = useState<PendingRating | null>(null)
+  const [ratingOpen, setRatingOpen] = useState(false)
+  const [rated, setRated] = useState(false)
+
+  useEffect(() => {
+    setPendingRating(null)
+    setRatingOpen(false)
+    setRated(false)
+    if (!receiptBookingId) return
+    let cancelled = false
+    void apiService.listPendingRatings().then((result) => {
+      if (cancelled || !result.success) return
+      const pending = result.data?.find((item) => item.bookingId === receiptBookingId) || null
+      setPendingRating(pending)
+      // Ask by itself right after the job; once skipped (or reminded), the button below stays.
+      if (pending && userId && shouldAutoAsk(userId, pending.bookingId)) setRatingOpen(true)
+    })
+    return () => { cancelled = true }
+  }, [receiptBookingId, userId])
   
   // Find the booking
   const booking = bookingHistory.find(b => b.id === receiptBookingId)
@@ -79,7 +105,17 @@ export default function ReceiptModal() {
     )
   }
   
+  const ratingSheet = ratingOpen && pendingRating ? (
+    <RatingSheet
+      pending={pendingRating}
+      context="after_job"
+      onRated={() => { setRated(true); setRatingOpen(false) }}
+      onSkip={() => { if (userId) markRatingSkipped(userId, pendingRating.bookingId); setRatingOpen(false) }}
+    />
+  ) : null
+
   return (
+    <>
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
@@ -171,6 +207,16 @@ export default function ReceiptModal() {
               </div>
             </div>
             
+            {/* B15: rate the driver (only while the server says this job can still be rated) */}
+            {rated ? (
+              <p className="rating-done" role="status"><Star size={16} aria-hidden="true" /> Thanks — your rating is saved.</p>
+            ) : pendingRating && (
+              <button type="button" className="rating-prompt" onClick={() => setRatingOpen(true)}>
+                <Star size={20} aria-hidden="true" />
+                <span>Rate {pendingRating.rateeFirstName || 'your driver'}<small>Until {new Date(pendingRating.rateBy).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</small></span>
+              </button>
+            )}
+
             {/* Price Breakdown */}
             <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
               <p className="text-xs text-gray-400 font-medium mb-3">PRICE BREAKDOWN</p>
@@ -251,5 +297,7 @@ export default function ReceiptModal() {
         </motion.div>
       </motion.div>
     </AnimatePresence>
+    {ratingSheet}
+    </>
   )
 }

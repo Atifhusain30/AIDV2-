@@ -77,6 +77,22 @@ test('remote database has the AID marketplace schema', { timeout: 30000 }, async
     assert.match(e4.rows[0].status_check, /'expired'/);
     assert.equal(e4.rows[0].expired_at, true);
     assert.match(e4.rows[0].one_active || '', /UNIQUE INDEX .* \(customer_id\) WHERE .*'searching'.*'in_progress'/, 'one active booking per customer must be a unique index');
+    // B15: ratings are API-only — RLS on, no client privileges; one per booking per rater; never yourself.
+    const b15 = await pool.query(`
+      select (select relrowsecurity from pg_class where oid = 'public.ratings'::regclass) as rls,
+        has_table_privilege('authenticated', 'public.ratings', 'select') or has_table_privilege('authenticated', 'public.ratings', 'insert')
+          or has_table_privilege('anon', 'public.ratings', 'select') as client_access,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'ratings_one_per_rater')) as unique_rater,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'ratings_not_self')) as not_self,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'ratings_stars_check')) as stars,
+        pg_get_constraintdef((select oid from pg_constraint where conname = 'ratings_comment_check')) as comment
+    `);
+    assert.equal(b15.rows[0].rls, true, 'ratings RLS must be enabled');
+    assert.equal(b15.rows[0].client_access, false, 'clients must not read or write ratings directly');
+    assert.match(b15.rows[0].unique_rater, /UNIQUE \(booking_id, rater_id\)/);
+    assert.match(b15.rows[0].not_self, /rater_id <> ratee_id/);
+    assert.match(b15.rows[0].stars, /stars >= 1.*stars <= 5/);
+    assert.match(b15.rows[0].comment, /500/);
     assert.ok(hardenedPolicies.rowCount > 0);
     for (const policy of hardenedPolicies.rows) {
       assert.match(policy.expression, /is_active_account/i, `${policy.tablename}.${policy.policyname} must reject inactive accounts`);

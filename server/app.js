@@ -16,6 +16,10 @@ const {
   LOCATION_MAX_AGE_MINUTES, LOCATION_REQUIRED_CODE, OUT_OF_RANGE_CODE,
 } = require('./nearby');
 
+const {
+  RATING_WINDOW_DAYS, COMMENT_MAX, RATING_TAGS, RATING_CODES, cleanRating, checkCanRate, ratingDeadline,
+} = require('./ratings');
+
 // E4 answer codes the apps act on.
 const ACTIVE_REQUEST_CODE = 'active_request_exists';
 const REQUEST_EXPIRED_CODE = 'request_expired';
@@ -73,7 +77,7 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv() }) {
+function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = 'http://127.0.0.1:5173', requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS }) {
   const app = express();
   const requestExpiryMinutes = repository.requestExpiryMinutes || DEFAULT_REQUEST_EXPIRY_MINUTES;
   // E4: end stale work for this caller before answering (the interval sweep in index.js does the rest).
@@ -328,6 +332,48 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (!REPORTABLE.includes(booking.status)) return res.status(409).json({ error: 'Issues can be reported only on an active job' });
       const issue = await repository.reportBookingIssue(booking.id, req.auth.identity.id, { role, category, details, status: booking.status });
       res.status(201).json(issue);
+    } catch (error) { next(error); }
+  });
+
+  // ---- B15: ratings both directions (rules in ratings.js) ----
+  // The customer rates the driver and the driver rates the customer, once each, after completion.
+  app.post('/api/bookings/:bookingId/rating', authenticate, async (req, res, next) => {
+    try {
+      const role = req.auth.profile.role;
+      const userId = req.auth.identity.id;
+      if (role !== 'customer' && role !== 'driver') return res.status(403).json({ error: 'Only the customer or the driver of a job can rate it' });
+      const cleaned = cleanRating(req.body, role);
+      if (!cleaned.ok) return res.status(400).json({ error: cleaned.error, field: cleaned.field });
+      const booking = await repository.getBooking(req.params.bookingId, userId, role);
+      const verdict = checkCanRate({ role, userId, booking, windowDays: ratingWindowDays });
+      if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error, ...(verdict.code ? { code: verdict.code } : {}) });
+      const alreadyRated = () => res.status(409).json({ error: "You've already rated this job", code: RATING_CODES.alreadyRated });
+      if (await repository.hasRated(booking.id, userId)) return alreadyRated();
+      let saved;
+      try {
+        saved = await repository.createRating({ bookingId: booking.id, raterId: userId, raterRole: role, rateeId: verdict.rateeId, ...cleaned.rating }, ratingWindowDays);
+      } catch (error) {
+        if (error?.code === RATING_CODES.alreadyRated) return alreadyRated(); // two submits raced; the unique constraint decided
+        throw error;
+      }
+      // The booking changed between the checks and the insert (e.g. the window just closed).
+      if (!saved) return res.status(409).json({ error: 'This job can no longer be rated', code: RATING_CODES.windowClosed });
+      res.status(201).json(saved);
+    } catch (error) { next(error); }
+  });
+  // Completed jobs the signed-in person can still rate, with the tag choices for their direction.
+  app.get('/api/ratings/pending', authenticate, async (req, res, next) => {
+    try {
+      const role = req.auth.profile.role;
+      if (role !== 'customer' && role !== 'driver') return res.json([]);
+      const pending = await repository.listPendingRatings(req.auth.identity.id, role, ratingWindowDays);
+      res.json(pending.map((item) => ({
+        ...item,
+        rateeRole: role === 'customer' ? 'driver' : 'customer',
+        rateBy: ratingDeadline(item.completedAt, ratingWindowDays),
+        tags: RATING_TAGS[role],
+        commentMaxLength: COMMENT_MAX,
+      })));
     } catch (error) { next(error); }
   });
 

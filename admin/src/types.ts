@@ -58,9 +58,18 @@ export interface Readiness {
   credentialsValidUntil: string | null
 }
 
+/** B15: ratings this driver received (admin view: true average, private notes on low ratings). */
+export interface DriverRatings {
+  average: number | null
+  count: number
+  lowRatingMaxStars: number
+  recentLow: { bookingId: string; stars: number; comment: string | null; tags: string[]; serviceName: string; raterFirstName: string; createdAt: string }[]
+}
+
 export interface DriverDetail {
-  driver: Omit<DriverSummary, 'pendingDocuments'> & { reviewNotes: string | null; rating: number; totalJobs: number; status: VerificationStatus }
+  driver: Omit<DriverSummary, 'pendingDocuments'> & { reviewNotes: string | null; rating: number | null; ratingCount?: number; totalJobs: number; status: VerificationStatus }
   documents: ReviewDocument[]
+  ratings?: DriverRatings
   events: ReviewEvent[]
   readiness: Readiness
 }

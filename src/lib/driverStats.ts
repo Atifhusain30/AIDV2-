@@ -5,6 +5,7 @@
  */
 
 import type { Booking } from '../types'
+import { MIN_RATINGS_TO_SHOW, ratingSummary } from './ratings'
 
 const sameLocalDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
@@ -18,9 +19,19 @@ export function completedTodayCount(bookings: Pick<Booking, 'status' | 'complete
   }).length
 }
 
-/** A rating is only shown once real ratings exist; the server default of 0 means "none yet". */
-export function driverRatingLabel(driver: { rating?: number; totalJobs?: number } | null | undefined): string {
-  return driver && (driver.rating ?? 0) > 0 && (driver.totalJobs ?? 0) > 0 ? driver.rating!.toFixed(1) : '—'
+type RatedDriver = { rating?: number | null; ratingCount?: number } | null | undefined
+
+/** B15: the driver's real average from customer ratings, or '—' until there are enough to show. */
+export function driverRatingLabel(driver: RatedDriver): string {
+  return ratingSummary(driver)?.value ?? '—'
+}
+
+/** What the Today note says about the rating. */
+export function driverRatingNote(driver: RatedDriver): string {
+  const summary = ratingSummary(driver)
+  if (summary) return `Rating from ${summary.count} customer ${summary.count === 1 ? 'rating' : 'ratings'}.`
+  const count = driver?.ratingCount ?? 0
+  return `Your rating shows once ${MIN_RATINGS_TO_SHOW} customers have rated you${count > 0 ? ` (${count} so far)` : ''}.`
 }
 
 /** Greeting that matches the driver's local time of day. */

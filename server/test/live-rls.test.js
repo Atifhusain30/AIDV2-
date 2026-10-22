@@ -42,6 +42,11 @@ test('signed-in users cannot escalate privileges or tamper with server-owned dat
     assert.ok(fakeDoc.error, 'clients must not insert approved documents directly');
     const fakeBooking = await client.from('bookings').insert({ customer_id: userId, service_type: 'towing', service_name: 'x', location_address: 'x', location_lat: 0, location_lng: 0, estimated_price_cents: 1 });
     assert.ok(fakeBooking.error, 'clients must not create bookings (and prices) directly');
+    // B15: ratings go through the API only — no direct writes (a fake 5★ for yourself) or reads (private comments).
+    const fakeRating = await client.from('ratings').insert({ booking_id: randomUUID(), rater_id: userId, rater_role: 'driver', ratee_id: randomUUID(), stars: 5 });
+    assert.ok(fakeRating.error, 'clients must not insert ratings directly');
+    const readRatings = await client.from('ratings').select('comment');
+    assert.ok(readRatings.error || readRatings.data.length === 0, 'rating comments must not be readable');
     const audit = await client.from('driver_verification_events').select('*');
     assert.ok(audit.error || audit.data.length === 0, 'audit log must not be readable');
 
