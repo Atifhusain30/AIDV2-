@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { Booking, BookingStatus, ServiceType } from '../types'
+import { formatPrice } from '../lib/money'
 
 const serviceIcons: Partial<Record<ServiceType, typeof Wrench>> = {
   battery_jump: Battery,
@@ -61,7 +62,7 @@ function ActivityCard({ booking }: { booking: Booking }) {
           <small><CalendarDays size={13} /> {date}</small>
           <small><MapPin size={13} /> {booking.location.address}</small>
         </span>
-        <span className="activity-card__price">${booking.finalPrice ?? booking.estimatedPrice}<ChevronRight size={17} /></span>
+        <span className="activity-card__price">{formatPrice(booking.finalPrice ?? booking.estimatedPrice)}<ChevronRight size={17} /></span>
       </button>
       {completed && (
         <div className="activity-card__actions">

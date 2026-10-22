@@ -8,10 +8,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { AlertCircle, Battery, Car, ChevronRight, CircleDot, Droplets, Fuel, KeyRound, Loader2, MapPin, Navigation, Search, Truck, X, Zap } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
-import { apiService, type ServiceOption } from '../../services/api'
+import { apiService, type PriceQuote, type ServiceOption } from '../../services/api'
 import * as bookingService from '../../services/bookingService'
 import { searchAddressSuggestions } from '../../services/locationService'
 import type { ServiceType } from '../../types'
+import { formatPrice } from '../../lib/money'
 
 const ICONS: Partial<Record<ServiceType, typeof Battery>> = {
   battery_jump: Battery, flat_tire: CircleDot, towing: Truck, lockout: KeyRound,
@@ -110,6 +111,8 @@ export default function RequestSheet() {
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [quote, setQuote] = useState<PriceQuote | null>(null)
+  const [quoteError, setQuoteError] = useState<string | null>(null)
   const titleId = useId()
   const notesId = useId()
   const loaded = useRef(false)
@@ -139,6 +142,26 @@ export default function RequestSheet() {
     return () => window.removeEventListener('keydown', onKey)
   }, [close, isOpen])
 
+  // Distance-priced services (towing): ask the server for the exact price once both ends are known.
+  const selected = catalog?.find((item) => item.id === serviceFormData.selectedService && item.available) ?? null
+  const quoteDropoff = selected?.requiresDropoff ? serviceFormData.dropoff ?? null : null
+  const quoteKey = isOpen && selected && quoteDropoff && userCoords && userLocationLabel
+    ? JSON.stringify([selected.id, userLocationLabel, userCoords.lat, userCoords.lng, quoteDropoff])
+    : null
+  useEffect(() => {
+    setQuote(null)
+    setQuoteError(null)
+    if (!quoteKey) return
+    const [serviceType, address, lat, lng, dropoffLocation] = JSON.parse(quoteKey)
+    let cancelled = false
+    void apiService.quoteBooking({ serviceType, location: { address, lat, lng }, dropoffLocation }).then((result) => {
+      if (cancelled) return
+      if (result.success && result.data) setQuote(result.data)
+      else setQuoteError(result.error || 'Unable to price this tow. Try again.')
+    })
+    return () => { cancelled = true }
+  }, [quoteKey])
+
   if (!isOpen) return null
 
   const service = catalog?.find((item) => item.id === serviceFormData.selectedService && item.available) ?? null
@@ -147,6 +170,10 @@ export default function RequestSheet() {
   const hasLocation = Boolean(userLocationLabel && userCoords)
   const dropoff = serviceFormData.dropoff ?? null
   const needsDropoff = Boolean(service?.requiresDropoff && !dropoff)
+  const distancePriced = Boolean(service?.requiresDropoff)
+  const price = distancePriced ? quote?.price ?? null : service?.basePrice ?? null
+  const rates = service?.pricing
+  const rateText = rates ? `${formatPrice(rates.hookup)} includes the first ${rates.includedMiles} miles, then ${formatPrice(rates.perMile)} per mile.` : ''
 
   const chooseLocation = () => {
     setPendingReturnModal('services', 1)
@@ -206,7 +233,7 @@ export default function RequestSheet() {
                   <button type="button" onClick={() => setServiceFormData({ selectedService: option.id })}>
                     <span className="request-picker__icon"><Icon size={20} aria-hidden="true" /></span>
                     <span className="request-picker__text"><strong>{option.name}</strong><small>{option.description}</small></span>
-                    <span className="request-picker__price">${option.basePrice}</span>
+                    <span className="request-picker__price">{option.requiresDropoff ? 'from ' : ''}{formatPrice(option.basePrice)}</span>
                     <ChevronRight size={17} aria-hidden="true" />
                   </button>
                 </li>
@@ -242,17 +269,22 @@ export default function RequestSheet() {
                 onChange={(event) => setServiceFormData({ problemDescription: event.target.value })} />
             </label>
 
+            {quoteError && <p className="request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {quoteError}</p>}
             {error && <p className="request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}
 
             <div className="request-footer">
               {hasLocation ? (
-                <button type="button" className="aid-primary-button" disabled={submitting || needsDropoff} onClick={() => void submit()}>
-                  {submitting ? 'Requesting…' : `Request · $${service.basePrice}`}
+                <button type="button" className="aid-primary-button" disabled={submitting || needsDropoff || price === null} onClick={() => void submit()}>
+                  {submitting ? 'Requesting…' : price === null ? `Request · from ${formatPrice(service.basePrice)}` : `Request · ${formatPrice(price)}`}
                 </button>
               ) : (
                 <button type="button" className="aid-primary-button" onClick={chooseLocation}>Set your location</button>
               )}
-              <p>{needsDropoff ? 'Choose where the vehicle should be towed.' : `$${service.basePrice} flat price. You won't be charged until the job is done.`}</p>
+              <p>
+                {distancePriced
+                  ? quote?.distanceMiles != null ? `${quote.distanceMiles} mi tow · ${rateText}` : `Choose where the vehicle should be towed. ${rateText}`
+                  : `${formatPrice(service.basePrice)} flat price. You won't be charged until the job is done.`}
+              </p>
             </div>
           </>
         )}

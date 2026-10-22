@@ -99,8 +99,55 @@ test('booking price is server-owned and customer identity comes from the token',
 
   assert.equal(response.status, 201);
   assert.equal(response.body.customerId, 'customer-1');
-  assert.equal(response.body.estimatedPrice, 65);
+  assert.equal(response.body.estimatedPrice, 69);
   assert.equal(response.body.service.id, 'battery_jump');
+});
+
+test('catalog uses the approved market prices', async () => {
+  const { app } = buildHarness();
+  const response = await request(app).get('/api/services');
+  const prices = Object.fromEntries(response.body.map((service) => [service.id, service.basePrice]));
+  assert.deepEqual(
+    { ...prices, detailing: undefined, window_tinting: undefined },
+    { battery_jump: 69, flat_tire: 79, towing: 95, lockout: 79, fuel_delivery: 79, ev_charging: 129, oil_change: 99, detailing: undefined, window_tinting: undefined },
+  );
+  const towing = response.body.find((service) => service.id === 'towing');
+  assert.deepEqual(towing.pricing, { hookup: 95, includedMiles: 5, perMile: 4.5, maxMiles: 100 });
+});
+
+test('towing is priced by distance on the server, ignoring any client price', async () => {
+  const { app } = buildHarness();
+  const response = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer customerToken')
+    .send({
+      serviceType: 'towing', estimatedPrice: 1,
+      location: { address: 'Dallas', lat: 32.7767, lng: -96.797 },
+      dropoffLocation: { address: 'Fort Worth', lat: 32.7555, lng: -97.3308 },
+    });
+  assert.equal(response.status, 201);
+  assert.ok(response.body.estimatedPrice > 230 && response.body.estimatedPrice < 250, `got ${response.body.estimatedPrice}`);
+});
+
+test('quote endpoint returns the same price the booking will charge', async () => {
+  const { app } = buildHarness();
+  const body = {
+    serviceType: 'towing',
+    location: { address: 'Dallas', lat: 32.7767, lng: -96.797 },
+    dropoffLocation: { address: 'Fort Worth', lat: 32.7555, lng: -97.3308 },
+  };
+  const quote = await request(app).post('/api/quotes').set('Authorization', 'Bearer customerToken').send(body);
+  assert.equal(quote.status, 200);
+  assert.ok(quote.body.distanceMiles > 36 && quote.body.distanceMiles < 40);
+  const booking = await request(app).post('/api/bookings').set('Authorization', 'Bearer customerToken').send(body);
+  assert.equal(booking.body.estimatedPrice, quote.body.price);
+
+  const tooFar = await request(app).post('/api/quotes').set('Authorization', 'Bearer customerToken')
+    .send({ ...body, dropoffLocation: { address: 'Houston', lat: 29.7604, lng: -95.3698 } });
+  assert.equal(tooFar.status, 400);
+  assert.match(tooFar.body.error, /longer than 100 miles/);
+  const unauthenticated = await request(app).post('/api/quotes').send(body);
+  assert.equal(unauthenticated.status, 401);
 });
 
 test('service catalog marks which services can be requested now', async () => {
@@ -153,7 +200,7 @@ test('booking cannot reference a vehicle owned by another customer', async () =>
     .post('/api/bookings')
     .set('Authorization', 'Bearer customerToken')
     .send({
-      serviceType: 'towing',
+      serviceType: 'battery_jump',
       vehicleId: 'other-customer-vehicle',
       location: { address: '100 Main St', lat: 32.77, lng: -96.79 },
     });

@@ -87,7 +87,7 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(bookingResponse.status, 201);
     const booking = await bookingResponse.json();
     bookingId = booking.id;
-    assert.equal(booking.estimatedPrice, 125);
+    assert.equal(booking.estimatedPrice, 95); // short tow: hook-up fee covers the first 5 miles
 
     assert.equal((await api('/drivers/me/online', driver.token, { method: 'PATCH', body: JSON.stringify({ isOnline: true }) })).status, 200);
     const requestsResponse = await api('/drivers/requests', driver.token);

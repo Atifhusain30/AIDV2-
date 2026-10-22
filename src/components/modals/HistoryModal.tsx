@@ -9,6 +9,7 @@ import {
 import { useAppStore } from '../../store/useAppStore'
 import { Booking } from '../../types'
 import Modal from '../ui/Modal'
+import { formatPrice } from '../../lib/money'
 
 const statusColors: Record<string, { bg: string; text: string; icon: React.ElementType }> = {
   completed: { bg: 'bg-emerald-500/20', text: 'text-emerald-400', icon: CheckCircle },
@@ -40,7 +41,7 @@ function BookingCard({ booking, index }: { booking: Booking; index: number }) {
             </span>
           </div>
         </div>
-        <span className="text-iris-300 font-bold">${booking.estimatedPrice}</span>
+        <span className="text-iris-300 font-bold">{formatPrice(booking.estimatedPrice)}</span>
       </div>
       
       <div className="space-y-2 text-sm">

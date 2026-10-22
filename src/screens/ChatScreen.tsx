@@ -21,6 +21,7 @@ import { BookingStatus } from '../types'
 import { lazy, Suspense } from 'react'
 import * as bookingService from '../services/bookingService'
 import * as chatService from '../services/chatService'
+import { formatPrice } from '../lib/money'
 
 // Lazy load TrackingMap to avoid SSR issues with Leaflet
 const TrackingMap = lazy(() => import('../components/ui/TrackingMap'))
@@ -283,7 +284,7 @@ function BookingInfoCard({
       {/* Price */}
       <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/10">
         <span className="text-gray-400 text-sm">Estimated Price</span>
-        <span className="text-emerald-400 font-semibold">${estimatedPrice}</span>
+        <span className="text-emerald-400 font-semibold">{formatPrice(estimatedPrice)}</span>
       </div>
     </motion.div>
   )

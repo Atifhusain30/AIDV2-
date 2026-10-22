@@ -10,16 +10,16 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 ## A. Business & legal foundation (start now — some take weeks)
 | # | Item | Owner | Status |
 |---|---|---|---|
-| A1 | Business entity (LLC/Corp), EIN, business bank account | 👤 | ⬜ |
+| A1 | Business entity (LLC/Corp), EIN, business bank account | 👤 | ✅ |
 | A2 | Apple Developer Program **as an organization** (needs D-U-N-S number, ~1–2 weeks) — $99/yr | 👤 | ⬜ |
 | A3 | Google Play developer account (organization; identity verification) — $25 one-time | 👤 | ⬜ |
-| A4 | Business insurance: general liability + coverage for a marketplace (talk to a broker) | 👤 | ⬜ |
+| A4 | Business insurance: general liability + coverage for a marketplace (talk to a broker) | 👤 | ✅ |
 | A5 | Driver requirement policy: commercial auto + on-hook/garagekeepers for towing; minimum limits | 👤 | ⬜ |
 | A6 | Driver classification decision (independent contractor) + Independent Contractor Agreement | 👤 lawyer | ⬜ |
-| A7 | Terms of Service (customer) + Driver Terms + Privacy Policy (lawyer review; I can draft) | 🤝 | ⬜ |
+| A7 | Terms of Service (customer) + Driver Terms + Privacy Policy (lawyer review; I can draft) | 🤝 | ✅ written (in email) — must be published online (I1) |
 | A8 | Service area for launch (city/metro) and operating hours | 👤 | ⬜ |
-| A9 | Pricing per service, platform fee/driver payout split, cancellation & refund policy | 👤 | ⬜ |
-| A10 | Domain name (e.g. aidroadside.com) + business email (support@, privacy@) | 👤 | ⬜ |
+| A9 | Pricing per service, platform fee/driver payout split, cancellation & refund policy | 👤 | 🟡 market prices live (tow $95 incl. 5 mi + $4.50/mi); payout split + cancellation policy open |
+| A10 | Domain name (e.g. aidroadside.com) + business email (support@, privacy@) | 👤 | 🟡 domain ✅; support email open |
 | A11 | Trademark search for "AID" name/logo | 👤 | ⬜ |
 
 ## B. Core product (the app must really work end to end)
@@ -48,7 +48,7 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 ## C. Payments (Stripe)
 | # | Item | Owner | Status |
 |---|---|---|---|
-| C1 | Stripe account (business verified) + test keys | 👤 | ⬜ |
+| C1 | Stripe account (business verified) + test keys | 👤 | 🟡 account ✅; keys to be entered via hidden-input script |
 | C2 | Card hold at request, charge on completion; Apple Pay / Google Pay | 🛠 | ⬜ |
 | C3 | Cancellation fees, refunds, disputes handling, webhook hardening | 🛠 | 🟡 |
 | C4 | Stripe Connect Express for driver payouts + 1099s | 🤝 | ⬜ |

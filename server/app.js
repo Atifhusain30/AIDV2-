@@ -5,6 +5,7 @@ const {
   REQUIRED_DOCUMENT_TYPES, EXPIRING_DOCUMENT_TYPES, DRIVER_DECISIONS, DRIVER_STATUS_FILTERS,
   todayIso, parseIsoDate, cleanNotes, verificationReadiness, credentialsCurrent,
 } = require('./verification');
+const { quoteService, PricingError, TOWING } = require('./pricing');
 
 const DOCUMENT_TYPES = new Set(REQUIRED_DOCUMENT_TYPES);
 const publicDocument = ({ storagePath: _storagePath, ...document }) => document;
@@ -28,13 +29,14 @@ const documentUpload = multer({
 });
 
 const SERVICE_CATALOG = Object.freeze({
-  battery_jump: { id: 'battery_jump', name: "Won't start", description: 'Battery jump-start and diagnosis', basePrice: 65, estimatedTime: 30 },
-  flat_tire: { id: 'flat_tire', name: 'Flat tire', description: 'On-site tire change or inflation', basePrice: 75, estimatedTime: 35 },
-  towing: { id: 'towing', name: 'Towing', description: 'Local roadside towing', basePrice: 125, estimatedTime: 60, requiresDropoff: true },
-  lockout: { id: 'lockout', name: 'Locked out', description: 'Vehicle lockout assistance', basePrice: 70, estimatedTime: 30 },
-  fuel_delivery: { id: 'fuel_delivery', name: 'Fuel delivery', description: 'Emergency fuel delivery', basePrice: 75, estimatedTime: 35 },
-  ev_charging: { id: 'ev_charging', name: 'EV charging', description: 'Mobile emergency EV charge', basePrice: 95, estimatedTime: 45 },
-  oil_change: { id: 'oil_change', name: 'Oil change', description: 'Mobile oil change', basePrice: 90, estimatedTime: 45 },
+  // Market-based flat prices (approved 2026-10-21). Towing basePrice is the hook-up fee; see pricing.js.
+  battery_jump: { id: 'battery_jump', name: "Won't start", description: 'Battery jump-start and diagnosis', basePrice: 69, estimatedTime: 30 },
+  flat_tire: { id: 'flat_tire', name: 'Flat tire', description: 'Spare tire installed or tire inflated', basePrice: 79, estimatedTime: 35 },
+  towing: { id: 'towing', name: 'Towing', description: 'Includes the first 5 miles', basePrice: TOWING.hookup, estimatedTime: 60, requiresDropoff: true, pricing: TOWING },
+  lockout: { id: 'lockout', name: 'Locked out', description: 'Vehicle lockout assistance', basePrice: 79, estimatedTime: 30 },
+  fuel_delivery: { id: 'fuel_delivery', name: 'Fuel delivery', description: 'Up to 2 gallons included', basePrice: 79, estimatedTime: 35 },
+  ev_charging: { id: 'ev_charging', name: 'EV charging', description: 'Mobile emergency EV charge', basePrice: 129, estimatedTime: 45 },
+  oil_change: { id: 'oil_change', name: 'Oil change', description: 'Mobile full-synthetic oil change', basePrice: 99, estimatedTime: 45 },
   // Scheduled appointment services — not offered at launch (on-demand roadside only).
   detailing: { id: 'detailing', name: 'Detailing', description: 'Mobile vehicle detailing', basePrice: 150, estimatedTime: 120, available: false },
   window_tinting: { id: 'window_tinting', name: 'Window tinting', description: 'Professional mobile tinting', basePrice: 250, estimatedTime: 180, available: false },
@@ -176,21 +178,42 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
+  // Shared by quotes and bookings so the quoted price is exactly the booked price.
+  function priceRequest(body) {
+    const service = SERVICE_CATALOG[body.serviceType];
+    if (!service) return { status: 400, error: 'Unsupported service type' };
+    if (service.available === false) return { status: 409, error: `${service.name} is not available yet` };
+    if (!validLocation(body.location)) return { status: 400, error: 'A valid service location is required' };
+    if (body.dropoffLocation && !validLocation(body.dropoffLocation)) return { status: 400, error: 'Drop-off location is invalid' };
+    const dropoff = service.requiresDropoff && body.dropoffLocation ? body.dropoffLocation : null;
+    try {
+      return { service, dropoff, quote: quoteService(service, body.location, dropoff) };
+    } catch (error) {
+      if (error instanceof PricingError) return { status: 400, error: error.message };
+      throw error;
+    }
+  }
+
+  app.post('/api/quotes', authenticate, requireRole('customer'), (req, res, next) => {
+    try {
+      const priced = priceRequest(req.body);
+      if (priced.error) return res.status(priced.status).json({ error: priced.error });
+      res.json({ serviceType: priced.service.id, ...priced.quote });
+    } catch (error) { next(error); }
+  });
+
   app.post('/api/bookings', authenticate, requireRole('customer'), async (req, res, next) => {
     try {
-      const service = SERVICE_CATALOG[req.body.serviceType];
-      if (!service) return res.status(400).json({ error: 'Unsupported service type' });
-      if (service.available === false) return res.status(409).json({ error: `${service.name} is not available yet` });
-      if (!validLocation(req.body.location)) return res.status(400).json({ error: 'A valid service location is required' });
-      if (req.body.dropoffLocation && !validLocation(req.body.dropoffLocation)) return res.status(400).json({ error: 'Drop-off location is invalid' });
+      const priced = priceRequest(req.body);
+      if (priced.error) return res.status(priced.status).json({ error: priced.error });
+      const { service, dropoff, quote } = priced;
       if (req.body.vehicleId && !await repository.getVehicle(req.auth.identity.id, req.body.vehicleId)) {
         return res.status(400).json({ error: 'Vehicle is not available for this customer' });
       }
-      if (service.requiresDropoff && !req.body.dropoffLocation) return res.status(400).json({ error: 'A drop-off location is required for towing' });
       const booking = await repository.createBooking({
         customerId: req.auth.identity.id, vehicleId: req.body.vehicleId || null, service,
         location: cleanLocation(req.body.location),
-        dropoffLocation: req.body.dropoffLocation ? cleanLocation(req.body.dropoffLocation) : null, estimatedPrice: service.basePrice,
+        dropoffLocation: dropoff ? cleanLocation(dropoff) : null, estimatedPrice: quote.price,
         notes: typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 1000) : null,
       });
       res.status(201).json(booking);

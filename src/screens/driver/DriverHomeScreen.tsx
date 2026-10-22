@@ -20,6 +20,7 @@ import { useDriverStore } from '../../store/useDriverStore'
 import type { Driver } from '../../types'
 import { driverEligibility, ELIGIBILITY_COPY } from '../../lib/driverEligibility'
 import { formatCalendarDate } from '../../lib/dates'
+import { formatPrice } from '../../lib/money'
 
 interface DriverHomeScreenProps {
   onOpenOnboarding: () => void
@@ -137,7 +138,7 @@ export default function DriverHomeScreen({ onOpenOnboarding, onOpenSettings, onO
                 <div className="request-card__top">
                   <span className="request-card__service"><Truck size={19} /></span>
                   <div><strong>{request.service.name}</strong><p>{request.customerName || 'Nearby customer'}</p></div>
-                  <span className="request-card__price">${request.estimatedPrice}</span>
+                  <span className="request-card__price">{formatPrice(request.estimatedPrice)}</span>
                 </div>
                 <p className="request-card__location"><MapPin size={15} /> {request.location.address}</p>
                 <div className="request-card__actions">

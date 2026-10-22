@@ -20,6 +20,7 @@ import {
 import { useDriverStore } from '../../store/useDriverStore'
 import { locationService } from '../../services/location'
 import type { Booking, BookingStatus } from '../../types'
+import { formatPrice } from '../../lib/money'
 
 interface DriverJobScreenProps {
   onBack: () => void
@@ -165,7 +166,7 @@ export default function DriverJobScreen({ onBack }: DriverJobScreenProps) {
             <p className="text-gray-500">{activeBooking.vehicle?.label || '—'}</p>
           </div>
           <span className="text-emerald-400 font-bold text-2xl">
-            ${activeBooking.estimatedPrice}
+            {formatPrice(activeBooking.estimatedPrice)}
           </span>
         </div>
 

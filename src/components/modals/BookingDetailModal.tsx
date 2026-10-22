@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import { ServiceType, BookingStatus } from '../../types'
+import { formatPrice } from '../../lib/money'
 
 // Generate Google Maps URL
 const getMapsUrl = (lat: number, lng: number): string => {
@@ -288,7 +289,7 @@ export default function BookingDetailModal() {
                     </span>
                   </div>
                 </div>
-                <p className="text-xl font-bold text-emerald-400">${booking.estimatedPrice}</p>
+                <p className="text-xl font-bold text-emerald-400">{formatPrice(booking.estimatedPrice)}</p>
               </div>
             </div>
 

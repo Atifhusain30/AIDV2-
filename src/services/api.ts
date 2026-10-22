@@ -92,10 +92,23 @@ export async function deleteVehicle(id: string): Promise<ApiResponse<void>> {
 export interface ServiceOption extends Service {
   available: boolean
   requiresDropoff: boolean
+  /** Distance pricing (towing): hook-up fee covers includedMiles, then perMile. */
+  pricing?: { hookup: number; includedMiles: number; perMile: number; maxMiles: number }
 }
 
 export async function listServices(): Promise<ApiResponse<ServiceOption[]>> {
   return apiFetch('/services')
+}
+
+export interface PriceQuote {
+  serviceType: ServiceType
+  price: number
+  distanceMiles: number | null
+}
+
+/** Exact price the server will charge for this request (same calculation as booking). */
+export async function quoteBooking(payload: Omit<CreateBookingPayload, 'vehicleId' | 'notes'>): Promise<ApiResponse<PriceQuote>> {
+  return apiFetch('/quotes', { method: 'POST', body: JSON.stringify(payload) })
 }
 
 export interface CreateBookingPayload {
@@ -181,7 +194,7 @@ export function getAuthState() { return { isAuthenticated: false, user: null, to
 export const apiService = {
   customerLogin, customerRegister, driverLogin, driverRegister, logout, getAuthState,
   getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
-  listServices, createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
+  listServices, quoteBooking, createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, createPaymentIntent,
 }
 
