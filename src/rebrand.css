@@ -97,32 +97,17 @@ select:focus-visible {
   gap: 12px;
 }
 
+/* The AID mark: violet rounded tile with the white "A + location dot" glyph (AidGlyph). */
 .aid-mark {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, 7px);
-  align-items: end;
-  gap: 4px;
+  place-items: center;
   width: 46px;
   height: 46px;
-  padding: 10px;
-  overflow: hidden;
-  border-radius: 15px;
+  border-radius: 14px;
   background: var(--aid-signal);
   color: var(--aid-signal-ink);
 }
-
-.aid-mark__lane {
-  display: block;
-  width: 7px;
-  border-radius: 99px 99px 2px 2px;
-  background: currentColor;
-  transform: skewX(-9deg);
-}
-
-.aid-mark__lane--one { height: 15px; }
-.aid-mark__lane--two { height: 25px; }
-.aid-mark__lane--three { height: 20px; }
 
 .aid-brand__copy {
   display: flex;
@@ -147,19 +132,15 @@ select:focus-visible {
 }
 
 .aid-brand--compact .aid-mark {
-  grid-template-columns: repeat(3, 5px);
-  gap: 3px;
   width: 36px;
   height: 36px;
-  padding: 8px;
-  border-radius: 12px;
+  border-radius: 11px;
 }
 
-.aid-brand--compact .aid-mark__lane { width: 5px; }
-.aid-brand--compact .aid-mark__lane--one { height: 11px; }
-.aid-brand--compact .aid-mark__lane--two { height: 19px; }
-.aid-brand--compact .aid-mark__lane--three { height: 15px; }
 .aid-brand--compact .aid-brand__copy strong { font-size: 1.1rem; }
+/* "AID Driver" reads as one name (like "Uber Driver"), not a pill. */
+.aid-brand--compact .aid-brand__copy { flex-direction: row; align-items: baseline; gap: 5px; }
+.aid-brand--compact .aid-brand__copy span { margin: 0; color: var(--aid-text-2); font-size: 1.1rem; font-weight: 600; letter-spacing: -.03em; }
 
 /* Shared authenticated shell */
 .customer-shell { width: 100%; background: var(--aid-ink); }
@@ -578,7 +559,7 @@ button.ui-row:active:not(:disabled) { background: var(--aid-surface-2); }
 /* Section header: sentence case, one size. */
 .ui-section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
 .ui-section-header h2 { font-size: var(--aid-fs-md); font-weight: 700; letter-spacing: -.02em; }
-.ui-section-header button { display: inline-flex; align-items: center; min-height: 44px; margin-right: -8px; padding: 0 8px; color: var(--aid-signal-strong); font-size: var(--aid-fs-sm); font-weight: 650; }
+.ui-section-header button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin-right: -8px; padding: 0 8px; color: var(--aid-signal-strong); font-size: var(--aid-fs-sm); font-weight: 650; }
 .ui-section { margin-top: 28px; }
 
 /* Chips / status pills. */
@@ -717,7 +698,9 @@ button.ui-row:active:not(:disabled) { background: var(--aid-surface-2); }
 a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(--aid-surface-2); }
 .ui-btn, .ui-row, .choice, .ui-segmented button, .activity-item__main, .garage-row__remove { transition: background 140ms ease, transform 110ms ease, opacity 140ms ease, border-color 140ms ease, color 140ms ease; }
 .activity-item__main:active { background: var(--aid-surface-2); }
-@media (prefers-reduced-motion: reduce) { .account-sheet-backdrop { animation: none; } .ui-btn:active, .ui-icon-btn:active { transform: none !important; } }
+@media (prefers-reduced-motion: reduce) { .account-sheet-backdrop { animation: none; } .ui-btn:active, .ui-icon-btn:active, .service-shortcuts button:active, .activity-item__main:active { transform: none !important; } }
+/* Subtle press feedback on whole tappable cards (switched off above with Reduce Motion). */
+.activity-item__main:active { transform: scale(.99); }
 
 /* ---------- Sheet content (the one bottom-sheet style) ---------- */
 .sheet-text { color: var(--aid-text-2); font-size: var(--aid-fs-base); line-height: 1.5; }
@@ -779,9 +762,18 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 .activity-item__price { flex: none; font-size: var(--aid-fs-base); font-weight: 650; font-variant-numeric: tabular-nums; }
 .activity-item__price.is-muted { color: var(--aid-text-3); }
 .activity-item__text small { overflow: hidden; color: var(--aid-text-3); font-size: var(--aid-fs-sm); line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.activity-item__status { justify-self: start; margin-top: 6px; }
-.activity-item__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 14px 14px; }
-.activity-item__actions .ui-btn { background: var(--aid-surface-2); }
+/* Status sits inline with the date as coloured text (Uber-style), not a separate chip row. */
+.activity-item__status { font-weight: 650; }
+.activity-item__status.is-danger { color: var(--aid-danger-text); }
+.activity-item__status.is-brand { color: var(--aid-signal-strong); }
+.activity-item__status.is-success { color: var(--aid-success); }
+/* Quiet text actions under a hairline, aligned with the title (no boxed buttons). */
+.activity-item__actions { display: flex; gap: 4px; margin: 0 14px; padding: 2px 0 4px 52px; border-top: 1px solid var(--aid-line); }
+.activity-action { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: -8px; padding: 0 8px; border-radius: var(--aid-radius-sm); color: var(--aid-ivory); font-size: var(--aid-fs-sm); font-weight: 650; transition: background 140ms ease, transform 110ms ease; }
+.activity-action + .activity-action { margin-left: 12px; }
+.activity-action svg { color: var(--aid-text-3); }
+.activity-action:active { background: var(--aid-surface-2); transform: scale(.97); }
+@media (prefers-reduced-motion: reduce) { .activity-action:active { transform: none; } }
 .activity-stale { align-items: center; justify-content: space-between; margin-top: 16px; }
 .activity-stale button { display: inline-flex; flex: none; align-items: center; gap: 6px; min-height: 44px; margin: -10px -6px -10px 0; padding: 0 6px; color: var(--aid-warning); font-weight: 700; }
 
@@ -792,21 +784,27 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 .detail-summary__text { flex: 1; min-width: 0; }
 .detail-summary__price { flex: none; font-size: var(--aid-fs-xl); font-weight: 760; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .detail-summary__price.is-muted { color: var(--aid-text-3); }
+.detail-summary__price.is-text { font-size: var(--aid-fs-md); font-weight: 650; letter-spacing: -.01em; }
 .detail-sheet .ui-card { padding: 12px 14px; }
 .detail-maps { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 4px 0 -8px 40px; color: var(--aid-signal-strong); font-size: var(--aid-fs-sm); font-weight: 650; text-decoration: none; }
 .detail-actions { display: grid; grid-auto-columns: 1fr; grid-auto-flow: column; gap: 8px; }
 
 /* ---------- Customer Account ---------- */
-.account-identity { display: flex; align-items: center; gap: 14px; margin-top: 18px; padding: 16px; border: 1px solid var(--aid-line); border-radius: var(--aid-radius-md); background: var(--aid-surface-1); }
-.account-identity > div { display: grid; gap: 2px; min-width: 0; }
-.account-identity strong { overflow: hidden; font-size: var(--aid-fs-lg); font-weight: 720; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
-.account-identity small { display: flex; align-items: center; gap: 6px; overflow: hidden; color: var(--aid-text-3); font-size: var(--aid-fs-sm); text-overflow: ellipsis; white-space: nowrap; }
+/* Identity straight on the canvas (Uber-style): big name, quiet email, avatar on the right. */
+.account-identity { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; padding: 4px 0 6px; }
+.account-identity > div { display: grid; gap: 4px; min-width: 0; }
+.account-identity strong { overflow: hidden; font-size: var(--aid-fs-xl); font-weight: 760; letter-spacing: -.03em; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.account-identity small { overflow: hidden; color: var(--aid-text-3); font-size: var(--aid-fs-sm); text-overflow: ellipsis; white-space: nowrap; }
+.account-identity .ui-avatar { flex: none; }
 .garage-list { margin: 0; padding: 0; list-style: none; }
 .garage-row { display: flex; align-items: stretch; }
 .garage-row + .garage-row { border-top: 1px solid var(--aid-line); }
 .garage-row__select { flex: 1; min-width: 0; }
-.garage-row__remove { display: grid; flex: none; place-items: center; width: 52px; border-left: 1px solid var(--aid-line); color: var(--aid-text-3); }
-.garage-row__remove:active { background: var(--aid-surface-2); color: var(--aid-danger-text); }
+.garage-row__add { flex: 1; min-height: 56px; }
+.garage-row__add .ui-row__icon { background: transparent; }
+/* Edit mode: a red text "Remove" at the end of each row instead of a permanent trash column. */
+.garage-row__remove { flex: none; min-height: 44px; margin: auto 8px auto 0; padding: 0 12px; border-radius: var(--aid-radius-sm); color: var(--aid-danger-text); font-size: var(--aid-fs-sm); font-weight: 700; }
+.garage-row__remove:active { background: var(--aid-surface-2); }
 .garage-error { margin-bottom: 10px; }
 .account-version { margin-top: 24px; color: var(--aid-text-3); font-size: var(--aid-fs-xs); text-align: center; }
 
@@ -894,7 +892,9 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 @media (hover: hover) { .role-option:hover { border-color: var(--aid-line-strong); } .role-option--primary:hover { background: var(--aid-signal-hover); } }
 /* Sign in / sign up. */
 .auth__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; }
-.auth__intro { margin: 40px 0 28px; }
+/* Bounded top space (never margin:auto) so the form sits in the upper-middle like Uber and the footer
+   gap shrinks, while keyboard-open and short screens still fit. */
+.auth__intro { margin: clamp(32px, 11vh, 104px) 0 28px; }
 .auth__intro h1, .auth__done h1 { font-size: var(--aid-fs-2xl); font-weight: 760; letter-spacing: -.04em; line-height: 1.1; text-wrap: balance; }
 .auth__intro p { max-width: 34ch; margin-top: 8px; color: var(--aid-text-2); font-size: var(--aid-fs-base); line-height: 1.5; }
 .auth__form, .auth__register { display: grid; gap: 16px; }

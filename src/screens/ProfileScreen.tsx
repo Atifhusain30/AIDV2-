@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react'
-import { AlertCircle, Car, LifeBuoy, LogOut, Mail, MapPin, Phone, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, Car, LifeBuoy, LogOut, MapPin, Plus, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiService } from '../services/api'
@@ -76,6 +76,9 @@ export default function ProfileScreen() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
+  const [editingGarage, setEditingGarage] = useState(false)
+  // Leave edit mode once the last vehicle is gone.
+  useEffect(() => { if (vehicles.length === 0) setEditingGarage(false) }, [vehicles.length])
 
   const loadVehicles = useCallback(async () => {
     if (!token) return
@@ -143,7 +146,8 @@ export default function ProfileScreen() {
           </List>
         )
         : (
-          <ul className="ui-list garage-list" aria-label="Your vehicles">
+          // Removing a vehicle is behind Edit (iOS / Uber pattern) so the list stays one clean column.
+          <ul className={`ui-list garage-list${editingGarage ? ' is-editing' : ''}`} aria-label="Your vehicles">
             {vehicles.map((vehicle) => {
               const active = vehicle.id === activeVehicleId || (!activeVehicleId && vehicle.id === vehicles[0].id)
               const label = `${vehicle.year} ${vehicle.make} ${vehicle.model}`
@@ -152,14 +156,21 @@ export default function ProfileScreen() {
                   <button type="button" className="ui-row garage-row__select" onClick={() => setActiveVehicle(vehicle.id)} aria-pressed={active}>
                     <span className="ui-row__icon" aria-hidden="true"><Car size={20} /></span>
                     <span className="ui-row__text"><strong>{label}</strong><small>{[vehicle.color, vehicle.plate].filter(Boolean).join(' · ')}</small></span>
-                    {active && <span className="ui-chip ui-chip--brand">Default</span>}
+                    {active && !editingGarage && <span className="ui-chip ui-chip--brand">Default</span>}
                   </button>
-                  <button type="button" className="garage-row__remove" aria-label={`Remove ${vehicle.make} ${vehicle.model}`} onClick={() => void handleRemoveVehicle(vehicle.id)}>
-                    <Trash2 size={18} aria-hidden="true" />
-                  </button>
+                  {editingGarage && (
+                    <button type="button" className="garage-row__remove" aria-label={`Remove ${vehicle.make} ${vehicle.model}`} onClick={() => void handleRemoveVehicle(vehicle.id)}>
+                      Remove
+                    </button>
+                  )}
                 </li>
               )
             })}
+            {!editingGarage && (
+              <li className="garage-row">
+                <ListRow className="garage-row__add" icon={<Plus size={20} />} tone="brand" title="Add vehicle" chevron={false} hasPopup onClick={() => setShowVehicleForm(true)} />
+              </li>
+            )}
           </ul>
         )
 
@@ -167,18 +178,20 @@ export default function ProfileScreen() {
     <div className="ui-screen account-screen">
       <header className="ui-screen-title"><h1>Account</h1></header>
 
+      {/* Uber-style identity: big name and avatar on the canvas, no boxed card. */}
       <section className="account-identity" aria-label="Account profile">
-        <PersonAvatar name={name} size="lg" />
         <div>
           <strong>{name || 'Guest account'}</strong>
           {!email && !phone && <small>Your roadside settings are saved on this device</small>}
-          {email && <small><Mail size={13} aria-hidden="true" /> {email}</small>}
-          {phone && <small><Phone size={13} aria-hidden="true" /> {phone}</small>}
+          {email && <small>{email}</small>}
+          {phone && <small>{phone}</small>}
         </div>
+        <PersonAvatar name={name} size="lg" />
       </section>
 
       <section className="ui-section" aria-labelledby="account-garage-title">
-        <SectionHeader id="account-garage-title" title="Your garage" action={{ label: 'Add vehicle', onClick: () => setShowVehicleForm(true) }} />
+        <SectionHeader id="account-garage-title" title="Your garage"
+          action={vehicles.length > 0 ? { label: editingGarage ? 'Done' : 'Edit', ariaLabel: editingGarage ? 'Done editing garage' : 'Edit garage', onClick: () => setEditingGarage((value) => !value) } : undefined} />
         {garageError && vehicles.length > 0 && <p className="ui-alert ui-alert--danger garage-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {garageError}</p>}
         {garageBody}
       </section>

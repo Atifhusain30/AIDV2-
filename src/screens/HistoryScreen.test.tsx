@@ -50,6 +50,27 @@ describe('customer activity', () => {
     expect(within(groups[0]).getByRole('button', { name: 'Request again' })).toBeTruthy()
     expect(within(groups[1]).getByText('Cancelled')).toBeTruthy()
     expect(within(groups[1]).queryByRole('button', { name: 'Receipt' })).toBeNull()
+    expect(within(groups[0]).getByText('$79')).toBeTruthy()
+  })
+
+  it('shows "No charge" (not a price) on cancelled and no-driver requests, in Activity and in details', () => {
+    useAppStore.setState({ bookingHistory: [
+      booking('c', { status: 'cancelled', estimatedPrice: 79 }),
+      booking('e', { status: 'expired', estimatedPrice: 95, createdAt: new Date('2026-10-18T15:00:00Z') }),
+    ] })
+    render(<><HistoryScreen /><BookingDetailModal /></>)
+    expect(screen.getAllByText('No charge')).toHaveLength(2)
+    expect(screen.queryByText('$79')).toBeNull()
+    expect(screen.queryByText('$95')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: /^Flat tire/ })[0])
+    const sheet = screen.getByRole('dialog', { name: 'Flat tire' })
+    expect(within(sheet).getByText('No charge')).toBeTruthy()
+  })
+
+  it('still shows the amount when a cancelled request has a recorded successful payment', () => {
+    useAppStore.setState({ bookingHistory: [booking('p', { status: 'cancelled', finalPrice: 25, payment: { intentId: 'pi', status: 'succeeded', amount: 2500 } })] })
+    render(<HistoryScreen />)
+    expect(screen.getByText('$25')).toBeTruthy()
   })
 
   it('filters with pressed-state buttons and says so when a filter is empty', () => {

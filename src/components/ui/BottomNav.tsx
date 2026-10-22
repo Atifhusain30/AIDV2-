@@ -1,9 +1,11 @@
 import { motion } from 'framer-motion'
-import { Clock3, LifeBuoy, UserRound } from 'lucide-react'
+import { Clock3, Home as House, UserRound } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 
+// Home = request help (same behaviour as before). "Help & Support" lives only under Account,
+// so no tab is called "Help" (Uber / DoorDash / Lyft all lead with Home).
 const navItems = [
-  { id: 'home', icon: LifeBuoy, label: 'Help' },
+  { id: 'home', icon: House, label: 'Home' },
   { id: 'history', icon: Clock3, label: 'Activity' },
   { id: 'profile', icon: UserRound, label: 'Account' },
 ] as const
@@ -44,7 +46,7 @@ export default function BottomNav() {
                   transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                 />
               )}
-              <span className="aid-bottom-nav__icon"><Icon size={21} strokeWidth={isActive ? 2.35 : 1.8} /></span>
+              <span className="aid-bottom-nav__icon"><Icon size={22} /></span>
               <span className="aid-bottom-nav__label">{item.label}</span>
             </button>
           )

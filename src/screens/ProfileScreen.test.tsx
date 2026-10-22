@@ -20,7 +20,7 @@ describe('customer account', () => {
   it('prioritizes real profile, garage, and roadside support controls', () => {
     render(<ProfileScreen />)
     expect(screen.getByRole('heading', { name: 'Account' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Add vehicle' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Add your first vehicle/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Safety/i })).toBeTruthy()
     expect(screen.queryByText('John Doe')).toBeNull()
   })
@@ -75,6 +75,20 @@ describe('account garage states (F5)', () => {
     const use = await screen.findByRole('button', { name: /2020 Honda Civic/ })
     expect(use.getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('Default')).toBeTruthy()
+  })
+
+  it('keeps the garage one clean list: Remove appears only in Edit mode, and Add vehicle is a row', async () => {
+    vi.mocked(apiService.listVehicles).mockResolvedValue({ success: true, data: [{ id: 'v1', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123', createdAt: '' }] })
+    signIn()
+    render(<ProfileScreen />)
+    await screen.findByRole('button', { name: /2020 Honda Civic/ })
+    expect(screen.queryByRole('button', { name: 'Remove Honda Civic' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add vehicle' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit garage' }))
+    expect(screen.getByRole('button', { name: 'Remove Honda Civic' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add vehicle' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Done editing garage' }))
+    expect(screen.queryByRole('button', { name: 'Remove Honda Civic' })).toBeNull()
   })
 
   it('offers to add the first vehicle when the garage is empty', async () => {

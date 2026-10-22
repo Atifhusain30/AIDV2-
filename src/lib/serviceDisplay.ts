@@ -2,6 +2,7 @@
 
 import { Battery, Car, CircleDot, Fuel, KeyRound, Truck, Wrench, Zap } from 'lucide-react'
 import type { BookingStatus, ServiceType } from '../types'
+import { formatPrice } from './money'
 
 export const serviceIcons: Partial<Record<ServiceType, typeof Wrench>> = {
   battery_jump: Battery,
@@ -32,6 +33,18 @@ export function statusTone(status: BookingStatus): 'danger' | 'brand' | 'success
   if (status === 'cancelled' || status === 'expired') return 'danger'
   if (status === 'completed') return 'success'
   return 'brand'
+}
+
+/**
+ * What the customer paid, as shown in Activity and service details. A request that ended without
+ * service (cancelled / no driver found) costs nothing — AID charges no cancellation fee — so it
+ * reads "No charge" rather than a price that looks like a charge. Only a recorded successful
+ * payment on such a request shows an amount.
+ */
+export function chargeLabel(booking: { status: BookingStatus; finalPrice?: number; estimatedPrice: number; payment?: { status: string } }) {
+  const ended = booking.status === 'cancelled' || booking.status === 'expired'
+  if (ended && booking.payment?.status !== 'succeeded') return { text: 'No charge', muted: true }
+  return { text: formatPrice(booking.finalPrice ?? booking.estimatedPrice), muted: ended }
 }
 
 export const dayLabel = (value: Date | string) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })

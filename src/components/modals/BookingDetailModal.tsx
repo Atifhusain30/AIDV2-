@@ -8,7 +8,6 @@ import { useState } from 'react'
 import { CalendarClock, Car, CheckCircle2, ExternalLink, MessageCircle, Navigation, ReceiptText, RotateCcw, SearchX, Wrench } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import type { BookingStatus } from '../../types'
-import { formatPrice } from '../../lib/money'
 import { jobCountLabel, ratingSummary } from '../../lib/ratings'
 import { endedChatReadable } from '../../lib/chat'
 import JobChat from '../chat/JobChat'
@@ -19,7 +18,7 @@ import PersonAvatar from '../ui/PersonAvatar'
 import StepProgress from '../ui/StepProgress'
 import { EmptyState } from '../ui/States'
 import { TripStops } from '../tracking/TrackLayout'
-import { dayLabel, serviceIcon, statusLabels, statusTone, timeLabel } from '../../lib/serviceDisplay'
+import { chargeLabel, dayLabel, serviceIcon, statusLabels, statusTone, timeLabel } from '../../lib/serviceDisplay'
 
 const mapsUrl = (lat: number, lng: number) => `https://www.google.com/maps?q=${lat},${lng}`
 const fullDate = (value: Date | string) => `${new Date(value).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} at ${timeLabel(value)}`
@@ -58,7 +57,7 @@ export default function BookingDetailModal() {
   const driverVehicle = driver?.vehicle ? [driver.vehicle.color, driver.vehicle.make, driver.vehicle.model].filter(Boolean).join(' ') : ''
   const rating = ratingSummary(driver)
   const jobs = jobCountLabel(driver?.totalJobs)
-  const price = booking.finalPrice ?? booking.estimatedPrice
+  const charge = chargeLabel(booking)
   const hasCoords = Boolean(booking.location.lat && booking.location.lng)
 
   const footer = (
@@ -87,7 +86,7 @@ export default function BookingDetailModal() {
             {booking.status === 'completed' && <CheckCircle2 size={13} aria-hidden="true" />}{statusLabels[booking.status]}
           </span>
         </div>
-        <strong className={`detail-summary__price${tone === 'danger' ? ' is-muted' : ''}`}>{formatPrice(price)}</strong>
+        <strong className={`detail-summary__price${charge.muted ? ' is-muted' : ''}${charge.text === 'No charge' ? ' is-text' : ''}`}>{charge.text}</strong>
       </div>
 
       {live && <StepProgress steps={LIVE_STEPS} current={liveStep(booking.status)} label="Service progress" />}

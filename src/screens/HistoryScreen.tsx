@@ -9,10 +9,8 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { ArrowRight, Clock3, Plus, ReceiptText, RotateCcw, RotateCw, Wrench } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { Booking } from '../types'
-import { formatPrice } from '../lib/money'
 import { loadBookingHistory, useHistoryLoad } from '../lib/bookingHistory'
-import { dayLabel, monthLabel, serviceIcon, statusLabels, statusTone, timeLabel } from '../lib/serviceDisplay'
-import Button from '../components/ui/Button'
+import { chargeLabel, dayLabel, monthLabel, serviceIcon, statusLabels, statusTone, timeLabel } from '../lib/serviceDisplay'
 import { SkeletonRows } from '../components/ui/Skeleton'
 import { EmptyState, ErrorState } from '../components/ui/States'
 
@@ -29,6 +27,7 @@ function ActivityItem({ booking }: { booking: Booking }) {
   const completed = booking.status === 'completed'
   // Completed is the normal case: no chip. Cancelled / no driver / live get one.
   const tone = completed ? null : statusTone(booking.status)
+  const charge = chargeLabel(booking)
 
   return (
     <li className="activity-item">
@@ -37,17 +36,17 @@ function ActivityItem({ booking }: { booking: Booking }) {
         <span className="activity-item__text">
           <span className="activity-item__title">
             <strong>{booking.service.name}</strong>
-            <span className={`activity-item__price${tone === 'danger' ? ' is-muted' : ''}`}>{formatPrice(booking.finalPrice ?? booking.estimatedPrice)}</span>
+            <span className={`activity-item__price${charge.muted ? ' is-muted' : ''}`}>{charge.text}</span>
           </span>
-          <small>{dayLabel(booking.createdAt)} · {timeLabel(booking.createdAt)}</small>
+          <small>{dayLabel(booking.createdAt)} · {timeLabel(booking.createdAt)}{tone ? <> · <span className={`activity-item__status is-${tone}`}>{statusLabels[booking.status]}</span></> : null}</small>
           <small className="activity-item__where">{booking.location.address}</small>
-          {tone && <span className={`ui-chip ui-chip--${tone} activity-item__status`}>{statusLabels[booking.status]}</span>}
         </span>
       </button>
+      {/* Quiet text actions (Uber-style), not two boxed buttons. */}
       {completed && (
         <div className="activity-item__actions">
-          <Button size="sm" variant="secondary" icon={<ReceiptText size={16} aria-hidden="true" />} onClick={() => openReceipt(booking.id)}>Receipt</Button>
-          <Button size="sm" variant="secondary" icon={<RotateCcw size={16} aria-hidden="true" />} onClick={() => rebookFromHistory(booking.id)}>Request again</Button>
+          <button type="button" className="activity-action" onClick={() => openReceipt(booking.id)}><ReceiptText size={16} aria-hidden="true" /> Receipt</button>
+          <button type="button" className="activity-action" onClick={() => rebookFromHistory(booking.id)}><RotateCcw size={16} aria-hidden="true" /> Request again</button>
         </div>
       )}
     </li>
