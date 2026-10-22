@@ -33,6 +33,9 @@ const {
 } = require('./security');
 const { createRealtimeHub, notifyEnded } = require('./realtime');
 const { MFA_REQUIRED_CODE, MFA_REQUIRED_MESSAGE, adminNeedsMfa, mfaExempt } = require('./mfa');
+const {
+  CODES: PAYMENT_CODES, paymentsConfigFromEnv, createPayments, cancellationFeeFor, cleanRefundRequest, toCents,
+} = require('./payments');
 
 // E4 answer codes the apps act on.
 const ACTIVE_REQUEST_CODE = 'active_request_exists';
@@ -95,8 +98,13 @@ function validVehicle(input) {
 
 function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = DEFAULT_CORS_ORIGINS, requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now(),
   logger = silentLogger, rateLimits = rateLimitsFromEnv(), rateLimitStore, trustProxy = false, hsts = { enabled: false },
-  jsonBodyLimit = '100kb', documentMaxBytes = 10 * 1024 * 1024, realtime, realtimeEnabled = true }) {
+  jsonBodyLimit = '100kb', documentMaxBytes = 10 * 1024 * 1024, realtime, realtimeEnabled = true, paymentsConfig = paymentsConfigFromEnv() }) {
   const app = express();
+  // C2/C3: card holds, capture, release, fees, refunds, disputes (payments.js). Without a Stripe client
+  // payments are 'not_configured' and requests are refused unless DEV_ALLOW_UNPAID_REQUESTS=true.
+  const payments = createPayments({ stripe, repository, config: paymentsConfig, logger });
+  app.locals.payments = payments;
+  const allowUnpaidRequests = !payments.configured && paymentsConfig.allowUnpaidRequests;
   // B11: realtime hub (realtime.js). One per app unless index.js passes a shared one (the expiry sweep uses it too).
   const hub = realtime || createRealtimeHub({ clock, radiusMiles: requestRadiusMiles, logger });
   app.locals.realtime = hub;
@@ -109,8 +117,15 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     const result = await repository.expireStaleBookings(scope);
     if (result && ((result.expired && result.expired.length) || (result.released && result.released.length))) {
       notifyEnded(hub, repository, result).catch((error) => logger.warn({ msg: 'realtime expiry notify failed', error: error && error.message }));
+      // C2: expired requests and released jobs never cost the customer anything — release their holds.
+      await payments.settleMany([...(result.expired || []), ...(result.released || [])]);
     }
     return result;
+  };
+  // C2: a request's card hold is confirmed — it now goes to nearby drivers, and the customer's app hears it.
+  const announceAuthorized = async (bookingId) => {
+    const [target] = typeof repository.getRealtimeTargets === 'function' ? await repository.getRealtimeTargets([bookingId]) : [];
+    if (target) notify(() => { hub.bookingChanged(target, 'status'); hub.requestsChanged(target); });
   };
   const limit = createLimiters({ limits: rateLimits, store: rateLimitStore, clock });
   const documentUpload = documentUploader(documentMaxBytes);
@@ -140,16 +155,36 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   // E3: per-IP ceiling on everything below (health checks above are never limited).
   app.use(limit.global);
 
+  // C3: Stripe webhooks. The raw body is verified against STRIPE_WEBHOOK_SECRET before anything is read;
+  // each event id is processed once (stripe_events); a processing failure forgets the id and answers 500
+  // so Stripe retries. Events for PaymentIntents that aren't AID bookings are acknowledged and ignored.
   app.post('/api/webhooks/stripe', express.raw({ type: 'application/json', limit: '512kb' }), async (req, res) => {
-    if (!stripe || !stripeWebhookSecret) return res.status(503).json({ error: 'Stripe webhook is not configured' });
+    if (!stripe || !stripeWebhookSecret) return res.status(503).json({ error: 'Stripe webhook is not configured', code: PAYMENT_CODES.notConfigured });
+    let event;
     try {
-      const event = stripe.webhooks.constructEvent(req.body, req.get('stripe-signature'), stripeWebhookSecret);
-      if (event.type === 'payment_intent.succeeded') await repository.updatePaymentStatus(event.data.object.id, 'succeeded');
-      if (event.type === 'payment_intent.payment_failed') await repository.updatePaymentStatus(event.data.object.id, 'failed');
-      if (event.type === 'payment_intent.processing') await repository.updatePaymentStatus(event.data.object.id, 'processing');
-      res.json({ received: true });
+      if (!Buffer.isBuffer(req.body)) throw new Error('Webhook body must be raw JSON');
+      event = stripe.webhooks.constructEvent(req.body, req.get('stripe-signature') || '', stripeWebhookSecret);
     } catch (_error) {
-      res.status(400).json({ error: 'Invalid webhook signature' });
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
+    if (!event || typeof event.id !== 'string' || typeof event.type !== 'string') return res.status(400).json({ error: 'Invalid webhook event' });
+    if (!await repository.recordStripeEvent(event.id, event.type)) return res.json({ received: true, duplicate: true });
+    try {
+      const result = await payments.handleEvent(event);
+      if (result && result.bookingId) {
+        if (result.promoted) await announceAuthorized(result.bookingId);
+        // Authorized after the request already ended (e.g. the customer cancelled meanwhile): release it.
+        else if (event.type === 'payment_intent.amount_capturable_updated') await payments.settle(result.bookingId);
+        if (!result.promoted && result.changed !== false) {
+          const [target] = typeof repository.getRealtimeTargets === 'function' ? await repository.getRealtimeTargets([result.bookingId]) : [];
+          if (target) notify(() => hub.bookingChanged(target, 'status'));
+        }
+      }
+      res.json({ received: true });
+    } catch (error) {
+      logger.error({ msg: 'stripe webhook processing failed', type: event.type, error: error && error.message });
+      await repository.forgetStripeEvent(event.id).catch(() => {});
+      res.status(500).json({ error: 'Webhook processing failed' });
     }
   });
 
@@ -277,8 +312,17 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
+  // C2: what the apps need to know about payments (no secrets): configured or not, the hold model and
+  // the cancellation fee policy shown before a request.
+  app.get('/api/payments/config', (_req, res) => res.json(payments.publicConfig()));
+
   app.post('/api/bookings', authenticate, requireRole('customer'), limit.bookingCreate, async (req, res, next) => {
     try {
+      // C2: no card payments configured → no requests (an honest refusal), unless a developer
+      // explicitly allowed unpaid dev requests (DEV_ALLOW_UNPAID_REQUESTS=true, never in production).
+      if (!payments.configured && !allowUnpaidRequests) {
+        return res.status(503).json({ error: "Card payments aren't set up yet, so requests can't be sent. Please try again later.", code: PAYMENT_CODES.notConfigured });
+      }
       const priced = priceRequest(req.body);
       if (priced.error) return res.status(priced.status).json({ error: priced.error });
       const { service, dropoff, quote } = priced;
@@ -288,6 +332,11 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       // E4: one active request per customer. Stale ones are ended first so they never block a new
       // request; the unique index catches two requests racing past this check.
       await expireStaleFor(req.auth);
+      if (payments.configured) {
+        // C2: an earlier request whose card was never confirmed is replaced (its hold released), not a blocker.
+        const abandoned = await repository.cancelUnpaidPending({ customerId: req.auth.identity.id });
+        if (abandoned.length) await payments.settleMany(abandoned);
+      }
       const existing = await repository.getActiveBooking(req.auth.identity.id, 'customer');
       if (existing) return activeRequestConflict(res, existing);
       let booking;
@@ -297,13 +346,49 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
           location: cleanLocation(req.body.location),
           dropoffLocation: dropoff ? cleanLocation(dropoff) : null, estimatedPrice: quote.price,
           notes: typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 1000) : null,
+          status: payments.configured ? 'pending' : 'searching',
+          paymentStatus: payments.configured ? 'pending' : 'not_required',
         });
       } catch (error) {
         if (error?.code !== ACTIVE_REQUEST_CODE) throw error;
         return activeRequestConflict(res, await repository.getActiveBooking(req.auth.identity.id, 'customer'));
       }
-      notify(() => { hub.requestsChanged(booking); hub.bookingChanged(booking, 'created'); });
-      res.status(201).json(booking);
+      if (!payments.configured) {
+        notify(() => { hub.requestsChanged(booking); hub.bookingChanged(booking, 'created'); });
+        return res.status(201).json(booking);
+      }
+      // C2: the hold for the server's quote, on the customer's own Stripe Customer. Drivers see the
+      // request only once the card is confirmed (POST …/payment/confirm or the webhook).
+      let setup;
+      try {
+        setup = await payments.authorizeBooking(booking, req.auth.profile, req.auth.identity.email);
+      } catch (error) {
+        logger.error({ msg: 'card hold could not be created', bookingId: booking.id, error: error && error.message });
+        await repository.cancelUnpaidPending({ bookingId: booking.id });
+        return res.status(502).json({ error: "We couldn't start the card check. Nothing was charged — try again.", code: 'payment_setup_failed' });
+      }
+      notify(() => hub.bookingChanged(booking, 'created'));
+      const fresh = await repository.getBooking(booking.id, req.auth.identity.id, 'customer');
+      res.status(201).json({
+        ...(fresh || booking),
+        paymentSetup: { clientSecret: setup.clientSecret, amountCents: setup.amountCents, currency: 'usd', status: setup.status },
+      });
+    } catch (error) { next(error); }
+  });
+  // C2: the app confirmed the card (with 3-D Secure when the bank asked). The server asks Stripe itself;
+  // only a hold for this booking's own server amount releases the request to drivers.
+  app.post('/api/bookings/:bookingId/payment/confirm', authenticate, requireRole('customer'), limit.statusChange, async (req, res, next) => {
+    try {
+      if (!payments.configured) return res.status(503).json({ error: "Card payments aren't set up yet.", code: PAYMENT_CODES.notConfigured });
+      const booking = await repository.getBooking(req.params.bookingId, req.auth.identity.id, 'customer');
+      if (!booking) return res.status(404).json({ error: 'Booking not found' });
+      const result = await payments.confirmAuthorization(booking);
+      if (result.status === 200) {
+        if (result.body.promoted) await announceAuthorized(booking.id);
+        else await payments.settle(booking.id); // hold landed after the request ended: release it (no-op otherwise)
+      }
+      const latest = await repository.getBooking(booking.id, req.auth.identity.id, 'customer');
+      res.status(result.status).json({ ...result.body, booking: latest });
     } catch (error) { next(error); }
   });
   app.get('/api/bookings', authenticate, async (req, res, next) => {
@@ -451,11 +536,23 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
           ? { error: verdict.error, currentStatus: verdict.currentStatus, booking: current }
           : { error: verdict.error });
       }
+      // C3: a customer who cancels once the driver is on the way pays the cancellation fee (never more
+      // than the hold); every other cancel is free. Decided on the exact status the compare-and-set checks.
+      const cancellationFeeCents = nextStatus === 'cancelled' && payments.configured ? cancellationFeeFor({
+        role, fromStatus: verdict.from, authorizedCents: toCents(current.payment?.amountAuthorized || 0),
+        feeCents: paymentsConfig.cancellationFeeCents, feeFromStatuses: paymentsConfig.feeFromStatuses,
+      }) : 0;
       // Compare-and-set on the exact status we validated, so a concurrent change is a 409, never a skipped step.
-      const booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, role, nextStatus, [verdict.from], { reason: verdict.reason });
+      let booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, role, nextStatus, [verdict.from], { reason: verdict.reason, cancellationFeeCents });
       if (!booking) {
         const latest = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
         return res.status(409).json({ error: 'This job was just updated. Showing the latest status.', currentStatus: latest?.status, booking: latest });
+      }
+      // C2: the job ended — capture the quote (completed), the fee, or release the hold. A Stripe failure
+      // never undoes the status change; the settlement sweep retries it.
+      if ((nextStatus === 'completed' || nextStatus === 'cancelled') && payments.configured) {
+        await payments.settle(booking.id);
+        booking = (await repository.getBooking(booking.id, req.auth.identity.id, role)) || booking;
       }
       notify(() => {
         hub.bookingChanged(booking, nextStatus === 'cancelled' ? 'cancelled' : 'status');
@@ -881,25 +978,32 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
-  app.post('/api/payments/create-intent', authenticate, requireRole('customer'), async (req, res, next) => {
+  // ---- C3: admin payments (holds, charges, fees, refunds, disputes). Admin routes require the
+  // authenticator-app step (aal2, E5) — authenticate() refuses password-only admin sessions. ----
+  const PAYMENT_FILTERS = new Set(['attention', 'disputes', 'refunds', 'all']);
+  app.get('/api/admin/payments', authenticate, requireAdmin, async (req, res, next) => {
     try {
-      if (!stripe) return res.status(503).json({ error: 'Payments are not configured' });
-      const booking = await repository.getBooking(req.body.bookingId, req.auth.identity.id, 'customer');
-      if (!booking) return res.status(404).json({ error: 'Booking not found' });
-      if (booking.payment?.status === 'succeeded') return res.status(409).json({ error: 'Booking is already paid' });
-      if (booking.status !== 'completed') return res.status(409).json({ error: 'Booking must be completed before payment' });
-      const amount = Math.round(booking.estimatedPrice * 100);
-      const previousIntentId = booking.payment?.intentId;
-      const retryablePayment = previousIntentId && ['failed', 'refunded'].includes(booking.payment.status);
-      const idempotencyKey = retryablePayment
-        ? `booking-${booking.id}-retry-${previousIntentId}`
-        : `booking-${booking.id}`;
-      const intent = await stripe.paymentIntents.create({
-        amount, currency: 'usd', automatic_payment_methods: { enabled: true },
-        metadata: { bookingId: booking.id, customerId: req.auth.identity.id },
-      }, { idempotencyKey });
-      await repository.setPaymentIntent(booking.id, req.auth.identity.id, intent.id);
-      res.json({ id: intent.id, clientSecret: intent.client_secret, amount: intent.amount, currency: intent.currency, status: intent.status });
+      const filter = req.query.filter ? String(req.query.filter) : 'attention';
+      if (!PAYMENT_FILTERS.has(filter)) return res.status(400).json({ error: 'Unsupported payment filter' });
+      res.json({ ...(await repository.listPaymentsForAdmin(filter)), config: payments.publicConfig() });
+    } catch (error) { next(error); }
+  });
+  app.get('/api/admin/payments/:bookingId', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      const detail = UUID.test(req.params.bookingId) ? await repository.getPaymentForAdmin(req.params.bookingId) : null;
+      if (!detail) return res.status(404).json({ error: 'No payment for this booking' });
+      res.json(detail);
+    } catch (error) { next(error); }
+  });
+  // Full or partial refund of what was charged, with a reason (kept on the booking's audit trail).
+  app.post('/api/admin/payments/:bookingId/refund', authenticate, requireAdmin, limit.accountChange, async (req, res, next) => {
+    try {
+      if (!payments.configured) return res.status(503).json({ error: "Card payments aren't set up yet.", code: PAYMENT_CODES.notConfigured });
+      if (!UUID.test(req.params.bookingId)) return res.status(404).json({ error: 'This booking has no card payment.' });
+      const cleaned = cleanRefundRequest(req.body);
+      if (!cleaned.ok) return res.status(400).json({ error: cleaned.error, field: cleaned.field });
+      const result = await payments.refund({ bookingId: req.params.bookingId, adminId: req.auth.identity.id, ...cleaned.refund });
+      res.status(result.status).json(result.body);
     } catch (error) { next(error); }
   });
 

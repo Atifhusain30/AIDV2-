@@ -121,6 +121,26 @@ function mapVehicle(row) {
   };
 }
 
+/**
+ * C2/C3: what the customer's app (and receipt) shows about the money — in dollars, only what really
+ * happened: the hold, what was charged, a cancellation fee, refunds. 'not_required' = a dev request
+ * made without payments (DEV_ALLOW_UNPAID_REQUESTS). No card details are ever stored by AID.
+ */
+function mapBookingPaymentSummary(row) {
+  if (row.pay_status) {
+    return {
+      status: row.pay_status,
+      amountAuthorized: dollars(row.pay_authorized_cents),
+      amountCaptured: dollars(row.pay_captured_cents),
+      cancellationFee: dollars(row.pay_fee_cents),
+      refunded: dollars(row.pay_refunded_cents),
+      ...(row.pay_last_error && ['failed', 'awaiting_authorization'].includes(row.pay_status) ? { error: row.pay_last_error } : {}),
+    };
+  }
+  if (row.payment_status === 'not_required') return { status: 'not_required', amountAuthorized: 0, amountCaptured: 0, cancellationFee: 0, refunded: 0 };
+  return undefined;
+}
+
 function mapBooking(row) {
   if (!row) return null;
   const estimatedPrice = dollars(row.estimated_price_cents);
@@ -140,11 +160,7 @@ function mapBooking(row) {
     estimatedPrice,
     finalPrice: dollars(row.final_price_cents),
     notes: row.notes || undefined,
-    payment: row.payment_intent_id ? {
-      intentId: row.payment_intent_id,
-      status: row.payment_status,
-      amount: dollars(row.final_price_cents || row.estimated_price_cents),
-    } : undefined,
+    payment: mapBookingPaymentSummary(row),
     driverLocation: row.driver_lat == null ? undefined : { lat: row.driver_lat, lng: row.driver_lng },
     createdAt: row.created_at,
     acceptedAt: row.accepted_at || undefined,
@@ -224,8 +240,11 @@ const PARTY_SELECT = `
     (select e.metadata->>'reason'
        from public.booking_events e where e.booking_id = b.id and e.to_status in ('cancelled','expired') and e.event_type = 'status_changed'
          and e.actor_id is null and e.metadata->>'role' = 'system'
-       order by e.created_at desc limit 1) as system_end_reason
+       order by e.created_at desc limit 1) as system_end_reason,
+    bp.status as pay_status, bp.amount_authorized_cents as pay_authorized_cents, bp.amount_captured_cents as pay_captured_cents,
+    bp.cancellation_fee_cents as pay_fee_cents, bp.refunded_cents as pay_refunded_cents, bp.last_error as pay_last_error
   from public.bookings b
+  left join public.booking_payments bp on bp.booking_id = b.id
   left join public.vehicles v on v.id = b.vehicle_id
   left join public.profiles c on c.id = b.customer_id
   left join public.profiles d on d.id = b.driver_id
@@ -263,6 +282,8 @@ function mapParticipantBooking(row, role) {
   const booking = mapBooking(row);
   if (!booking) return null;
   const live = CONTACT_STATUSES.has(row.status);
+  // The customer's card hold/charges are between the customer and AID; drivers see the job price only.
+  if (role === 'driver') delete booking.payment;
   if (booking.vehicle && row.vehicle_color) booking.vehicle.color = row.vehicle_color;
   if (!live) delete booking.driverLocation;
   else if (booking.driverLocation && row.driver_location_at) booking.driverLocation.updatedAt = new Date(row.driver_location_at).toISOString();
@@ -588,13 +609,16 @@ class PostgresRepository {
       result = await this.pool.query(`
         insert into public.bookings (
           customer_id, vehicle_id, service_type, service_name, location_address, location_lat, location_lng,
-          dropoff_address, dropoff_lat, dropoff_lng, estimated_price_cents, notes
-        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *
+          dropoff_address, dropoff_lat, dropoff_lng, estimated_price_cents, notes, status, payment_status
+        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *
       `, [
         input.customerId, input.vehicleId, input.service.id, input.service.name,
         input.location.address, input.location.lat, input.location.lng,
         dropoff?.address || null, dropoff?.lat ?? null, dropoff?.lng ?? null,
         Math.round(input.estimatedPrice * 100), input.notes,
+        // C2: 'pending' until the card hold is confirmed (drivers only see 'searching'); 'searching' for
+        // dev requests without payments (payment_status 'not_required').
+        input.status === 'pending' ? 'pending' : 'searching', input.paymentStatus === 'not_required' ? 'not_required' : 'pending',
       ]);
     } catch (error) {
       if (error?.code === '23505' && error.constraint === ONE_ACTIVE_INDEX) throw new ActiveBookingExistsError();
@@ -723,6 +747,7 @@ class PostgresRepository {
     `, [serviceTypes, electricTowing, area.minLat, area.maxLat, area.minLng, area.maxLng, center.lat, center.lng, this.requestExpiryMinutes, driverId]);
     return result.rows.map((row) => {
       const booking = mapBooking(row);
+      delete booking.payment;
       booking.pickup = { lat: row.location_lat, lng: row.location_lng };
       // Requests past their expiry window are never listed, even before the sweep marks them expired.
       booking.expiresAt = new Date(new Date(row.created_at).getTime() + this.requestExpiryMinutes * 60000);
@@ -814,8 +839,12 @@ class PostgresRepository {
    * customer/driver), stamping the matching *_at column and writing an audit event atomically.
    * Ending a job (completed/cancelled) clears the driver's last shared position on the booking.
    */
-  async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrentStatuses, { reason = null } = {}) {
+  async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrentStatuses, { reason = null, cancellationFeeCents = 0 } = {}) {
     const ownership = role === 'customer' ? 'customer_id=$2' : 'driver_id=$2';
+    // C3: a customer cancel that costs the fee records it on the payment in the same statement (never
+    // more than the hold); the settlement then captures exactly that and releases the rest.
+    const fee = Number.isInteger(cancellationFeeCents) && cancellationFeeCents > 0 ? cancellationFeeCents : 0;
+    const metadata = { role, ...(reason ? { reason } : {}), ...(fee ? { cancellationFeeCents: fee } : {}) };
     const result = await this.pool.query(`
       with prev as (
         select id, status from public.bookings
@@ -833,9 +862,13 @@ class PostgresRepository {
       ), ev as (
         insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
         select id, $2, 'status_changed', from_status, $3, $5::jsonb from upd
+      ), fee as (
+        update public.booking_payments p set cancellation_fee_cents = least($6::int, p.amount_authorized_cents)
+        from upd where p.booking_id = upd.id and $3 = 'cancelled' and $6::int > 0 and p.status = 'authorized'
+        returning p.booking_id
       )
       select id from upd
-    `, [bookingId, actorId, nextStatus, allowedCurrentStatuses, JSON.stringify(reason ? { role, reason } : { role })]);
+    `, [bookingId, actorId, nextStatus, allowedCurrentStatuses, JSON.stringify(metadata), fee]);
     return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, role) : null;
   }
 
@@ -1253,27 +1286,326 @@ class PostgresRepository {
     return mapDriverVehicle(result.rows[0]);
   }
 
-  async setPaymentIntent(bookingId, customerId, paymentIntentId) {
-    const result = await this.pool.query(`
-      update public.bookings
-      set payment_intent_id=$3,
-          payment_status=case when payment_status='succeeded' then payment_status else 'pending' end
-      where id=$1 and customer_id=$2 returning *
-    `, [bookingId, customerId, paymentIntentId]);
-    return mapBooking(result.rows[0]);
+  // ---- C2/C3: payments (rules in payments.js; Stripe is only called from there) ----
+
+  async getStripeCustomerId(profileId) {
+    const result = await this.pool.query('select stripe_customer_id from public.stripe_customers where profile_id=$1', [profileId]);
+    return result.rows[0]?.stripe_customer_id || null;
   }
 
-  async updatePaymentStatus(paymentIntentId, paymentStatus) {
-    const result = await this.pool.query(`
-      update public.bookings set payment_status=$2
-      where payment_intent_id=$1 and (payment_status <> 'succeeded' or $2 in ('succeeded','refunded'))
-      returning *
-    `, [paymentIntentId, paymentStatus]);
-    return mapBooking(result.rows[0]);
+  /** Save the user's Stripe Customer; if two requests raced, the first saved id wins and is returned. */
+  async saveStripeCustomer(profileId, stripeCustomerId) {
+    await this.pool.query('insert into public.stripe_customers (profile_id, stripe_customer_id) values ($1,$2) on conflict (profile_id) do nothing', [profileId, stripeCustomerId]);
+    return this.getStripeCustomerId(profileId);
   }
+
+  async createBookingPayment({ bookingId, intentId, stripeCustomerId, quotedCents, currency = 'usd' }) {
+    await this.pool.query(`
+      insert into public.booking_payments (booking_id, payment_intent_id, stripe_customer_id, quoted_cents, currency)
+      values ($1,$2,$3,$4,$5) on conflict (booking_id) do nothing
+    `, [bookingId, intentId, stripeCustomerId, quotedCents, currency]);
+    await this.pool.query(`
+      insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+      select b.id, null, 'payment', b.status, b.status, jsonb_build_object('role','system','action','hold_requested','amountCents',$2::int)
+      from public.bookings b where b.id=$1
+    `, [bookingId, quotedCents]);
+  }
+
+  async getBookingPayment(bookingId) {
+    const result = await this.pool.query(`${PAYMENT_SELECT} where p.booking_id=$1`, [bookingId]);
+    return mapPayment(result.rows[0]);
+  }
+
+  async getPaymentByIntent(intentId) {
+    const result = await this.pool.query(`${PAYMENT_SELECT} where p.payment_intent_id=$1`, [intentId]);
+    return mapPayment(result.rows[0]);
+  }
+
+  /**
+   * Stripe says the hold is in place: record it and, in the same statement, release the request to
+   * drivers (pending → searching) with both steps on the audit trail. Out-of-order or repeated events
+   * change nothing (only from awaiting_authorization/failed; only a pending booking is promoted).
+   */
+  async markPaymentAuthorized(intentId, capturableCents, { source = 'sync' } = {}) {
+    const result = await this.pool.query(`
+      with pay as (
+        update public.booking_payments set status='authorized', amount_authorized_cents=$2, authorized_at=coalesce(authorized_at, now()), last_error=null
+        where payment_intent_id=$1 and status in ('awaiting_authorization','failed')
+        returning booking_id
+      ), promoted as (
+        update public.bookings b set status='searching' from pay where b.id=pay.booking_id and b.status='pending'
+        returning b.id
+      ), ev_pay as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select b.id, null, 'payment', b.status, b.status, jsonb_build_object('role','system','action','authorized','amountCents',$2::int,'source',$3::text)
+        from pay join public.bookings b on b.id=pay.booking_id
+      ), ev_status as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select id, null, 'status_changed', 'pending', 'searching', '{"role":"system","reason":"payment_authorized"}'::jsonb from promoted
+      )
+      select (select booking_id from public.booking_payments where payment_intent_id=$1) as booking_id,
+             exists(select 1 from pay) as changed, exists(select 1 from promoted) as promoted
+    `, [intentId, capturableCents, source]);
+    const row = result.rows[0];
+    return row?.booking_id ? { bookingId: row.booking_id, changed: row.changed, promoted: row.promoted } : null;
+  }
+
+  async markPaymentFailed(intentId, message) {
+    return this.paymentUpdate(intentId, `
+      update public.booking_payments set status='failed', last_error=left($2::text, 500)
+      where payment_intent_id=$1 and status in ('awaiting_authorization','failed')
+      returning booking_id, 'failed'::text as action, null::int as amount_cents
+    `, [message]);
+  }
+
+  /** Captured on Stripe: the full quote (completed job) or the cancellation fee (cancelled job). */
+  async markPaymentCaptured(intentId, amountReceivedCents) {
+    return this.paymentUpdate(intentId, `
+      update public.booking_payments p set
+        status = case when b.status = 'cancelled' then 'fee_captured' else 'captured' end,
+        amount_captured_cents = $2, settled_at = coalesce(p.settled_at, now()), last_error = null,
+        needs_attention = case when p.needs_attention = 'settlement_failed' then null else p.needs_attention end
+      from public.bookings b
+      where b.id = p.booking_id and p.payment_intent_id=$1 and p.status in ('awaiting_authorization','authorized','failed')
+      returning p.booking_id, p.status as action, p.amount_captured_cents as amount_cents
+    `, [amountReceivedCents]);
+  }
+
+  /** Hold cancelled on Stripe: nothing charged. Never overrides a capture. */
+  async markPaymentReleased(intentId) {
+    return this.paymentUpdate(intentId, `
+      update public.booking_payments p set status='released', settled_at=coalesce(p.settled_at, now()), last_error=null,
+        needs_attention = case when p.needs_attention = 'settlement_failed' then null else p.needs_attention end
+      where p.payment_intent_id=$1 and p.status in ('awaiting_authorization','authorized','failed')
+      returning p.booking_id, 'released'::text as action, 0 as amount_cents
+    `, []);
+  }
+
+  /** Runs one booking_payments update for an intent and writes a 'payment' audit event when it changed something. */
+  async paymentUpdate(intentId, updateSql, extra) {
+    const result = await this.pool.query(`
+      with upd as (${updateSql}), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select b.id, null, 'payment', b.status, b.status,
+          jsonb_strip_nulls(jsonb_build_object('role','system','action',upd.action,'amountCents',upd.amount_cents))
+        from upd join public.bookings b on b.id=upd.booking_id
+      )
+      select (select booking_id from public.booking_payments where payment_intent_id=$1) as booking_id, exists(select 1 from upd) as changed
+    `, [intentId, ...extra]);
+    const row = result.rows[0];
+    return row?.booking_id ? { bookingId: row.booking_id, changed: row.changed } : null;
+  }
+
+  /** A capture/release attempt failed: count it; after `attentionAfter` failures flag the booking for the admin. */
+  async recordSettlementError(bookingId, message, attentionAfter = 3) {
+    await this.pool.query(`
+      update public.booking_payments set settlement_attempts = settlement_attempts + 1, last_error = left($2::text, 500),
+        needs_attention = case when needs_attention is null and settlement_attempts + 1 >= $3 then 'settlement_failed' else needs_attention end
+      where booking_id=$1
+    `, [bookingId, message, attentionAfter]);
+  }
+
+  /** Ended bookings whose hold is still open (the settlement sweep retries these). */
+  async listUnsettledPayments(limit = 50) {
+    const result = await this.pool.query(`
+      select p.booking_id from public.booking_payments p join public.bookings b on b.id = p.booking_id
+      where p.status in ('awaiting_authorization','authorized','failed') and b.status in ('completed','cancelled','expired')
+      order by p.updated_at asc limit $1
+    `, [limit]);
+    return result.rows.map((row) => row.booking_id);
+  }
+
+  /**
+   * A request whose card was never confirmed (or a hold that couldn't be set up) is ended by the server
+   * (actor null, role system, reason payment_not_completed) so it never blocks a new request. Scoped to
+   * one customer's pending requests, or one booking. Returns the ended booking ids.
+   */
+  async cancelUnpaidPending({ customerId = null, bookingId = null, olderThanMinutes = null }) {
+    const result = await this.pool.query(`
+      with prev as (
+        select b.id from public.bookings b left join public.booking_payments p on p.booking_id = b.id
+        where b.status = 'pending' and (p.booking_id is null or p.status in ('awaiting_authorization','failed'))
+          and ($1::uuid is null or b.customer_id=$1) and ($2::uuid is null or b.id=$2)
+          and ($3::int is null or b.created_at <= now() - make_interval(mins => $3::int))
+        for update of b skip locked
+      ), upd as (
+        update public.bookings b set status='cancelled', cancelled_at=now() from prev where b.id=prev.id returning b.id
+      ), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select id, null, 'status_changed', 'pending', 'cancelled', '{"role":"system","reason":"payment_not_completed"}'::jsonb from upd
+      )
+      select id from upd
+    `, [customerId, bookingId, olderThanMinutes]);
+    return result.rows.map((row) => row.id);
+  }
+
+  /** Admin refund: stored once per Stripe refund id; the booking's refunded total and status follow. */
+  async recordRefund(bookingId, { refundId, amountCents, status, reason, stripeReason, adminId }) {
+    await this.pool.query(`
+      with ins as (
+        insert into public.payment_refunds (id, booking_id, amount_cents, status, reason, stripe_reason, admin_id)
+        values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing returning amount_cents
+      ), upd as (
+        update public.booking_payments p set
+          refunded_cents = least(p.amount_captured_cents, p.refunded_cents + ins.amount_cents),
+          status = case when p.refunded_cents + ins.amount_cents >= p.amount_captured_cents then 'refunded' else 'partially_refunded' end
+        from ins where p.booking_id=$2
+        returning p.booking_id
+      ), ev as (
+        insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+        select b.id, $7, 'payment', b.status, b.status,
+          jsonb_strip_nulls(jsonb_build_object('role','admin','action','refunded','amountCents',$3::int,'refundId',$1::text,'reason',$5::text,'stripeReason',$6::text))
+        from upd join public.bookings b on b.id=upd.booking_id
+      )
+      select 1
+    `, [refundId, bookingId, amountCents, status, reason, stripeReason, adminId]);
+    return this.getBookingPayment(bookingId);
+  }
+
+  /**
+   * charge.refunded webhook: Stripe's total refunded for the charge is the truth (refunds made in the
+   * Stripe dashboard count too). Each refund id is stored once.
+   */
+  async applyChargeRefunded(intentId, amountRefundedCents, refunds = []) {
+    const payment = await this.getPaymentByIntent(intentId);
+    if (!payment) return null;
+    for (const refund of refunds) {
+      if (!refund.id || !(refund.amountCents > 0)) continue;
+      await this.pool.query(`
+        insert into public.payment_refunds (id, booking_id, amount_cents, status, stripe_reason) values ($1,$2,$3,$4,$5)
+        on conflict (id) do update set status = excluded.status
+      `, [refund.id, payment.bookingId, refund.amountCents, refund.status || 'succeeded', refund.stripeReason || null]);
+    }
+    return this.paymentUpdate(intentId, `
+      update public.booking_payments p set
+        refunded_cents = least(p.amount_captured_cents, greatest(p.refunded_cents, $2::int)),
+        status = case when least(p.amount_captured_cents, greatest(p.refunded_cents, $2::int)) >= p.amount_captured_cents then 'refunded' else 'partially_refunded' end
+      where p.payment_intent_id=$1 and p.amount_captured_cents > 0 and $2::int > p.refunded_cents
+        and p.status in ('captured','fee_captured','partially_refunded','refunded')
+      returning p.booking_id, 'refund_recorded'::text as action, p.refunded_cents as amount_cents
+    `, [amountRefundedCents]);
+  }
+
+  /** Dispute webhooks: store the dispute and flag the booking for the admin while it's open. */
+  async applyDispute(intentId, { disputeId, status, amountCents, reason, open }) {
+    return this.paymentUpdate(intentId, `
+      update public.booking_payments p set dispute_id=$2, dispute_status=$3, dispute_amount_cents=$4, dispute_reason=$5,
+        needs_attention = case when $6::boolean then 'dispute' when p.needs_attention = 'dispute' then null else p.needs_attention end
+      where p.payment_intent_id=$1
+      returning p.booking_id, case when $6::boolean then 'dispute_' || $3 else 'dispute_closed_' || $3 end as action, $4::int as amount_cents
+    `, [disputeId, status, amountCents, reason, open]);
+  }
+
+  /** Webhook dedupe: true the first time an event id is seen. */
+  async recordStripeEvent(eventId, type) {
+    const result = await this.pool.query('insert into public.stripe_events (id, type) values ($1,$2) on conflict (id) do nothing returning id', [eventId, type]);
+    return result.rowCount > 0;
+  }
+
+  /** Processing failed: forget the event so Stripe's retry is processed. */
+  async forgetStripeEvent(eventId) {
+    await this.pool.query('delete from public.stripe_events where id=$1', [eventId]);
+  }
+
+  /** Admin Payments list: needs attention (open disputes, failed settlements), disputes, refunds, or all. */
+  async listPaymentsForAdmin(filter = 'attention') {
+    const condition = ADMIN_PAYMENT_FILTERS[filter];
+    if (!condition) throw new Error(`Unsupported payment filter: ${filter}`);
+    const [list, counts] = await Promise.all([
+      this.pool.query(`${ADMIN_PAYMENT_SELECT} where ${condition} order by (p.needs_attention is not null) desc, p.updated_at desc limit 200`),
+      this.pool.query(`select count(*) filter (where needs_attention is not null)::int as attention,
+        count(*) filter (where needs_attention = 'dispute')::int as disputes from public.booking_payments`),
+    ]);
+    return { payments: list.rows.map(mapAdminPayment), counts: counts.rows[0] };
+  }
+
+  async getPaymentForAdmin(bookingId) {
+    const result = await this.pool.query(`${ADMIN_PAYMENT_SELECT} where p.booking_id=$1`, [bookingId]);
+    if (!result.rows[0]) return null;
+    const [refunds, events] = await Promise.all([
+      this.pool.query(`select r.*, a.first_name as admin_first_name, a.last_name as admin_last_name from public.payment_refunds r
+        left join public.profiles a on a.id = r.admin_id where r.booking_id=$1 order by r.created_at`, [bookingId]),
+      this.pool.query(`select e.*, a.first_name as actor_first_name, a.last_name as actor_last_name from public.booking_events e
+        left join public.profiles a on a.id = e.actor_id
+        where e.booking_id=$1 and (e.event_type = 'payment' or e.event_type = 'status_changed') order by e.created_at, e.id`, [bookingId]),
+    ]);
+    return {
+      ...mapAdminPayment(result.rows[0]),
+      refunds: refunds.rows.map((row) => ({
+        id: row.id, amountCents: row.amount_cents, status: row.status, reason: row.reason || null, stripeReason: row.stripe_reason || null,
+        admin: row.admin_id ? `${row.admin_first_name || ''} ${row.admin_last_name || ''}`.trim() || 'Admin' : null, createdAt: iso(row.created_at),
+      })),
+      events: events.rows.map((row) => ({
+        type: row.event_type, fromStatus: row.from_status, toStatus: row.to_status, metadata: row.metadata || {},
+        actor: row.actor_id ? `${row.actor_first_name || ''} ${row.actor_last_name || ''}`.trim() || 'Someone' : (row.metadata?.role === 'system' ? 'AID (automatic)' : null),
+        createdAt: iso(row.created_at),
+      })),
+    };
+  }
+}
+
+const PAYMENT_SELECT = `
+  select p.*, b.status as booking_status, b.final_price_cents, b.customer_id,
+    (select case when e.actor_id = b.customer_id then 'customer' when e.actor_id = b.driver_id then 'driver'
+              when e.actor_id is null then 'system' else 'support' end
+       from public.booking_events e where e.booking_id = b.id and e.to_status = 'cancelled' and e.event_type = 'status_changed'
+       order by e.created_at desc limit 1) as cancelled_by
+  from public.booking_payments p join public.bookings b on b.id = p.booking_id`;
+
+function mapPayment(row) {
+  if (!row) return null;
+  return {
+    bookingId: row.booking_id,
+    customerId: row.customer_id,
+    intentId: row.payment_intent_id,
+    stripeCustomerId: row.stripe_customer_id || null,
+    status: row.status,
+    currency: row.currency,
+    quotedCents: row.quoted_cents,
+    amountAuthorizedCents: row.amount_authorized_cents,
+    amountCapturedCents: row.amount_captured_cents,
+    cancellationFeeCents: row.cancellation_fee_cents,
+    refundedCents: row.refunded_cents,
+    finalCents: row.final_price_cents || null,
+    bookingStatus: row.booking_status,
+    cancelledBy: row.cancelled_by || null,
+    lastError: row.last_error || null,
+    needsAttention: row.needs_attention || null,
+    settlementAttempts: row.settlement_attempts,
+    dispute: row.dispute_id ? { id: row.dispute_id, status: row.dispute_status, amountCents: row.dispute_amount_cents, reason: row.dispute_reason || null } : null,
+    authorizedAt: iso(row.authorized_at),
+    settledAt: iso(row.settled_at),
+  };
+}
+
+const ADMIN_PAYMENT_FILTERS = Object.freeze({
+  attention: 'p.needs_attention is not null',
+  disputes: 'p.dispute_id is not null',
+  refunds: 'p.refunded_cents > 0',
+  all: 'true',
+});
+
+const ADMIN_PAYMENT_SELECT = `
+  select p.*, b.status as booking_status, b.final_price_cents, b.customer_id, b.service_name, b.created_at as booking_created_at,
+    c.first_name as customer_first_name, c.last_name as customer_last_name, u.email as customer_email, null::text as cancelled_by
+  from public.booking_payments p
+  join public.bookings b on b.id = p.booking_id
+  left join public.profiles c on c.id = b.customer_id
+  left join auth.users u on u.id = b.customer_id`;
+
+function mapAdminPayment(row) {
+  const { cancelledBy: _cancelledBy, stripeCustomerId: _stripeCustomerId, ...payment } = mapPayment(row);
+  return {
+    ...payment,
+    serviceName: row.service_name,
+    bookingCreatedAt: iso(row.booking_created_at),
+    customerName: `${row.customer_first_name || ''} ${row.customer_last_name || ''}`.trim() || 'Unnamed',
+    customerEmail: row.customer_email || '',
+    refundableCents: Math.max(0, row.amount_captured_cents - row.refunded_cents),
+  };
 }
 
 module.exports = {
   PostgresRepository, ActiveBookingExistsError, RatingExistsError, RATING_UNIQUE, ONE_ACTIVE_INDEX, ONE_JOB_PER_DRIVER_INDEX,
-  mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, mapSupportReport, mapAdminSupportReport, mapJobMessage, ACTIVE_STATUSES, CONTACT_STATUSES,
+  mapPayment, mapAdminPayment, mapProfile, mapDriverVehicle, mapVehicle, mapBooking, mapParticipantBooking, mapSupportReport, mapAdminSupportReport, mapJobMessage, ACTIVE_STATUSES, CONTACT_STATUSES,
 };

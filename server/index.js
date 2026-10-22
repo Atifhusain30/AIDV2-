@@ -41,7 +41,8 @@ const pool = new Pool({
 const expiryConfig = expiryConfigFromEnv(process.env);
 const repository = new PostgresRepository(pool, expiryConfig);
 const stripeKey = process.env.STRIPE_SECRET_KEY;
-const stripe = stripeKey && /^sk_(test|live)_/.test(stripeKey) ? new Stripe(stripeKey) : null;
+// Network retries are safe: every Stripe write carries an idempotency key (payments.js).
+const stripe = stripeKey && /^sk_(test|live)_/.test(stripeKey) ? new Stripe(stripeKey, { maxNetworkRetries: 2, timeout: 20000 }) : null;
 const auth = {
   async getUser(accessToken) {
     const { data, error } = await supabase.auth.getUser(accessToken);
@@ -109,6 +110,11 @@ const host = process.env.HOST || '127.0.0.1';
 const server = app.listen(port, host, () => {
   logger.info({ msg: `AID API listening on http://${host}:${port}` });
   logger.info({ msg: `Postgres pool configured | Stripe: ${stripe ? 'configured' : 'not configured'}` });
+  const pay = app.locals.payments.publicConfig();
+  logger.info({
+    msg: 'payments', status: pay.status, mode: pay.mode, unpaidDevRequests: pay.unpaidRequestsAllowed,
+    cancellationFeeCents: pay.cancellationFee.cents, feeFrom: pay.cancellationFee.appliesFrom, webhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+  });
   logger.info({ msg: `Requests expire after ${expiryConfig.requestExpiryMinutes} min without a driver; silent jobs are released after ${expiryConfig.staleJobMinutes} min; sweep every ${expiryConfig.sweepSeconds} s` });
   logger.info({
     msg: 'security', corsOrigins: security.corsOrigin, trustProxy: security.trustProxy, hsts: security.hsts.enabled,
@@ -119,9 +125,17 @@ const server = app.listen(port, host, () => {
     maxConnectionsPerUser: realtimeConfig.maxConnectionsPerUser, maxStreamMinutes: realtimeConfig.maxStreamMs / 60000, heartbeatSeconds: realtimeConfig.heartbeatMs / 1000,
   });
 });
+const payments = app.locals.payments;
 const expirySweep = startExpirySweep({
   repository,
   onExpired: (result) => notifyEnded(realtime, repository, result),
+  // C2: release holds of expired/released jobs, end requests whose card was never confirmed, retry open settlements.
+  onTick: async (result) => {
+    if (!payments.configured) return;
+    await payments.settleMany([...(result.expired || []), ...(result.released || [])]);
+    const { ended } = await payments.tick();
+    if (ended.length) await notifyEnded(realtime, repository, { expired: [], released: ended });
+  },
   intervalMs: expiryConfig.sweepSeconds * 1000,
   logger: { log: (line) => logger.info({ msg: line }), error: (...parts) => logger.error({ msg: parts.map(String).join(' ') }) },
 });

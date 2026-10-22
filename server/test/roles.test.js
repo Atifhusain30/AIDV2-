@@ -39,7 +39,7 @@ const send = (app, method, path, token) => {
 
 const CUSTOMER_ONLY = [
   ['get', '/api/vehicles'], ['post', '/api/vehicles'], ['patch', '/api/vehicles/v1'], ['delete', '/api/vehicles/v1'],
-  ['post', '/api/quotes'], ['post', '/api/bookings'], ['post', '/api/payments/create-intent'],
+  ['post', '/api/quotes'], ['post', '/api/bookings'], ['post', '/api/bookings/00000000-0000-4000-8000-000000000001/payment/confirm'],
 ];
 const DRIVER_ONLY = [
   ['patch', '/api/drivers/me/online'], ['patch', '/api/drivers/me/vehicle'], ['get', '/api/drivers/me/documents'],
@@ -54,6 +54,9 @@ const ADMIN_ONLY = [
   ['get', '/api/admin/drivers'], ['get', '/api/admin/drivers/d1'], ['post', '/api/admin/documents/doc-1/review'],
   ['post', '/api/admin/drivers/d1/decision'], ['get', '/api/admin/reports'], ['get', '/api/admin/reports/r1'],
   ['get', '/api/admin/reports/r1/messages'], ['patch', '/api/admin/reports/r1'],
+  // C3: payments list, detail and refunds (refunds need the authenticator step like every admin route).
+  ['get', '/api/admin/payments'], ['get', '/api/admin/payments/00000000-0000-4000-8000-000000000001'],
+  ['post', '/api/admin/payments/00000000-0000-4000-8000-000000000001/refund'],
 ];
 
 test('customer-only routes refuse drivers and admins (even when their metadata claims otherwise)', async () => {

@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createApp } = require('../app');
+const { DEV_UNPAID } = require('./helpers/payments');
 const { MemoryStore, createRateLimiter, rateLimitsFromEnv, DEFAULT_LIMITS } = require('../rateLimit');
 const { redact, redactString, roundCoordinate } = require('../redact');
 const { trustProxyFromEnv, corsOriginsFromEnv, securityConfigFromEnv, DEFAULT_CORS_ORIGINS } = require('../security');
@@ -64,6 +65,7 @@ function makeApp(options = {}) {
       async remove() {},
     },
     corsOrigin: 'capacitor://localhost,https://localhost,http://127.0.0.1:5173',
+    paymentsConfig: DEV_UNPAID,
     ...options.app,
   });
   return { app, repository, logger, advance(ms) { now += ms; } };

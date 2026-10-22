@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createApp } = require('../app');
+const { DEV_UNPAID } = require('./helpers/payments');
 
 const TOW_TRUCK = Object.freeze({ make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'flatbed' });
 const WHEEL_LIFT = Object.freeze({ ...TOW_TRUCK, model: 'F-450', plate: 'LIFT-1', equipmentType: 'wheel_lift' });
@@ -169,7 +170,7 @@ function buildHarness(stripe = null, accountAdmin = null) {
     },
   };
 
-  return { app: createApp({ auth, repository, stripe, accountAdmin }), repository, bookings };
+  return { app: createApp({ auth, repository, stripe, accountAdmin, paymentsConfig: DEV_UNPAID }), repository, bookings };
 }
 
 test('health endpoint is available without authentication', async () => {
@@ -376,82 +377,11 @@ test('booking acceptance is atomic', async () => {
   assert.equal(second.status, 409);
 });
 
-test('payment intent amount and customer identity come from the owned booking', async () => {
-  let stripeRequest;
-  const stripe = {
-    paymentIntents: {
-      async create(input, options) {
-        stripeRequest = { input, options };
-        return { id: 'pi_test_1', client_secret: 'pi_test_1_secret', amount: input.amount, currency: input.currency, status: 'requires_payment_method' };
-      },
-    },
-  };
-  const { app, bookings } = buildHarness(stripe);
-  bookings.set('booking-paid', { id: 'booking-paid', customerId: 'customer-1', estimatedPrice: 125, status: 'completed' });
-
-  const response = await request(app)
-    .post('/api/payments/create-intent')
-    .set('Authorization', 'Bearer customerToken')
-    .send({ bookingId: 'booking-paid', amount: 1, customerId: 'attacker-selected-id' });
-
-  assert.equal(response.status, 200);
-  assert.equal(response.body.amount, 12500);
-  assert.equal(stripeRequest.input.amount, 12500);
-  assert.equal(stripeRequest.input.metadata.customerId, 'customer-1');
-  assert.equal(stripeRequest.options.idempotencyKey, 'booking-booking-paid');
-  assert.equal(bookings.get('booking-paid').paymentIntentId, 'pi_test_1');
-});
-
-test('customer cannot create a payment intent for another customer booking', async () => {
-  const stripe = { paymentIntents: { async create() { throw new Error('Stripe must not be called'); } } };
-  const { app, bookings } = buildHarness(stripe);
-  bookings.set('booking-other', { id: 'booking-other', customerId: 'customer-2', estimatedPrice: 65, status: 'completed' });
-
-  const response = await request(app)
-    .post('/api/payments/create-intent')
-    .set('Authorization', 'Bearer customerToken')
-    .send({ bookingId: 'booking-other' });
-
+// C2/C3 payments (hold at request, capture, release, fee, refunds, webhooks) are covered in payments.test.js.
+test('the old pay-after-the-job endpoint is gone (the card hold now happens at request time)', async () => {
+  const { app } = buildHarness();
+  const response = await request(app).post('/api/payments/create-intent').set('Authorization', 'Bearer customerToken').send({ bookingId: 'booking-1' });
   assert.equal(response.status, 404);
-});
-
-test('payment intent creation requires a completed booking', async () => {
-  const stripe = { paymentIntents: { async create() { throw new Error('Stripe must not be called'); } } };
-  const { app, bookings } = buildHarness(stripe);
-  bookings.set('booking-active', { id: 'booking-active', customerId: 'customer-1', estimatedPrice: 65, status: 'searching' });
-
-  const response = await request(app)
-    .post('/api/payments/create-intent')
-    .set('Authorization', 'Bearer customerToken')
-    .send({ bookingId: 'booking-active' });
-
-  assert.equal(response.status, 409);
-  assert.equal(response.body.error, 'Booking must be completed before payment');
-});
-
-test('failed payment retries use a new idempotency key derived from the previous intent', async () => {
-  let options;
-  const stripe = {
-    paymentIntents: {
-      async create(_input, requestOptions) {
-        options = requestOptions;
-        return { id: 'pi_retry', client_secret: 'pi_retry_secret', amount: 12500, currency: 'usd', status: 'requires_payment_method' };
-      },
-    },
-  };
-  const { app, bookings } = buildHarness(stripe);
-  bookings.set('booking-retry', {
-    id: 'booking-retry', customerId: 'customer-1', estimatedPrice: 125, status: 'completed',
-    payment: { intentId: 'pi_failed', status: 'failed' },
-  });
-
-  const response = await request(app)
-    .post('/api/payments/create-intent')
-    .set('Authorization', 'Bearer customerToken')
-    .send({ bookingId: 'booking-retry' });
-
-  assert.equal(response.status, 200);
-  assert.equal(options.idempotencyKey, 'booking-booking-retry-retry-pi_failed');
 });
 
 test('authenticated users can permanently delete their own account', async () => {

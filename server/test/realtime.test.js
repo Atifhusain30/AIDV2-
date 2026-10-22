@@ -5,6 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const { createApp } = require('../app');
+const { DEV_UNPAID } = require('./helpers/payments');
 const { createRealtimeHub, notifyEnded, jobTarget } = require('../realtime');
 const { startExpirySweep } = require('../expiry');
 const { PostgresRepository } = require('../repository');
@@ -97,7 +98,7 @@ function harness({ clock = () => Date.now(), hubOptions = {}, status = 'accepted
   };
   const hub = createRealtimeHub({ clock, radiusMiles: 25, ...hubOptions });
   const auth = { async getUser(token) { const user = USERS[token]; return user ? { id: user.id, aal: 'aal2' } : null; } };
-  const app = createApp({ auth, repository, realtime: hub, clock, supportContact: { email: null, phone: null } });
+  const app = createApp({ auth, repository, realtime: hub, clock, supportContact: { email: null, phone: null }, paymentsConfig: DEV_UNPAID });
   return { app, hub, repository, bookings };
 }
 

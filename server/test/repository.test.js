@@ -54,16 +54,43 @@ test('available-booking listings hide customer identity and precise pickup detai
   assert.equal(Number.isNaN(booking.expiresAt.getTime()), false);
 });
 
-test('payment status cannot be downgraded after success', async () => {
-  let captured;
+test('C2/C3: payment updates are monotonic — a capture/release only moves an open hold, never a settled one', async () => {
+  const calls = [];
   const repository = new PostgresRepository(poolWith(async (text, values) => {
-    captured = { text, values };
-    return { rows: [] };
+    calls.push({ text, values });
+    return { rows: [{ booking_id: 'booking-1', changed: false, promoted: false }] };
   }));
+  await repository.markPaymentCaptured('pi_1', 9500);
+  await repository.markPaymentReleased('pi_1');
+  await repository.markPaymentFailed('pi_1', 'declined');
+  await repository.markPaymentAuthorized('pi_1', 9500);
+  assert.match(calls[0].text, /p\.status in \('awaiting_authorization','authorized','failed'\)/);
+  assert.match(calls[1].text, /p\.status in \('awaiting_authorization','authorized','failed'\)/);
+  assert.match(calls[2].text, /status in \('awaiting_authorization','failed'\)/);
+  // Authorization promotes only a pending request, in the same statement, with audit events.
+  assert.match(calls[3].text, /status in \('awaiting_authorization','failed'\)/);
+  assert.match(calls[3].text, /set status='searching' from pay where b\.id=pay\.booking_id and b\.status='pending'/);
+  assert.match(calls[3].text, /'status_changed', 'pending', 'searching'/);
+  // Every change writes a 'payment' event on the booking's audit trail.
+  for (const call of calls) assert.match(call.text, /insert into public\.booking_events[\s\S]*'payment'/);
+});
 
-  await repository.updatePaymentStatus('pi_1', 'processing');
+test('C3: a fee-bearing cancel records the fee in the same statement, capped at the hold', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => { calls.push({ text, values }); return { rows: [] }; }));
+  await repository.updateBookingStatus('booking-9', 'customer-1', 'customer', 'cancelled', ['en_route'], { reason: 'wait_too_long', cancellationFeeCents: 1500 });
+  assert.match(calls[0].text, /update public\.booking_payments p set cancellation_fee_cents = least\(\$6::int, p\.amount_authorized_cents\)/);
+  assert.equal(calls[0].values[5], 1500);
+  assert.equal(calls[0].values[4], JSON.stringify({ role: 'customer', reason: 'wait_too_long', cancellationFeeCents: 1500 }));
+});
 
-  assert.match(captured.text, /payment_status <> 'succeeded'/i);
+test('C2: bookings carry an honest payment summary for the customer and none for drivers', async () => {
+  const paid = { ...PARTY_ROW, status: 'completed', pay_status: 'captured', pay_authorized_cents: 9500, pay_captured_cents: 9500, pay_fee_cents: 0, pay_refunded_cents: 0 };
+  const repository = new PostgresRepository(poolWith(async () => ({ rows: [paid] })));
+  const customerView = await repository.getBooking('booking-9', 'customer-1', 'customer');
+  assert.deepEqual(customerView.payment, { status: 'captured', amountAuthorized: 95, amountCaptured: 95, cancellationFee: 0, refunded: 0 });
+  const driverView = await repository.getBooking('booking-9', 'driver-1', 'driver');
+  assert.equal(driverView.payment, undefined);
 });
 
 test('booking acceptance uses a conditional update to prevent double assignment', async () => {
@@ -178,7 +205,7 @@ test('status changes are compare-and-set, timestamped, audited and stop location
   assert.match(text, /driver_lat=case when \$3 in \('completed','cancelled'\) then null/);
   assert.match(text, /insert into public\.booking_events \(booking_id, actor_id, event_type, from_status, to_status, metadata\)/);
   assert.match(text, /select id, \$2, 'status_changed', from_status, \$3, \$5::jsonb from upd/);
-  assert.deepEqual(values, ['booking-9', 'driver-1', 'cancelled', ['arrived'], JSON.stringify({ role: 'driver', reason: 'cannot_reach_customer' })]);
+  assert.deepEqual(values, ['booking-9', 'driver-1', 'cancelled', ['arrived'], JSON.stringify({ role: 'driver', reason: 'cannot_reach_customer' }), 0]);
 
   await repository.updateBookingStatus('booking-9', 'customer-1', 'customer', 'cancelled', ['accepted']);
   assert.match(calls[2].text, /customer_id=\$2/);
