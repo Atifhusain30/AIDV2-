@@ -59,7 +59,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 3.3 | Status updates everywhere (not only while Chat screen is open); driver job refresh when customer cancels | ✅ by polling — customer every 4 s on every screen (`4cfd340`), driver's active job every 5 s with a "customer cancelled" notice (`26ceb6e`); realtime channel/push still 3.4 |
 | 3.4 | Push notifications (APNs/FCM) for request accepted, arriving, completed, new job for drivers | ❌ |
 | 3.5 | Lifecycle buttons only in allowed states (customer cancel after en route; driver cancel after arrival) | ✅ `26ceb6e` — server state machine `server/lifecycle.js` + client mirror `src/lib/jobLifecycle.ts`; customer cancels until arrival, driver (with reason) until service starts, then report-an-issue only |
-| 3.6 | Payment status re-read after paying; receipt shows real price (no invented distance/surge split) | ⚠️ |
+| 3.6 | Payment status re-read after paying; receipt shows real price (no invented distance/surge split) | ⚠️ receipt now shows only the server's price (`57b303e`); payment status re-read still pending |
 | 3.7 | Prices shown come from the server catalog (`GET /api/services`), not local/random estimates | ✅ `bbf9c8c` request flow; receipts still pending (3.6) |
 
 ## Phase 4 — UI/UX polish (Uber/DoorDash benchmark)
@@ -68,13 +68,13 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 4.1 | 2-tap request: tile → review → "Request · $X" (today 8 taps, service asked twice, fake 1.5 s delays) | ❌ |
 | 4.2 | One bottom-sheet component above the nav (6 different modal designs today; nav stays tappable behind modals) | ❌ |
 | 4.3 | One color system: black + restrained purple; remove emerald/teal/lime/navy/blue leftovers and ~30 `!important` overrides | ❌ |
-| 4.4 | Remove fake data: "1" notification promo, random providers, "Downtown District", hard-coded driver earnings, "providers nearby", "technician on their way" | ❌ |
+| 4.4 | Remove fake data: "1" notification promo, random providers, "Downtown District", hard-coded driver earnings, "providers nearby", "technician on their way" | ✅ `57b303e` — mock data file, random provider matching, simulated chat/tracking, promo notification and badge, seeded searches, invented receipt fee split, "Providers available nearby", hard-coded "$0.00"/"0" driver stats and dead driver bell removed; "Downtown District" and "technician on their way" were already gone. Driver Today uses real job history; earnings say "Soon". Guarded by `src/noFakeData.test.ts` |
 | 4.5 | Accessibility: dialog roles/focus trap/Escape, labelled icon buttons, 44 pt targets, text ≥ 12 px, contrast ≥ 4.5:1, allow pinch-zoom, reduced motion, remove confetti | ❌ |
 | 4.6 | Consistent terminology: "provider" (customer side) / "driver" (driver app) | ⚠️ |
-| 4.7 | Driver home: one clear "Finish verification" CTA, time-based greeting, working bell, service icons | ⚠️ |
+| 4.7 | Driver home: one clear "Finish verification" CTA, time-based greeting, working bell, service icons | ⚠️ time-based greeting done and the non-working bell removed (`57b303e`); service icons remain |
 | 4.8 | Chat/keyboard layout (`100dvh`, safe area), back navigation | ❌ |
 | 4.9 | Replace `window.alert` with inline errors/toasts; vehicle year validation | ❌ |
-| 4.10 | Remove dead code (~2,700 lines unused UI kit, ActiveServiceScreen, MapView, ~42 unused CSS classes); lazy-load maps/Stripe/driver app | ❌ ActiveServiceScreen, EmergencySOSModal and `.emergency-panel` CSS removed in `bd1c4d7`; the rest remains |
+| 4.10 | Remove dead code (~2,700 lines unused UI kit, ActiveServiceScreen, MapView, ~42 unused CSS classes); lazy-load maps/Stripe/driver app | ❌ ActiveServiceScreen, EmergencySOSModal and `.emergency-panel` CSS removed in `bd1c4d7`; MapView, TrackingMap, HistoryModal, chatService, mockData and the demo simulation in bookingService/ChatScreen removed in `57b303e` (~2,300 lines); unused UI kit, unused CSS and lazy-loading remain |
 
 ## Phase 5 — App Store & Google Play
 | # | Item | Status |
