@@ -30,14 +30,17 @@ const documentUpload = multer({
 const SERVICE_CATALOG = Object.freeze({
   battery_jump: { id: 'battery_jump', name: "Won't start", description: 'Battery jump-start and diagnosis', basePrice: 65, estimatedTime: 30 },
   flat_tire: { id: 'flat_tire', name: 'Flat tire', description: 'On-site tire change or inflation', basePrice: 75, estimatedTime: 35 },
-  towing: { id: 'towing', name: 'Towing', description: 'Local roadside towing', basePrice: 125, estimatedTime: 60 },
+  towing: { id: 'towing', name: 'Towing', description: 'Local roadside towing', basePrice: 125, estimatedTime: 60, requiresDropoff: true },
   lockout: { id: 'lockout', name: 'Locked out', description: 'Vehicle lockout assistance', basePrice: 70, estimatedTime: 30 },
   fuel_delivery: { id: 'fuel_delivery', name: 'Fuel delivery', description: 'Emergency fuel delivery', basePrice: 75, estimatedTime: 35 },
   ev_charging: { id: 'ev_charging', name: 'EV charging', description: 'Mobile emergency EV charge', basePrice: 95, estimatedTime: 45 },
   oil_change: { id: 'oil_change', name: 'Oil change', description: 'Mobile oil change', basePrice: 90, estimatedTime: 45 },
-  detailing: { id: 'detailing', name: 'Detailing', description: 'Mobile vehicle detailing', basePrice: 150, estimatedTime: 120 },
-  window_tinting: { id: 'window_tinting', name: 'Window tinting', description: 'Professional mobile tinting', basePrice: 250, estimatedTime: 180 },
+  // Scheduled appointment services — not offered at launch (on-demand roadside only).
+  detailing: { id: 'detailing', name: 'Detailing', description: 'Mobile vehicle detailing', basePrice: 150, estimatedTime: 120, available: false },
+  window_tinting: { id: 'window_tinting', name: 'Window tinting', description: 'Professional mobile tinting', basePrice: 250, estimatedTime: 180, available: false },
 });
+const publicService = (service) => ({ available: true, requiresDropoff: false, ...service });
+const cleanLocation = (location) => ({ address: location.address.trim().slice(0, 300), lat: location.lat, lng: location.lng });
 
 const DRIVER_TRANSITIONS = Object.freeze({
   en_route: ['accepted'], arrived: ['en_route'], in_progress: ['arrived'], completed: ['in_progress'], cancelled: ['accepted', 'en_route'],
@@ -83,7 +86,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
 
   app.use(express.json({ limit: '1mb' }));
   app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-  app.get('/api/services', (_req, res) => res.json(Object.values(SERVICE_CATALOG)));
+  app.get('/api/services', (_req, res) => res.json(Object.values(SERVICE_CATALOG).map(publicService)));
 
   async function authenticate(req, res, next) {
     const header = req.get('authorization') || '';
@@ -177,15 +180,17 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     try {
       const service = SERVICE_CATALOG[req.body.serviceType];
       if (!service) return res.status(400).json({ error: 'Unsupported service type' });
+      if (service.available === false) return res.status(409).json({ error: `${service.name} is not available yet` });
       if (!validLocation(req.body.location)) return res.status(400).json({ error: 'A valid service location is required' });
       if (req.body.dropoffLocation && !validLocation(req.body.dropoffLocation)) return res.status(400).json({ error: 'Drop-off location is invalid' });
       if (req.body.vehicleId && !await repository.getVehicle(req.auth.identity.id, req.body.vehicleId)) {
         return res.status(400).json({ error: 'Vehicle is not available for this customer' });
       }
+      if (service.requiresDropoff && !req.body.dropoffLocation) return res.status(400).json({ error: 'A drop-off location is required for towing' });
       const booking = await repository.createBooking({
         customerId: req.auth.identity.id, vehicleId: req.body.vehicleId || null, service,
-        location: { address: req.body.location.address.trim().slice(0, 300), lat: req.body.location.lat, lng: req.body.location.lng },
-        dropoffLocation: req.body.dropoffLocation || null, estimatedPrice: service.basePrice,
+        location: cleanLocation(req.body.location),
+        dropoffLocation: req.body.dropoffLocation ? cleanLocation(req.body.dropoffLocation) : null, estimatedPrice: service.basePrice,
         notes: typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 1000) : null,
       });
       res.status(201).json(booking);

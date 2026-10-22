@@ -40,6 +40,8 @@ export interface ServiceFormData {
   problemDescription: string
   vehicleType: 'sedan' | 'suv' | 'truck' | 'van' | 'motorcycle' | null
   photoUrl?: string
+  /** Tow destination chosen from address search (real coordinates). */
+  dropoff?: { address: string; lat: number; lng: number } | null
 }
 
 export interface TowingFormData {
@@ -122,10 +124,6 @@ interface AppState {
   removeVehicle: (id: string) => void
   setActiveVehicle: (id: string) => void
   setVehicles: (vehicles: UserVehicle[]) => void
-  
-  // User & Location (legacy)
-  userLocation: { lat: number; lng: number }
-  setUserLocation: (location: { lat: number; lng: number }) => void
   
   // Confirmed Location (for bookings)
   userLocationLabel: string              // Human-readable address or "Current location (GPS)"
@@ -371,10 +369,6 @@ export const useAppStore = create<AppState>()(
           : vehicles[0]?.id ?? null,
       })),
       
-      // User & Location (legacy)
-      userLocation: { lat: 32.7767, lng: -96.7970 },
-      setUserLocation: (location) => set({ userLocation: location }),
-      
       // Confirmed Location (for bookings)
       userLocationLabel: '',
       userCoords: null,
@@ -416,30 +410,20 @@ export const useAppStore = create<AppState>()(
           b.id === id ? { ...b, ...updates } : b
         )
       })),
+      // "Request again" reopens the request sheet prefilled with the same service (and tow
+      // destination); the customer confirms, and the server creates a real booking.
       rebookFromHistory: (bookingId) => set((state) => {
         const oldBooking = state.bookingHistory.find(b => b.id === bookingId)
         if (!oldBooking) return state
-        
-        // Create new booking based on old one, resetting provider-related fields
-        const newBooking: Booking = {
-          ...oldBooking,
-          id: crypto.randomUUID(),
-          createdAt: new Date(),
-          status: 'searching',
-          // Clear provider-related fields
-          mechanic: undefined,
-          driverId: undefined,
-          estimatedArrival: undefined,
-          driverLocation: undefined,
-          acceptedAt: undefined,
-          completedAt: undefined,
-          finalPrice: undefined,
-          payment: undefined,
-        }
-        
+        const dropoff = oldBooking.dropoffLocation
         return {
-          activeBooking: newBooking,
-          bookingHistory: [newBooking, ...state.bookingHistory],
+          serviceFormData: {
+            ...initialServiceFormData,
+            selectedService: oldBooking.service.id,
+            dropoff: dropoff && dropoff.address ? { address: dropoff.address, lat: dropoff.lat, lng: dropoff.lng } : null,
+          },
+          activeModal: 'services',
+          modalStep: 1,
         }
       }),
       matchProviderForBooking: (bookingId) => set((state) => {

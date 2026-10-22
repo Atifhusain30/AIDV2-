@@ -103,6 +103,50 @@ test('booking price is server-owned and customer identity comes from the token',
   assert.equal(response.body.service.id, 'battery_jump');
 });
 
+test('service catalog marks which services can be requested now', async () => {
+  const { app } = buildHarness();
+  const response = await request(app).get('/api/services');
+  assert.equal(response.status, 200);
+  const byId = Object.fromEntries(response.body.map((service) => [service.id, service]));
+  assert.equal(byId.battery_jump.available, true);
+  assert.equal(byId.towing.requiresDropoff, true);
+  assert.equal(byId.detailing.available, false);
+  assert.equal(byId.window_tinting.available, false);
+});
+
+test('services that are not offered yet cannot be booked', async () => {
+  const { app } = buildHarness();
+  const response = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer customerToken')
+    .send({ serviceType: 'detailing', location: { address: '100 Main St', lat: 32.77, lng: -96.79 } });
+  assert.equal(response.status, 409);
+  assert.match(response.body.error, /not available yet/i);
+});
+
+test('towing requires a drop-off location and stores it cleaned', async () => {
+  const { app } = buildHarness();
+  const missing = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer customerToken')
+    .send({ serviceType: 'towing', location: { address: '100 Main St', lat: 32.77, lng: -96.79 } });
+  assert.equal(missing.status, 400);
+  assert.match(missing.body.error, /drop-off/i);
+
+  const ok = await request(app)
+    .post('/api/bookings')
+    .set('Authorization', 'Bearer customerToken')
+    .send({
+      serviceType: 'towing',
+      location: { address: '100 Main St', lat: 32.77, lng: -96.79 },
+      dropoffLocation: { address: `  Joe's Garage ${'x'.repeat(400)}`, lat: 32.8, lng: -96.81, extra: 'ignored' },
+    });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.body.dropoffLocation.address.length, 300);
+  assert.ok(ok.body.dropoffLocation.address.startsWith("Joe's Garage"));
+  assert.equal(ok.body.dropoffLocation.extra, undefined);
+});
+
 test('booking cannot reference a vehicle owned by another customer', async () => {
   const { app } = buildHarness();
   const response = await request(app)
@@ -163,7 +207,7 @@ test('booking acceptance is atomic', async () => {
   const created = await request(app)
     .post('/api/bookings')
     .set('Authorization', 'Bearer customerToken')
-    .send({ serviceType: 'towing', location: { address: '100 Main St', lat: 32.77, lng: -96.79 } });
+    .send({ serviceType: 'towing', location: { address: '100 Main St', lat: 32.77, lng: -96.79 }, dropoffLocation: { address: '200 Garage Rd', lat: 32.8, lng: -96.8 } });
 
   const first = await request(app)
     .post(`/api/bookings/${created.body.id}/accept`)

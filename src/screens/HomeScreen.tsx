@@ -21,29 +21,18 @@ import {
   Zap,
 } from 'lucide-react'
 import AidBrand from '../components/brand/AidBrand'
-import { useAppStore, type ModalType } from '../store/useAppStore'
+import { useAppStore } from '../store/useAppStore'
 import type { ServiceType } from '../types'
-import {
-  DetailingModal,
-  EVChargingModal,
-  HistoryModal,
-  ServicesModal,
-  TowingModal,
-  WindowTintingModal,
-} from '../components/modals'
+import { HistoryModal } from '../components/modals'
+import RequestSheet from '../components/request/RequestSheet'
 
-const services: Array<{
-  label: string
-  icon: typeof Battery
-  service: ServiceType
-  modal: ModalType
-}> = [
-  { label: "Won't start", icon: Battery, service: 'battery_jump', modal: 'services' },
-  { label: 'Flat tire', icon: CircleDot, service: 'flat_tire', modal: 'services' },
-  { label: 'Tow', icon: Truck, service: 'towing', modal: 'towing' },
-  { label: 'Locked out', icon: KeyRound, service: 'lockout', modal: 'services' },
-  { label: 'Fuel', icon: Fuel, service: 'fuel_delivery', modal: 'services' },
-  { label: 'EV charge', icon: Zap, service: 'ev_charging', modal: 'ev_charging' },
+const services: Array<{ label: string; icon: typeof Battery; service: ServiceType }> = [
+  { label: "Won't start", icon: Battery, service: 'battery_jump' },
+  { label: 'Flat tire', icon: CircleDot, service: 'flat_tire' },
+  { label: 'Tow', icon: Truck, service: 'towing' },
+  { label: 'Locked out', icon: KeyRound, service: 'lockout' },
+  { label: 'Fuel', icon: Fuel, service: 'fuel_delivery' },
+  { label: 'EV charge', icon: Zap, service: 'ev_charging' },
 ]
 
 const bookingStatus: Record<string, string> = {
@@ -67,15 +56,18 @@ export default function HomeScreen() {
     setCurrentScreen,
     setActiveModal,
     setServiceFormData,
+    resetServiceFormData,
     rebookFromHistory,
   } = useAppStore()
 
   const activeVehicle = vehicles.find((vehicle) => vehicle.id === activeVehicleId) ?? vehicles[0]
   const recentBooking = bookingHistory.find((booking) => booking.status === 'completed')
 
-  const startService = (service: ServiceType, modal: ModalType) => {
+  // Every on-demand service uses the same request sheet.
+  const startService = (service: ServiceType | null) => {
+    resetServiceFormData()
     setServiceFormData({ selectedService: service })
-    setActiveModal(modal)
+    setActiveModal('services')
   }
 
   return (
@@ -120,14 +112,14 @@ export default function HomeScreen() {
 
         <section className="service-launcher" aria-label="Roadside services">
           <div className="service-shortcuts">
-            {services.map(({ label, icon: Icon, service, modal }) => (
-              <button key={service} type="button" aria-label={label === 'Tow' ? 'Need a tow' : label} onClick={() => startService(service, modal)}>
+            {services.map(({ label, icon: Icon, service }) => (
+              <button key={service} type="button" aria-label={label === 'Tow' ? 'Need a tow' : label} onClick={() => startService(service)}>
                 <span><Icon size={23} strokeWidth={1.8} /></span>
                 <strong>{label}</strong>
               </button>
             ))}
           </div>
-          <button type="button" className="guided-help" onClick={() => setActiveModal('services')}>
+          <button type="button" className="guided-help" onClick={() => startService(null)}>
             <span className="guided-help__icon"><Wrench size={20} /></span>
             <span><strong>Not sure what you need?</strong><small>Tell us what happened</small></span>
             <ArrowRight size={19} />
@@ -164,22 +156,18 @@ export default function HomeScreen() {
         )}
 
         <section className="consumer-section" aria-labelledby="care-title">
-          <div className="consumer-section__heading"><h2 id="care-title">Vehicle care</h2><span>Book ahead</span></div>
+          <div className="consumer-section__heading"><h2 id="care-title">Vehicle care</h2></div>
           <div className="care-row">
-            <button type="button" onClick={() => startService('oil_change', 'services')}><span><Car size={20} /></span><strong>Oil change</strong><small>At your location</small></button>
-            <button type="button" onClick={() => setActiveModal('detailing')}><span><Sparkles size={20} /></span><strong>Detailing</strong><small>Inside & out</small></button>
-            <button type="button" onClick={() => setActiveModal('window_tinting')}><span><Sun size={20} /></span><strong>Window tint</strong><small>UV protection</small></button>
+            <button type="button" onClick={() => startService('oil_change')}><span><Car size={20} /></span><strong>Oil change</strong><small>At your location</small></button>
+            <button type="button" className="is-soon" disabled aria-label="Detailing, coming soon"><span><Sparkles size={20} /></span><strong>Detailing</strong><small>Coming soon</small></button>
+            <button type="button" className="is-soon" disabled aria-label="Window tint, coming soon"><span><Sun size={20} /></span><strong>Window tint</strong><small>Coming soon</small></button>
           </div>
         </section>
 
         <div className="consumer-safety"><ShieldCheck size={18} /><span><strong>Help is available 24/7</strong><small>If you’re in immediate danger, call 911.</small></span></div>
       </main>
 
-      <ServicesModal />
-      <TowingModal />
-      <EVChargingModal />
-      <DetailingModal />
-      <WindowTintingModal />
+      <RequestSheet />
       <HistoryModal />
     </div>
   )

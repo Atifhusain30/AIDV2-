@@ -1,4 +1,4 @@
-import type { Booking, ServiceRequest, Location, ApiResponse, ServiceType, VerificationStatus } from '../types'
+import type { Booking, ServiceRequest, Location, ApiResponse, Service, ServiceType, VerificationStatus } from '../types'
 import type { UserVehicle } from '../store/useAppStore'
 import { supabase, managedAuth } from '../auth/supabase'
 
@@ -88,6 +88,16 @@ export async function deleteVehicle(id: string): Promise<ApiResponse<void>> {
   return apiFetch(`/vehicles/${id}`, { method: 'DELETE' })
 }
 
+/** Server-owned service catalog: the price shown is the price charged. */
+export interface ServiceOption extends Service {
+  available: boolean
+  requiresDropoff: boolean
+}
+
+export async function listServices(): Promise<ApiResponse<ServiceOption[]>> {
+  return apiFetch('/services')
+}
+
 export interface CreateBookingPayload {
   serviceType: Booking['service']['id']
   vehicleId?: string | null
@@ -171,7 +181,7 @@ export function getAuthState() { return { isAuthenticated: false, user: null, to
 export const apiService = {
   customerLogin, customerRegister, driverLogin, driverRegister, logout, getAuthState,
   getProfile, updateProfile, deleteAccount, listVehicles, createVehicle, updateVehicle, deleteVehicle,
-  createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
+  listServices, createBooking, listBookings, getBooking, updateBookingStatus, getActiveBooking, getDriverActiveBooking,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, createPaymentIntent,
 }
 
