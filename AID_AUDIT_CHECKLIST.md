@@ -23,9 +23,9 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 |---|---|---|
 | 1.1 | Driver onboarding: collect all 4 docs with expiration dates, call submit, show review status/reasons (`DriverOnboardingScreen`, `services/documents.ts`) | ✅ `04ba223` |
 | 1.1b | Admin review panel (separate site, `admin/`): queue, search, document review with reasons, verify/suspend/reinstate, history | ✅ `704eb9c`, redesigned `7e3bb83` |
-| 1.2 | Towing & EV use a hard-coded Dallas location; drop-off coordinates never set (`TowingModal`, `EVChargingModal`, `useAppStore` `userLocation`) | ❌ |
-| 1.3 | Detailing & Window Tint show "Booked!" without creating a booking | ❌ wire to API or mark "Coming soon" |
-| 1.4 | "Request again"/Rebook creates a local-only phantom booking (`rebookFromHistory`) | ❌ |
+| 1.2 | Towing & EV use a hard-coded Dallas location; drop-off coordinates never set | ✅ `bbf9c8c` one RequestSheet, confirmed location, tow drop-off from address search, server requires drop-off |
+| 1.3 | Detailing & Window Tint show "Booked!" without creating a booking | ✅ `bbf9c8c` "Coming soon"; server rejects (409) |
+| 1.4 | "Request again"/Rebook creates a local-only phantom booking (`rebookFromHistory`) | ✅ `bbf9c8c` reopens sheet prefilled; server creates booking |
 | 1.5 | After acceptance customer gets no driver name/phone/vehicle/live location; driver sees "Customer" with no contact, notes or tow destination | ❌ |
 | 1.6 | Driver app never captures/uploads GPS during a job (`watchLocation` never called) | ❌ |
 | 1.7 | Release builds silently default API to `127.0.0.1`; Android CORS origin `https://localhost` missing | ❌ |
@@ -58,7 +58,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 3.4 | Push notifications (APNs/FCM) for request accepted, arriving, completed, new job for drivers | ❌ |
 | 3.5 | Lifecycle buttons only in allowed states (customer cancel after en route; driver cancel after arrival) | ⚠️ |
 | 3.6 | Payment status re-read after paying; receipt shows real price (no invented distance/surge split) | ⚠️ |
-| 3.7 | Prices shown come from the server catalog (`GET /api/services`), not local/random estimates | ❌ |
+| 3.7 | Prices shown come from the server catalog (`GET /api/services`), not local/random estimates | ✅ `bbf9c8c` request flow; receipts still pending (3.6) |
 
 ## Phase 4 — UI/UX polish (Uber/DoorDash benchmark)
 | # | Item | Status |

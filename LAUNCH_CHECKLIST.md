@@ -29,9 +29,9 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | B2 | In-app account deletion (store requirement) | 🛠 | ✅ |
 | B3 | Driver onboarding: 4 documents + expiry, submit for review | 🛠 | ✅ |
 | B4 | Admin panel: review, approve/reject, verify/suspend, history | 🛠 | ✅ |
-| B5 | Request flow: real GPS location, tow drop-off address, real server prices | 🛠 | ⬜ **next** |
-| B6 | Detailing / Window Tint: "Coming soon" or real scheduling | 🤝 | ⬜ decision |
-| B7 | "Request again" creates a real booking | 🛠 | ⬜ |
+| B5 | Request flow: real GPS location, tow drop-off address, real server prices | 🛠 | ✅ |
+| B6 | Detailing / Window Tint: "Coming soon" or real scheduling | 🤝 | ✅ Coming soon (revisit after launch) |
+| B7 | "Request again" creates a real booking | 🛠 | ✅ |
 | B8 | Driver sees nearby requests, accepts (no double-booking) | 🛠 | 🟡 backend ✅, UI polish |
 | B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | ⬜ |
 | B10 | Job lifecycle: en route → arrived → in progress → completed; cancel rules | 🛠 | 🟡 |
