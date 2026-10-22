@@ -214,6 +214,21 @@ test('verified drivers with lapsed credentials cannot go online or receive jobs'
   assert.equal((await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer driver').send({ isOnline: true })).status, 403);
 });
 
+test('revoking an approved document from a verified driver takes them off the road', async () => {
+  const { app, profiles, events } = harness();
+  const ids = await uploadAll(app);
+  for (const id of Object.values(ids)) await admin(app, 'post', `/api/admin/documents/${id}/review`).send({ decision: 'approve' });
+  assert.equal((await admin(app, 'post', '/api/admin/drivers/driver-1/decision').send({ decision: 'verify' })).status, 200);
+  profiles['driver-1'].isOnline = true;
+
+  const revoke = await admin(app, 'post', `/api/admin/documents/${ids.insurance}/review`).send({ decision: 'reject', notes: 'Policy was cancelled' });
+  assert.equal(revoke.status, 200);
+  assert.equal(profiles['driver-1'].verificationStatus, 'rejected');
+  assert.equal(profiles['driver-1'].isOnline, false);
+  assert.equal(events.at(-1).action, 'rejected');
+  assert.equal((await request(app).patch('/api/drivers/me/online').set('Authorization', 'Bearer driver').send({ isOnline: true })).status, 403);
+});
+
 test('a driver whose credentials lapsed or who was suspended can still go offline', async () => {
   const { app, profiles } = harness();
   Object.assign(profiles['driver-1'], { verificationStatus: 'verified', credentialsValidUntil: PAST, isOnline: true });

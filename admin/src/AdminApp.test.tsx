@@ -23,6 +23,8 @@ const summary: DriverSummary = {
   verificationStatus: 'under_review', submittedAt: '2026-10-21T10:00:00Z', reviewedAt: null, credentialsValidUntil: null,
   isOnline: false, pendingDocuments: 4, createdAt: '2026-10-20T10:00:00Z',
 }
+const second: DriverSummary = { ...summary, id: 'driver-2', firstName: 'Sam', lastName: 'Second', email: 'sam@aid.test', submittedAt: '2026-10-21T11:00:00Z' }
+const verifiedSummary: DriverSummary = { ...summary, id: 'driver-3', firstName: 'Vera', lastName: 'Verified', email: 'vera@aid.test', verificationStatus: 'verified', pendingDocuments: 0, credentialsValidUntil: '2099-01-01' }
 const ALL = ['drivers_license', 'identification', 'insurance', 'vehicle_registration'] as const
 
 function detail(extra: Partial<DriverDetail> = {}, docStatus: 'pending' | 'approved' = 'pending'): DriverDetail {
@@ -43,7 +45,7 @@ function detail(extra: Partial<DriverDetail> = {}, docStatus: 'pending' | 'appro
 beforeEach(() => {
   vi.clearAllMocks()
   api.currentAdmin.mockResolvedValue(admin)
-  api.listDrivers.mockResolvedValue([summary])
+  api.listDrivers.mockImplementation(async (filter) => (filter === 'all' ? [summary, second, verifiedSummary] : filter === 'verified' ? [verifiedSummary] : [summary, second]))
   api.getDriver.mockResolvedValue(detail())
 })
 afterEach(() => cleanup())
@@ -66,34 +68,58 @@ describe('AID admin review', () => {
     expect(api.signIn).toHaveBeenCalledWith('driver@aid.test', 'secret-password')
   })
 
-  it('loads the needs-review queue and switches filters', async () => {
+  it('shows queue counts and switches filters', async () => {
     render(<AdminApp />)
     expect(await screen.findByRole('button', { name: /dana driver/i })).toBeTruthy()
     expect(api.listDrivers).toHaveBeenCalledWith('needs_review')
-    fireEvent.click(screen.getByRole('tab', { name: /verified/i }))
+    const needsReview = await screen.findByRole('tab', { name: /needs review/i })
+    await waitFor(() => expect(needsReview.textContent).toContain('2'))
+    fireEvent.click(screen.getByRole('tab', { name: /^verified/i }))
     await waitFor(() => expect(api.listDrivers).toHaveBeenCalledWith('verified'))
+    expect(await screen.findByRole('button', { name: /vera verified/i })).toBeTruthy()
   })
 
-  it('approves a document', async () => {
+  it('searches the queue by name or email', async () => {
+    render(<AdminApp />)
+    await screen.findByRole('button', { name: /dana driver/i })
+    fireEvent.change(screen.getByRole('searchbox', { name: /search drivers/i }), { target: { value: 'sam@' } })
+    expect(screen.queryByRole('button', { name: /dana driver/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /sam second/i })).toBeTruthy()
+  })
+
+  it('shows review progress and approves a document', async () => {
     const panel = await openDriver()
+    expect(within(panel).getByText(/0 of 4 approved/i)).toBeTruthy()
     const license = within(panel).getByRole('article', { name: /driver's license/i })
     fireEvent.click(within(license).getByRole('button', { name: /^approve$/i }))
     await waitFor(() => expect(api.reviewDocument).toHaveBeenCalledWith('drivers_license-doc', 'approve', undefined))
     await waitFor(() => expect(api.getDriver).toHaveBeenCalledTimes(2))
   })
 
-  it('requires a reason to reject a document', async () => {
+  it('requires a reason to reject a document and offers common reasons', async () => {
     const panel = await openDriver()
     const insurance = within(panel).getByRole('article', { name: /insurance/i })
     fireEvent.click(within(insurance).getByRole('button', { name: /^reject$/i }))
     const confirm = within(insurance).getByRole('button', { name: /confirm rejection/i }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
+    fireEvent.click(within(insurance).getByRole('button', { name: /business use/i }))
+    expect((within(insurance).getByLabelText(/reason/i) as HTMLTextAreaElement).value).toMatch(/business use/i)
     fireEvent.change(within(insurance).getByLabelText(/reason/i), { target: { value: 'Personal-use policy only' } })
     fireEvent.click(confirm)
     await waitFor(() => expect(api.reviewDocument).toHaveBeenCalledWith('insurance-doc', 'reject', 'Personal-use policy only'))
   })
 
-  it('blocks verification until every document is approved, then verifies', async () => {
+  it('opens a document preview larger', async () => {
+    const panel = await openDriver()
+    const license = within(panel).getByRole('article', { name: /driver's license/i })
+    fireEvent.click(within(license).getByRole('button', { name: /enlarge/i }))
+    const viewer = await screen.findByRole('dialog', { name: /driver's license/i })
+    expect(within(viewer).getByRole('img')).toBeTruthy()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('blocks verification until every document is approved, then verifies and confirms', async () => {
     const panel = await openDriver()
     expect((within(panel).getByRole('button', { name: /verify driver/i }) as HTMLButtonElement).disabled).toBe(true)
     expect(within(panel).getByText(/4 documents not yet approved/i)).toBeTruthy()
@@ -105,6 +131,7 @@ describe('AID admin review', () => {
     expect(verify.disabled).toBe(false)
     fireEvent.click(verify)
     await waitFor(() => expect(api.decide).toHaveBeenCalledWith('driver-1', 'verify', undefined))
+    expect((await screen.findByRole('status')).textContent).toMatch(/dana driver.*verified/i)
   })
 
   it('requires a reason to suspend a verified driver', async () => {
@@ -114,9 +141,10 @@ describe('AID admin review', () => {
     const panel = await openDriver()
     expect(within(panel).queryByRole('button', { name: /verify driver/i })).toBeNull()
     fireEvent.click(within(panel).getByRole('button', { name: /^suspend$/i }))
-    const confirm = within(panel).getByRole('button', { name: /confirm suspend/i }) as HTMLButtonElement
+    const dialog = await screen.findByRole('dialog', { name: /suspend/i })
+    const confirm = within(dialog).getByRole('button', { name: /confirm suspend/i }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
-    fireEvent.change(within(panel).getByLabelText(/reason/i), { target: { value: 'Customer safety complaint' } })
+    fireEvent.change(within(dialog).getByLabelText(/reason/i), { target: { value: 'Customer safety complaint' } })
     fireEvent.click(confirm)
     await waitFor(() => expect(api.decide).toHaveBeenCalledWith('driver-1', 'suspend', 'Customer safety complaint'))
   })
@@ -127,5 +155,13 @@ describe('AID admin review', () => {
     const panel = await openDriver()
     fireEvent.click(within(panel).getByRole('button', { name: /verify driver/i }))
     expect((await within(panel).findByRole('alert')).textContent).toMatch(/must be approved/)
+  })
+
+  it('moves on to the next driver and back to the queue', async () => {
+    const panel = await openDriver()
+    fireEvent.click(within(panel).getByRole('button', { name: /next driver/i }))
+    await waitFor(() => expect(api.getDriver).toHaveBeenLastCalledWith('driver-2'))
+    fireEvent.click(screen.getByRole('button', { name: /back to queue/i }))
+    expect(await screen.findByRole('button', { name: /dana driver/i })).toBeTruthy()
   })
 })

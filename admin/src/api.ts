@@ -44,7 +44,8 @@ async function currentAdmin(): Promise<AdminProfile | null> {
   if (!data.session) return null
   const profile = await call<AdminProfile & { role: string }>('/me')
   if (profile.role !== 'admin') {
-    await supabase().auth.signOut()
+    // Local scope: rejecting this tab must not sign the person out of the mobile app.
+    await supabase().auth.signOut({ scope: 'local' })
     const kind = profile.role === 'driver' || profile.role === 'customer' ? `a ${profile.role}` : 'not an admin'
     throw new Error(`This account does not have admin access (${profile.email} is ${kind} account). Sign in with an admin account.`)
   }
@@ -61,7 +62,7 @@ export const adminApi = {
     return profile
   },
   async signOut() {
-    await supabase().auth.signOut()
+    await supabase().auth.signOut({ scope: 'local' })
   },
   listDrivers: (filter: QueueFilter) => call<DriverSummary[]>(`/admin/drivers?status=${encodeURIComponent(filter)}`),
   getDriver: (driverId: string) => call<DriverDetail>(`/admin/drivers/${encodeURIComponent(driverId)}`),

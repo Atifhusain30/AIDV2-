@@ -32,7 +32,7 @@ export interface ManagedAuthClient {
       password: string
       options: { data: Record<string, unknown> }
     }): Promise<AuthResult>
-    signOut(): Promise<{ error: { message: string } | null }>
+    signOut(options?: { scope?: 'global' | 'local' | 'others' }): Promise<{ error: { message: string } | null }>
     getSession(): Promise<SessionResult>
     resetPasswordForEmail(email: string, options: { redirectTo: string }): Promise<{ error: { message: string } | null }>
     updateUser(input: { password: string }): Promise<{ error: { message: string } | null }>
@@ -95,6 +95,9 @@ function mapUser(user: ManagedUser, role: PortalRole): Customer | Driver {
   }
 }
 
+// Supabase signs out every device by default; leaving or rejecting one device must not end the others.
+const LOCAL_ONLY = { scope: 'local' } as const
+
 function unexpectedAuthError(error: unknown): string {
   // fetch() rejects with TypeError when the network is unreachable.
   if (error instanceof TypeError) return 'Unable to reach AID authentication. Check your connection and try again.'
@@ -119,12 +122,12 @@ export function createAuthService(client: ManagedAuthClient) {
 
       const accountRole = getManagedRole(data.user)
       if (!accountRole) {
-        await client.auth.signOut()
+        await client.auth.signOut(LOCAL_ONLY)
         return { success: false, error: 'This account does not have an AID customer or driver role.' }
       }
 
       if (accountRole !== requestedRole) {
-        await client.auth.signOut()
+        await client.auth.signOut(LOCAL_ONLY)
         return {
           success: false,
           error: accountRole === 'customer'
@@ -193,7 +196,7 @@ export function createAuthService(client: ManagedAuthClient) {
 
       const role = getManagedRole(data.session.user)
       if (!role) {
-        await client.auth.signOut()
+        await client.auth.signOut(LOCAL_ONLY)
         return { success: true, data: null }
       }
 
@@ -226,7 +229,8 @@ export function createAuthService(client: ManagedAuthClient) {
     try {
       const { error } = await client.auth.updateUser({ password })
       if (error) return { success: false, error: error.message }
-      await client.auth.signOut()
+      // A password change deliberately ends every session, including other devices.
+      await client.auth.signOut({ scope: 'global' })
       return { success: true, message: 'Your password has been updated.' }
     } catch {
       return { success: false, error: 'Unable to update your password. Check your connection and try again.' }
@@ -234,7 +238,7 @@ export function createAuthService(client: ManagedAuthClient) {
   }
 
   async function signOut(): Promise<void> {
-    await client.auth.signOut()
+    await client.auth.signOut(LOCAL_ONLY)
   }
 
   return { signIn, register, restore, requestPasswordReset, updatePassword, signOut }

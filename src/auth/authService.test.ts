@@ -60,7 +60,8 @@ describe('Supabase auth service', () => {
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('customer account')
-    expect(auth.signOut).toHaveBeenCalled()
+    // Only this device: the account may be signed in elsewhere (e.g. the customer app).
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
   })
 
   it('returns a verification notice when signup requires email confirmation', async () => {
@@ -133,7 +134,7 @@ describe('Supabase auth service', () => {
     const result = await service.updatePassword('new-secure-password')
 
     expect(auth.updateUser).toHaveBeenCalledWith({ password: 'new-secure-password' })
-    expect(auth.signOut).toHaveBeenCalled()
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: 'global' })
     expect(result).toEqual({ success: true, message: 'Your password has been updated.' })
   })
 

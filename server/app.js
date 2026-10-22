@@ -360,6 +360,17 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       const reviewed = await repository.reviewDriverDocument(document.id, req.auth.identity.id, {
         status: decision === 'approve' ? 'approved' : 'rejected', notes, expiresOn,
       });
+      // Rejecting a document of a verified driver (e.g. insurance cancelled) ends their eligibility
+      // immediately: they go offline and must fix the document and resubmit.
+      if (decision === 'reject') {
+        const detail = await repository.getDriverForReview(document.driverId);
+        if (detail?.driver.verificationStatus === 'verified') {
+          await repository.applyDriverDecision(document.driverId, req.auth.identity.id, {
+            fromStatuses: ['verified'], toStatus: 'rejected', event: 'rejected',
+            notes: `${notes} (document approval revoked)`,
+          });
+        }
+      }
       // An approved replacement (e.g. renewed insurance) extends an already-verified driver's eligibility.
       if (decision === 'approve') {
         const detail = await repository.getDriverForReview(document.driverId);
