@@ -42,6 +42,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 2.7 | Verification: atomic readiness check; rejecting an approved doc of a verified driver must suspend/recompute | ⚠️ revoke → offline fixed `7e3bb83`; atomic check open |
 | 2.7b | Drivers can always go offline (even after credentials lapse) | ✅ `04ba223`; still true with the D5 vehicle requirement — a driver with no/incomplete vehicle can go offline but not online (`eb21ba6`, tested) |
 | 2.7c | Sign-out and wrong-portal rejection affect only this device (password change still global) | ✅ `7e3bb83` |
+| 2.7d | Drivers can only see and accept jobs their equipment can do (no tows for light-duty vehicles; electric cars on flatbeds only) | ✅ `da1111a` — enforced on the server for both the request list and accept (also inside the accept update), tested for each equipment type and on the live database. Electric-car rule depends on customers marking the car electric, which no app screen does yet |
 | 2.8 | Account deletion: keep (anonymize) paid bookings for records; handle auth-delete failure; let suspended users delete; sweep storage prefix | ⚠️ |
 | 2.9 | Auth settings for production: email confirmation, secure password change, stronger password rules + leaked-password check | 🔒 Supabase dashboard |
 | 2.10 | Input validation gaps (UUID params, drop-off address length, lat/lng ranges); status route ignores credential expiry | ⚠️ |
