@@ -48,14 +48,14 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 2.8 | Account deletion: keep (anonymize) paid bookings for records; handle auth-delete failure; let suspended users delete; sweep storage prefix | ⚠️ |
 | 2.9 | Auth settings for production: email confirmation, secure password change, stronger password rules + leaked-password check | 🔒 Supabase dashboard |
 | 2.10 | Input validation gaps (UUID params, drop-off address length, lat/lng ranges); status route ignores credential expiry | ⚠️ |
-| 2.11 | Security headers, structured logging with redaction, booking status audit trail (`booking_events` unused) | ⚠️ audit trail done `26ceb6e` (every accept/status change/cancel reason/issue report written atomically to `booking_events`; job issue reports also land in `support_reports` since B18 `5f2f559`); security headers + structured logging open |
+| 2.11 | Security headers, structured logging with redaction, booking status audit trail (`booking_events` unused) | ⚠️ audit trail done `26ceb6e` (every accept/status change/cancel reason/issue report written atomically to `booking_events`; job issue reports also land in `support_reports` since B18 `5f2f559`; blocks are recorded as `user_blocked` since B12 `3eda4fa`); security headers + structured logging open |
 | 2.12 | Clear persisted data on logout (previous user's vehicles/history visible); mark driver offline on logout | ❌ |
 | 2.13 | Client routes by editable `user_metadata.role`; should use `/api/me` (admin sign-in shows blank screen) | ⚠️ |
 
 ## Phase 3 — Real-time experience
 | # | Item | Status |
 |---|---|---|
-| 3.1 | Real customer↔driver chat with report/block (currently simulated auto-replies) | ❌ no chat; reporting the other person is possible through Help & Support / Report an issue (B18 `5f2f559`), blocking is not |
+| 3.1 | Real customer↔driver chat with report/block (currently simulated auto-replies) | ✅ `3eda4fa` (B12) — real text chat between a job's customer and assigned driver from the tracking / job screen, unread count on the booking poll, sending / not sent + retry; server allows only the two participants, only while accepted → in service, read-only 24 h after the job ends then hidden from the apps (kept for admins), 1–1000 characters, 30/min per person, no phone/email/id in messages; report from chat opens the B18 form prefilled; block closes the chat and keeps the pair apart in the request list, accept and the database accept, never cancels the job; admins read a reported job's chat; `job_messages` / `user_blocks` RLS on, no client privileges. No unblock in the apps, no push for new messages (3.4) |
 | 3.2 | Call buttons (masked numbers or `tel:`) | ❌ console.log only |
 | 3.3 | Status updates everywhere (not only while Chat screen is open); driver job refresh when customer cancels | ✅ by polling — customer every 4 s on every screen (`4cfd340`), driver's active job every 5 s with a "customer cancelled" notice (`26ceb6e`); realtime channel/push still 3.4 |
 | 3.4 | Push notifications (APNs/FCM) for request accepted, arriving, completed, new job for drivers | ❌ |
@@ -74,7 +74,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 4.5 | Accessibility: dialog roles/focus trap/Escape, labelled icon buttons, 44 pt targets, text ≥ 12 px, contrast ≥ 4.5:1, allow pinch-zoom, reduced motion, remove confetti | ❌ |
 | 4.6 | Consistent terminology: "provider" (customer side) / "driver" (driver app) | ⚠️ |
 | 4.7 | Driver home: one clear "Finish verification" CTA, time-based greeting, working bell, service icons | ⚠️ time-based greeting done and the non-working bell removed (`57b303e`); service icons remain |
-| 4.8 | Chat/keyboard layout (`100dvh`, safe area), back navigation | ❌ |
+| 4.8 | Chat/keyboard layout (`100dvh`, safe area), back navigation | ⚠️ the new job chat (B12 `3eda4fa`) is full-screen at `100dvh` with safe-area padding, a composer that stays above the keyboard (Capacitor Keyboard resizes the body), 44 px+ targets, a back button and Escape to close; not yet checked on a real phone, and app-wide back navigation (Android back button) is still open |
 | 4.9 | Replace `window.alert` with inline errors/toasts; vehicle year validation | ❌ |
 | 4.10 | Remove dead code (~2,700 lines unused UI kit, ActiveServiceScreen, MapView, ~42 unused CSS classes); lazy-load maps/Stripe/driver app | ❌ ActiveServiceScreen, EmergencySOSModal and `.emergency-panel` CSS removed in `bd1c4d7`; MapView, TrackingMap, HistoryModal, chatService, mockData and the demo simulation in bookingService/ChatScreen removed in `57b303e` (~2,300 lines); unused `DriverAvatar`/`ProviderCard` (showed a rating without the minimum) removed in `9d8a63e`; rest of the unused UI kit, unused CSS and lazy-loading remain |
 
