@@ -48,20 +48,21 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | 2.8 | Account deletion: keep (anonymize) paid bookings for records; handle auth-delete failure; let suspended users delete; sweep storage prefix | ⚠️ |
 | 2.9 | Auth settings for production: email confirmation, secure password change, stronger password rules + leaked-password check | 🔒 Supabase dashboard |
 | 2.10 | Input validation gaps (UUID params, drop-off address length, lat/lng ranges); status route ignores credential expiry | ⚠️ |
-| 2.11 | Security headers, structured logging with redaction, booking status audit trail (`booking_events` unused) | ⚠️ audit trail done `26ceb6e` (every accept/status change/cancel reason/issue report written atomically to `booking_events`); security headers + structured logging open |
+| 2.11 | Security headers, structured logging with redaction, booking status audit trail (`booking_events` unused) | ⚠️ audit trail done `26ceb6e` (every accept/status change/cancel reason/issue report written atomically to `booking_events`; job issue reports also land in `support_reports` since B18 `5f2f559`); security headers + structured logging open |
 | 2.12 | Clear persisted data on logout (previous user's vehicles/history visible); mark driver offline on logout | ❌ |
 | 2.13 | Client routes by editable `user_metadata.role`; should use `/api/me` (admin sign-in shows blank screen) | ⚠️ |
 
 ## Phase 3 — Real-time experience
 | # | Item | Status |
 |---|---|---|
-| 3.1 | Real customer↔driver chat with report/block (currently simulated auto-replies) | ❌ |
+| 3.1 | Real customer↔driver chat with report/block (currently simulated auto-replies) | ❌ no chat; reporting the other person is possible through Help & Support / Report an issue (B18 `5f2f559`), blocking is not |
 | 3.2 | Call buttons (masked numbers or `tel:`) | ❌ console.log only |
 | 3.3 | Status updates everywhere (not only while Chat screen is open); driver job refresh when customer cancels | ✅ by polling — customer every 4 s on every screen (`4cfd340`), driver's active job every 5 s with a "customer cancelled" notice (`26ceb6e`); realtime channel/push still 3.4 |
 | 3.4 | Push notifications (APNs/FCM) for request accepted, arriving, completed, new job for drivers | ❌ |
 | 3.5 | Lifecycle buttons only in allowed states (customer cancel after en route; driver cancel after arrival) | ✅ `26ceb6e` — server state machine `server/lifecycle.js` + client mirror `src/lib/jobLifecycle.ts`; customer cancels until arrival, driver (with reason) until service starts, then report-an-issue only |
 | 3.6 | Payment status re-read after paying; receipt shows real price (no invented distance/surge split) | ⚠️ receipt now shows only the server's price (`57b303e`); payment status re-read still pending |
 | 3.7 | Prices shown come from the server catalog (`GET /api/services`), not local/random estimates | ✅ `bbf9c8c` request flow; receipts still pending (3.6) |
+| 3.8 | Help & Support screen + in-app issue reporting (job-linked and general) that an admin can actually read and resolve | ✅ `5f2f559` — Help & Support (FAQ, Report a problem, My reports) in both apps; job "Report an issue" uses the same flow; one `support_reports` table (RLS on, no client privileges, category list per role enforced by the database, message ≤ 2000) plus an append-only admin trail `support_report_events`; B10 job reports migrated in; API checks job participation and 10 reports/person/hour; admin Reports inbox with status/category filters, safety highlighted, linked job + both parties, status changes and internal notes. Reporter isn't notified of changes (needs push, 3.4); no admin alert on new reports |
 
 ## Phase 4 — UI/UX polish (Uber/DoorDash benchmark)
 | # | Item | Status |
@@ -81,7 +82,7 @@ Legend: ✅ done · ⚠️ partial · ❌ missing/broken · 🔒 needs owner act
 | # | Item | Status |
 |---|---|---|
 | 5.1 | **Emergency SOS is fake** ("Call 911" shows success without calling) — remove or make `tel:911` real; fix dead "Roadside support" buttons | ✅ `bd1c4d7` — fake SOS modal deleted; real Call 911 (`tel:911`, confirm step first) + Safety sheet ("AID is not an emergency service…") on customer tracking, driver job, customer Account, driver Settings and Home; dead "Roadside support" (Account) and "Support" (booking details) buttons removed; Report an issue labelled non-emergency. Tests guard against fake SOS text returning |
-| 5.2 | Privacy Policy, Terms, Support pages published + linked in app and at sign-up; web account-deletion URL (Play) | ❌ 🔒 |
+| 5.2 | Privacy Policy, Terms, Support pages published + linked in app and at sign-up; web account-deletion URL (Play) | ❌ 🔒 in-app Help & Support exists (B18 `5f2f559`), but the public Support web page (App Store support URL), Privacy Policy and Terms are not published yet; support email waits on A10 |
 | 5.3 | Real app icon + splash (both platforms use Capacitor defaults); Android monochrome icon | ❌ 🔒 design assets |
 | 5.4 | iOS permissions: remove "Always" location, Camera, Photo Library Add strings (unused) | ❌ |
 | 5.5 | iOS `PrivacyInfo.xcprivacy`, `ITSAppUsesNonExemptEncryption=false`, `arm64` capability, versions from build settings | ❌ |
