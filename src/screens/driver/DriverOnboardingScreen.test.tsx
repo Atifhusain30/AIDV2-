@@ -62,14 +62,14 @@ describe('driver verification onboarding', () => {
     const openVehicle = vi.fn()
     useAuthStore.setState({ user: { id: 'driver-1', role: 'driver', vehicle: null } as never })
     const { unmount } = render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={openVehicle} />)
-    const step = screen.getByRole('button', { name: 'Service vehicle: Needed' })
+    const step = screen.getByRole('button', { name: /Vehicle & equipment.*Needed/ })
     fireEvent.click(step)
     expect(openVehicle).toHaveBeenCalledTimes(1)
     unmount()
 
     useAuthStore.setState({ user: { id: 'driver-1', role: 'driver', vehicle: { make: 'Ford', model: 'F-550', year: 2021, color: 'White', plate: 'TOW-77', plateState: 'TX', equipmentType: 'wheel_lift' } } as never })
     render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'Service vehicle: Added' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Vehicle & equipment.*Added/ })).toBeTruthy()
     expect(screen.getByText('2021 White Ford F-550 · TOW-77 (TX) · Wheel-lift tow truck')).toBeTruthy()
   })
 
@@ -145,5 +145,21 @@ describe('driver verification onboarding', () => {
     render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
     expect(screen.getByRole('heading', { name: /you're verified/i })).toBeTruthy()
     expect(screen.getByText(/Jun 30, 2098/)).toBeTruthy()
+  })
+})
+
+describe('verification loading and error states (F5)', () => {
+  it('shows placeholders while the verification loads, then an error with Try again if it fails', async () => {
+    let finish: (value: null) => void = () => undefined
+    useDriverStore.setState({ verification: null, error: null, ...actions, fetchVerification: vi.fn(() => new Promise<null>((resolve) => { finish = resolve })) })
+    render(<DriverOnboardingScreen onComplete={vi.fn()} onOpenVehicle={vi.fn()} />)
+    expect(screen.getByRole('status', { name: 'Loading your verification' })).toBeTruthy()
+    useDriverStore.setState({ error: 'Unable to reach AID.' })
+    finish(null)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Couldn't load your verification.*Unable to reach AID/)
+    const retry = vi.fn(async () => { setVerification(verification()); return verification() })
+    useDriverStore.setState({ fetchVerification: retry })
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }))
+    expect(await screen.findByRole('heading', { name: 'Become a verified driver' })).toBeTruthy()
   })
 })

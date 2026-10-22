@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowRight, Briefcase, Clock3, LifeBuoy, MapPinned, ShieldCheck } from 'lucide-react'
+import DriverSettingsScreen from './screens/driver/DriverSettingsScreen'
 import { useAppStore } from './store/useAppStore'
 import { useAuthStore } from './store/useAuthStore'
 import { useDriverStore } from './store/useDriverStore'
@@ -18,14 +19,12 @@ import { initNotifications, registerNotificationTapHandler } from './lib/notific
 import { applyLeafletIconFix } from './lib/leafletFix'
 import { apiService } from './services/api'
 import { settleStaleActiveBooking } from './services/bookingService'
-import { driverVehicleSummary } from './lib/driverVehicle'
 import type { Booking, Driver } from './types'
 import { App as CapacitorApp } from '@capacitor/app'
 import { supabase } from './auth/supabase'
 import { installSessionWatch, signOut } from './auth/signOut'
 import { completeRecoveryFromUrl } from './auth/recovery'
 import PasswordRecoveryScreen from './components/auth/PasswordRecoveryScreen'
-import { SafetyMenuItem } from './components/safety/Safety'
 import RatingSheet from './components/rating/RatingSheet'
 import PendingRatingReminder from './components/rating/PendingRatingReminder'
 import { markRatingSkipped, type PendingRating } from './lib/ratings'
@@ -319,53 +318,15 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="driver-settings min-h-screen px-6 py-8 safe-top"
+          className="ui-screen driver-settings safe-top"
         >
-          <button
-            type="button"
-            onClick={() => setCurrentView('home')}
-            className="text-gray-400 mb-4 -ml-2 min-h-[44px] px-2"
-          >
-            <span aria-hidden="true">← </span>Back
-          </button>
-          <h1 className="text-2xl font-bold text-white mb-6">Settings</h1>
-          
-          <div className="space-y-4">
-            <button
-              onClick={() => setCurrentView('onboarding')}
-              className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
-            >
-              <span className="text-white">Documents</span>
-              <p className="text-gray-400 text-sm">Manage your verification documents</p>
-            </button>
-
-            <button
-              onClick={() => openVehicle('settings')}
-              className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
-            >
-              <span className="text-white">Vehicle & equipment</span>
-              <p className="text-gray-400 text-sm">{driverVehicleSummary((user as Driver | null)?.vehicle) || 'Add the vehicle customers will look for'}</p>
-            </button>
-            
-            <button
-              onClick={() => setCurrentView('help')}
-              className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-left"
-            >
-              <span className="text-white">Help &amp; Support</span>
-              <p className="text-gray-400 text-sm">Report a problem, your reports, common questions</p>
-            </button>
-
-            <div className="account-menu">
-              <SafetyMenuItem audience="driver" />
-            </div>
-
-            <button
-              onClick={onLogout}
-              className="w-full p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400"
-            >
-              Log Out
-            </button>
-          </div>
+          <DriverSettingsScreen
+            onBack={() => setCurrentView('home')}
+            onOpenDocuments={() => setCurrentView('onboarding')}
+            onOpenVehicle={() => openVehicle('settings')}
+            onOpenHelp={() => setCurrentView('help')}
+            onLogout={onLogout}
+          />
         </motion.main>
       )}
     </AnimatePresence>

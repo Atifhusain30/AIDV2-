@@ -2,17 +2,25 @@
  * Driver verification — individual providers upload four documents, submit
  * for review, and follow the admin decision. All rules are enforced by the
  * server (server/verification.js); this screen mirrors them for guidance.
+ * Design system: status card, documents and vehicle as one list with status chips, the upload in
+ * the one bottom-sheet style, Submit pinned in the thumb zone. F5: skeleton while loading, an
+ * error with Try again.
  */
 
-import { useEffect, useId, useState } from 'react'
-import { AlertCircle, ArrowLeft, Camera, CheckCircle2, ChevronRight, Clock3, FileText, Loader2, ShieldAlert, ShieldCheck, Truck, X } from 'lucide-react'
+import { useCallback, useEffect, useId, useState } from 'react'
+import { AlertCircle, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock3, FileText, Lock, ShieldAlert, ShieldCheck, Truck } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useDriverStore } from '../../store/useDriverStore'
 import { documentService, DOCUMENT_REQUIREMENTS, REQUIRED_DOCUMENT_TYPES } from '../../services/documents'
 import type { Driver, DriverDocument, DriverDocumentType, DriverVerification } from '../../types'
 import { driverVehicleSummary, equipmentLabel, vehicleComplete } from '../../lib/driverVehicle'
 import { formatCalendarDate } from '../../lib/dates'
-import Dialog from '../../components/ui/Dialog'
+import BottomSheet from '../../components/ui/BottomSheet'
+import Button from '../../components/ui/Button'
+import SectionHeader from '../../components/ui/SectionHeader'
+import { Skeleton, SkeletonRows } from '../../components/ui/Skeleton'
+import { ErrorState } from '../../components/ui/States'
+import StickyActionBar from '../../components/ui/StickyActionBar'
 
 interface DriverOnboardingScreenProps {
   onComplete: () => void
@@ -37,46 +45,31 @@ function documentState(document: DriverDocument | undefined, status: DriverVerif
 }
 
 function StatusHeader({ verification }: { verification: DriverVerification }) {
-  switch (verification.status) {
-    case 'under_review':
-      return (
-        <header className="verify-status is-progress">
-          <Clock3 size={22} aria-hidden="true" />
-          <div><h1>Your application is under review</h1><p>We review applications in the order received and will update this screen when a decision is made.</p></div>
-        </header>
-      )
-    case 'verified':
-      return (
-        <header className="verify-status is-success">
-          <ShieldCheck size={22} aria-hidden="true" />
-          <div>
-            <h1>You're verified</h1>
-            <p>{verification.credentialsValidUntil ? `Eligible to drive through ${formatDate(verification.credentialsValidUntil)}. Upload renewals before then to keep driving.` : 'Your documents are approved.'}</p>
-          </div>
-        </header>
-      )
-    case 'rejected':
-      return (
-        <header className="verify-status is-danger">
-          <AlertCircle size={22} aria-hidden="true" />
-          <div><h1>Changes needed</h1><p>{verification.reviewNotes || 'Some documents need to be replaced before we can approve you.'}</p></div>
-        </header>
-      )
-    case 'suspended':
-      return (
-        <header className="verify-status is-danger">
-          <ShieldAlert size={22} aria-hidden="true" />
-          <div><h1>Your account is suspended</h1><p>{verification.reviewNotes || 'Contact AID support for details.'}</p></div>
-        </header>
-      )
-    default:
-      return (
-        <header className="verify-status">
-          <ShieldCheck size={22} aria-hidden="true" />
-          <div><h1>Become a verified driver</h1><p>Upload the four documents below, then submit them for review. Customers only see verified drivers.</p></div>
-        </header>
-      )
-  }
+  const view = (() => {
+    switch (verification.status) {
+      case 'under_review':
+        return { tone: 'progress', Icon: Clock3, title: 'Your application is under review', text: 'We review applications in the order received and will update this screen when a decision is made.' }
+      case 'verified':
+        return {
+          tone: 'success', Icon: ShieldCheck, title: "You're verified",
+          text: verification.credentialsValidUntil ? `Eligible to drive through ${formatDate(verification.credentialsValidUntil)}. Upload renewals before then to keep driving.` : 'Your documents are approved.',
+        }
+      case 'rejected':
+        return { tone: 'danger', Icon: AlertCircle, title: 'Changes needed', text: verification.reviewNotes || 'Some documents need to be replaced before we can approve you.' }
+      case 'suspended':
+        return { tone: 'danger', Icon: ShieldAlert, title: 'Your account is suspended', text: verification.reviewNotes || 'Contact AID support for details.' }
+      default:
+        return { tone: 'neutral', Icon: ShieldCheck, title: 'Become a verified driver', text: 'Upload the four documents below, then submit them for review. Customers only see verified drivers.' }
+    }
+  })()
+  const { Icon } = view
+  return (
+    <header className={`verify-hero is-${view.tone}`}>
+      <span className="verify-hero__icon" aria-hidden="true"><Icon size={22} /></span>
+      <h1>{view.title}</h1>
+      <p>{view.text}</p>
+    </header>
+  )
 }
 
 function UploadSheet({ type, onClose }: { type: DriverDocumentType; onClose: () => void }) {
@@ -87,12 +80,6 @@ function UploadSheet({ type, onClose }: { type: DriverDocumentType; onClose: () 
   const [isUploading, setIsUploading] = useState(false)
   const titleId = useId()
   const dateId = useId()
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !isUploading) onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [isUploading, onClose])
 
   const choose = async (kind: 'photo' | 'pdf') => {
     setError(null)
@@ -114,33 +101,30 @@ function UploadSheet({ type, onClose }: { type: DriverDocumentType; onClose: () 
   }
 
   return (
-    <Dialog labelledBy={titleId} describedBy={`${titleId}-hint`} className="account-sheet verify-sheet" dismissible={!isUploading} onClose={onClose}>
-        <div className="account-sheet__header">
-          <div><small>UPLOAD DOCUMENT</small><h2 id={titleId}>{requirement.label}</h2></div>
-          <button type="button" aria-label="Close" disabled={isUploading} onClick={onClose}><X size={20} /></button>
-        </div>
-        <p id={`${titleId}-hint`} className="verify-sheet__hint">{requirement.hint}</p>
+    <BottomSheet title={requirement.label} titleId={titleId} subtitle={requirement.hint} className="verify-sheet" dismissible={!isUploading} onClose={onClose}
+      footer={(
+        <>
+          {error && <p role="alert" className="ui-alert ui-alert--danger"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}
+          <Button block size="lg" icon={<Camera size={18} aria-hidden="true" />} loading={isUploading} loadingLabel="Uploading…" onClick={() => void choose('photo')}>Choose photo</Button>
+          <Button variant="secondary" block icon={<FileText size={18} aria-hidden="true" />} disabled={isUploading} onClick={() => void choose('pdf')}>Choose PDF</Button>
+        </>
+      )}>
+      {requirement.requiresExpiration && (
+        <label className="ui-field" htmlFor={dateId}>
+          <span>Expiration date</span>
+          <input id={dateId} className="ui-input" type="date" min={tomorrowIso()} value={expiresOn} disabled={isUploading} onChange={(event) => setExpiresOn(event.target.value)} />
+        </label>
+      )}
+      <p className="verify-sheet__privacy"><Lock size={14} aria-hidden="true" /> Stored privately. Only the AID review team sees your documents.</p>
+    </BottomSheet>
+  )
+}
 
-        {requirement.requiresExpiration && (
-          <label className="verify-sheet__field" htmlFor={dateId}>
-            <span>Expiration date</span>
-            <input id={dateId} type="date" min={tomorrowIso()} value={expiresOn} disabled={isUploading} onChange={(event) => setExpiresOn(event.target.value)} />
-          </label>
-        )}
-
-        {error && <p role="alert" className="verify-sheet__error"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}
-
-        <div className="verify-sheet__actions">
-          <button type="button" className="aid-primary-button" disabled={isUploading} onClick={() => void choose('photo')}>
-            {isUploading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Camera size={18} aria-hidden="true" />}
-            {isUploading ? 'Uploading…' : 'Choose photo'}
-          </button>
-          <button type="button" className="verify-sheet__secondary" disabled={isUploading} onClick={() => void choose('pdf')}>
-            <FileText size={18} aria-hidden="true" /> Choose PDF
-          </button>
-        </div>
-        <p className="verify-sheet__privacy">Documents are stored privately and only seen by the AID review team.</p>
-    </Dialog>
+function DocIcon({ tone, Fallback }: { tone: ChipTone; Fallback: typeof FileText }) {
+  return (
+    <span className={`ui-row__icon verify-icon is-${tone}`} aria-hidden="true">
+      {tone === 'success' ? <CheckCircle2 size={20} /> : tone === 'danger' ? <AlertCircle size={20} /> : <Fallback size={20} />}
+    </span>
   )
 }
 
@@ -150,15 +134,30 @@ export default function DriverOnboardingScreen({ onComplete, onOpenVehicle }: Dr
   const [activeType, setActiveType] = useState<DriverDocumentType | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [load, setLoad] = useState<'loading' | 'error' | 'ready'>('loading')
 
-  useEffect(() => { void fetchVerification() }, [fetchVerification])
+  const reload = useCallback(async () => {
+    setLoad('loading')
+    setLoad((await fetchVerification()) ? 'ready' : 'error')
+  }, [fetchVerification])
+  useEffect(() => { void reload() }, [reload])
+
+  const back = <button type="button" className="ui-back" onClick={onComplete}><ChevronLeft size={22} aria-hidden="true" /> Back to work</button>
 
   if (!verification) {
     return (
-      <div className="driver-work verify safe-top safe-bottom">
-        <button type="button" className="verify__back" onClick={onComplete}><ArrowLeft size={18} aria-hidden="true" /> Back to work</button>
+      <div className="ui-screen driver-form safe-top">
+        {back}
         <h1 className="sr-only">Driver verification</h1>
-        <div className="driver-empty-state" role="status"><Loader2 size={25} className="animate-spin" aria-hidden="true" /><strong>Loading your verification</strong></div>
+        {load === 'error' ? (
+          <ErrorState title="Couldn't load your verification" body={useDriverStore.getState().error || 'Check your connection and try again.'} onRetry={() => void reload()} />
+        ) : (
+          <div className="verify-loading" role="status" aria-label="Loading your verification">
+            <Skeleton height={132} radius={16} />
+            <Skeleton width={120} height={16} />
+            <SkeletonRows count={4} label="Loading your documents" />
+          </div>
+        )}
       </div>
     )
   }
@@ -173,6 +172,7 @@ export default function DriverOnboardingScreen({ onComplete, onOpenVehicle }: Dr
   const latest = documentService.latestDocumentsByType(verification.documents)
   const { readiness } = verification
   const outstanding = readiness.missing.length + readiness.rejected.length + readiness.expired.length
+  const done = REQUIRED_DOCUMENT_TYPES.length - outstanding
   const canApply = verification.status === 'pending' || verification.status === 'rejected'
 
   const handleSubmit = async () => {
@@ -188,31 +188,32 @@ export default function DriverOnboardingScreen({ onComplete, onOpenVehicle }: Dr
   }
 
   return (
-    <div className="driver-work verify safe-top safe-bottom">
-      <button type="button" className="verify__back" onClick={onComplete}><ArrowLeft size={18} aria-hidden="true" /> Back to work</button>
-
+    <div className="ui-screen driver-form safe-top">
+      {back}
       <StatusHeader verification={verification} />
 
-      <section className="driver-section" aria-labelledby="documents-title">
-        <div className="driver-section__heading"><div><span>REQUIRED</span><h2 id="documents-title">Documents</h2></div></div>
-        <ul className="verify-list">
+      <section className="ui-section" aria-labelledby="documents-title">
+        <SectionHeader id="documents-title" title="Documents">
+          <span className="ui-chip" aria-label={`${Math.max(0, done)} of ${REQUIRED_DOCUMENT_TYPES.length} ready`}>{Math.max(0, done)} of {REQUIRED_DOCUMENT_TYPES.length}</span>
+        </SectionHeader>
+        <ul className="ui-list verify-docs">
           {REQUIRED_DOCUMENT_TYPES.map((type) => {
             const document = latest[type]
             const state = documentState(document, verification.status)
             const requirement = DOCUMENT_REQUIREMENTS[type]
             return (
               <li key={type}>
-                <button type="button" className="verify-item" onClick={() => setActiveType(type)} aria-label={`${requirement.label}: ${state.label}`}>
-                  <span className={`verify-item__icon is-${state.tone}`} aria-hidden="true">
-                    {state.tone === 'success' ? <CheckCircle2 size={20} /> : state.tone === 'danger' ? <AlertCircle size={20} /> : <FileText size={20} />}
-                  </span>
-                  <span className="verify-item__copy">
+                <button type="button" className="ui-row verify-row" onClick={() => setActiveType(type)} aria-haspopup="dialog">
+                  <DocIcon tone={state.tone} Fallback={FileText} />
+                  <span className="ui-row__text">
                     <strong>{requirement.label}</strong>
-                    <small>{document?.expiresOn ? `Expires ${formatDate(document.expiresOn)}` : document ? document.fileName : requirement.hint}</small>
+                    <small>
+                      <span className={`verify-state is-${state.tone}`}>{state.label}</span>
+                      {document?.expiresOn ? ` · Expires ${formatDate(document.expiresOn)}` : document ? ` · ${document.fileName}` : ''}
+                    </small>
                     {document?.status === 'rejected' && document.reviewNotes && <em>{document.reviewNotes}</em>}
                   </span>
-                  <span className={`verify-chip is-${state.tone}`}>{state.label}</span>
-                  <ChevronRight size={18} aria-hidden="true" />
+                  <ChevronRight className="ui-row__chevron" size={18} aria-hidden="true" />
                 </button>
               </li>
             )
@@ -220,29 +221,30 @@ export default function DriverOnboardingScreen({ onComplete, onOpenVehicle }: Dr
         </ul>
       </section>
 
-      <section className="driver-section" aria-labelledby="vehicle-title">
-        <div className="driver-section__heading"><div><span>REQUIRED TO GO ONLINE</span><h2 id="vehicle-title">Service vehicle</h2></div></div>
-        <button type="button" className="verify-item" onClick={onOpenVehicle} aria-label={`Service vehicle: ${vehicleState.label}`}>
-          <span className={`verify-item__icon is-${vehicleState.tone}`} aria-hidden="true">
-            {vehicleState.tone === 'success' ? <CheckCircle2 size={20} /> : <Truck size={20} />}
-          </span>
-          <span className="verify-item__copy">
-            <strong>Vehicle & equipment</strong>
-            <small>{vehicleSummary ? `${vehicleSummary}${equipment ? ` · ${equipment}` : ''}` : 'Make, model, year, color, plate and equipment'}</small>
-          </span>
-          <span className={`verify-chip is-${vehicleState.tone}`}>{vehicleState.label}</span>
-          <ChevronRight size={18} aria-hidden="true" />
-        </button>
+      <section className="ui-section" aria-labelledby="vehicle-title">
+        <SectionHeader id="vehicle-title" title="Service vehicle" />
+        <div className="ui-list">
+          <button type="button" className="ui-row verify-row" onClick={onOpenVehicle}>
+            <DocIcon tone={vehicleState.tone} Fallback={Truck} />
+            <span className="ui-row__text">
+              <strong>Vehicle &amp; equipment</strong>
+              <small>
+                <span className={`verify-state is-${vehicleState.tone}`}>{vehicleState.label}</span>
+                {' · '}<span>{vehicleSummary ? `${vehicleSummary}${equipment ? ` · ${equipment}` : ''}` : 'Required to go online'}</span>
+              </small>
+            </span>
+            <ChevronRight className="ui-row__chevron" size={18} aria-hidden="true" />
+          </button>
+        </div>
       </section>
 
       {canApply && (
-        <footer className="verify-footer">
-          <p>{readiness.canSubmit ? 'All documents uploaded. Submit when ready.' : `${outstanding} document${outstanding === 1 ? '' : 's'} still needed`}</p>
-          {submitError && <p role="alert" className="verify-sheet__error"><AlertCircle size={16} aria-hidden="true" /> {submitError}</p>}
-          <button type="button" className="aid-primary-button" disabled={!readiness.canSubmit || isSubmitting} onClick={() => void handleSubmit()}>
-            {isSubmitting ? 'Submitting…' : 'Submit for review'}
-          </button>
-        </footer>
+        <StickyActionBar hint={readiness.canSubmit ? 'All documents uploaded. Submit when ready.' : `${outstanding} document${outstanding === 1 ? '' : 's'} still needed`}>
+          {submitError && <p role="alert" className="ui-alert ui-alert--danger"><AlertCircle size={16} aria-hidden="true" /> {submitError}</p>}
+          <Button block size="lg" disabled={!readiness.canSubmit} loading={isSubmitting} loadingLabel="Submitting…" onClick={() => void handleSubmit()}>
+            Submit for review
+          </Button>
+        </StickyActionBar>
       )}
 
       {activeType && <UploadSheet type={activeType} onClose={() => setActiveType(null)} />}

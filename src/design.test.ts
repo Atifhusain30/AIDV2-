@@ -15,9 +15,7 @@ const css = { 'src/rebrand.css': read('src/rebrand.css'), 'src/index.css': read(
 const tsx = import.meta.glob(['./**/*.tsx', '!./**/*.test.tsx'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
 /** Screens not yet moved onto the design system. Shrinks to empty as each area is migrated. */
-const NOT_YET_MIGRATED: string[] = [
-  './App.tsx',
-]
+const NOT_YET_MIGRATED: string[] = []
 
 describe('one colour system (F2)', () => {
   it('no leftover lime / teal accents or glass utilities in the app stylesheets', () => {
