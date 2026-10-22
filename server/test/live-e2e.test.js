@@ -104,12 +104,27 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(accepted.location.address, '100 Main Street');
     assert.equal(accepted.dropoffLocation.address, '200 Main Street');
     assert.equal(accepted.notes, 'Private E2E gate instructions');
-    for (const status of ['en_route', 'arrived', 'in_progress', 'completed']) {
+    assert.ok(accepted.customer?.firstName !== undefined, 'driver sees the customer card after accepting');
+
+    const driverVehicleResponse = await api('/drivers/me/vehicle', driver.token, { method: 'PATCH', body: JSON.stringify({ make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'e2e-1' }) });
+    assert.equal(driverVehicleResponse.status, 200);
+    assert.equal((await api(`/bookings/${bookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status: 'en_route' }) })).status, 200);
+    const locationResponse = await api(`/bookings/${bookingId}/driver-location`, driver.token, { method: 'PATCH', body: JSON.stringify({ location: { lat: 32.79, lng: -96.81 } }) });
+    assert.equal(locationResponse.status, 200);
+    const tracking = await (await api('/bookings/active', customer.token)).json();
+    assert.equal(tracking.id, bookingId);
+    assert.deepEqual(tracking.driver.vehicle, { make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'E2E-1' });
+    assert.equal(tracking.driverLocation.lat, 32.79);
+    assert.ok(Date.now() - new Date(tracking.driverLocation.updatedAt).getTime() < 120000, 'location timestamp is fresh');
+
+    for (const status of ['arrived', 'in_progress', 'completed']) {
       const response = await api(`/bookings/${bookingId}/status`, driver.token, { method: 'PATCH', body: JSON.stringify({ status }) });
       assert.equal(response.status, 200, `transition to ${status}`);
     }
-    const customerBooking = await api(`/bookings/${bookingId}`, customer.token);
-    assert.equal((await customerBooking.json()).status, 'completed');
+    const customerBooking = await (await api(`/bookings/${bookingId}`, customer.token)).json();
+    assert.equal(customerBooking.status, 'completed');
+    assert.equal(customerBooking.driver.phone, undefined, 'driver phone is hidden after the job');
+    assert.equal(customerBooking.driverLocation, undefined, 'live location is hidden after the job');
 
     const form = new FormData();
     form.append('type', 'identification');

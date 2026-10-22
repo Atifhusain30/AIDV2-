@@ -21,6 +21,7 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | A9 | Pricing per service, platform fee/driver payout split, cancellation & refund policy | 👤 | 🟡 market prices live (tow $95 incl. 5 mi + $4.50/mi); payout split + cancellation policy open |
 | A10 | Domain name (e.g. aidroadside.com) + business email (support@, privacy@) | 👤 | 🟡 domain ✅; support email open |
 | A11 | Trademark search for "AID" name/logo | 👤 | ⬜ |
+| A12 | Twilio account (business) + A2P 10DLC texting registration (1–3 weeks) — for verification codes, update texts, private calling | 👤 | ⬜ |
 
 ## B. Core product (the app must really work end to end)
 | # | Item | Owner | Status |
@@ -33,11 +34,11 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | B6 | Detailing / Window Tint: "Coming soon" or real scheduling | 🤝 | ✅ Coming soon (revisit after launch) |
 | B7 | "Request again" creates a real booking | 🛠 | ✅ |
 | B8 | Driver sees nearby requests, accepts (no double-booking) | 🛠 | 🟡 backend ✅, UI polish |
-| B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | ⬜ **next** |
+| B9 | After accept: both sides see name/photo/vehicle, driver live location on map, ETA | 🛠 | 🟡 **next** — server ✅ (3a); driver GPS sharing (3b) + customer tracking (3c) in progress |
 | B10 | Job lifecycle: en route → arrived → in progress → completed; cancel rules | 🛠 | 🟡 |
 | B11 | Real-time status updates on every screen | 🛠 | ⬜ |
 | B12 | Real chat customer↔driver + report/block | 🛠 | ⬜ |
-| B13 | Calling (masked numbers e.g. Twilio, or direct tel:) | 🤝 | ⬜ |
+| B13 | Calling (masked numbers e.g. Twilio, or direct tel:) | 🤝 | ⬜ real numbers shared during a job for now; Twilio private numbers later |
 | B14 | Push notifications (accepted, arriving, completed, new job) | 🛠 | ⬜ needs A2 |
 | B15 | Ratings & reviews both directions | 🛠 | ⬜ |
 | B16 | Receipts + booking history with real amounts | 🛠 | 🟡 |
@@ -61,7 +62,7 @@ Updated 2026-10-21. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | D2 | Automatic block when license/insurance/registration expires | 🛠 | ✅ |
 | D3 | Identity + selfie check (Stripe Identity) | 🤝 | ⬜ |
 | D4 | Background + motor vehicle record check (Checkr) with FCRA consent | 🤝 | ⬜ |
-| D5 | Driver vehicle & equipment info (tow truck type, etc.) | 🛠 | ⬜ |
+| D5 | Driver vehicle & equipment info (tow truck type, etc.) | 🛠 | 🟡 vehicle make/model/color/plate saved on server; onboarding screen pending |
 | D6 | Incident reporting + deactivation process | 🤝 | ⬜ |
 
 ## E. Security & reliability

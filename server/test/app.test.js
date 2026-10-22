@@ -52,6 +52,14 @@ function buildHarness(stripe = null, accountAdmin = null) {
     async prepareAccountDeletion(userId) {
       return { userId, storagePaths: [] };
     },
+    async updateDriverVehicle(driverId, vehicle) {
+      this.savedDriverVehicle = { driverId, ...vehicle };
+      return vehicle;
+    },
+    async updateDriverLocation(bookingId, driverId, location) {
+      this.savedDriverLocation = { bookingId, driverId, location };
+      return { id: bookingId, driverId, status: 'en_route', driverLocation: location };
+    },
   };
 
   const auth = {
@@ -367,4 +375,25 @@ test('account deletion fails safely when identity deletion is unavailable', asyn
 
   assert.equal(response.status, 503);
   assert.equal(response.body.error, 'Account deletion is not configured');
+});
+
+test('drivers save their service vehicle with cleaned fields', async () => {
+  const { app, repository } = buildHarness();
+  const bad = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer driverToken').send({ make: '', model: 'F-550' });
+  assert.equal(bad.status, 400);
+  const ok = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer pendingDriverToken')
+    .send({ make: '  Ford ', model: 'F-550 Flatbed', color: 'White', plate: ' tow-77 ', extra: 'x' });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(repository.savedDriverVehicle, { driverId: 'driver-2', make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'TOW-77' });
+  const customer = await request(app).patch('/api/drivers/me/vehicle').set('Authorization', 'Bearer customerToken').send({ make: 'Ford', model: 'F-550' });
+  assert.equal(customer.status, 403);
+});
+
+test('driver location must be real coordinates', async () => {
+  const { app, repository } = buildHarness();
+  const bad = await request(app).patch('/api/bookings/booking-1/driver-location').set('Authorization', 'Bearer driverToken').send({ location: { lat: 200, lng: -97 } });
+  assert.equal(bad.status, 400);
+  const ok = await request(app).patch('/api/bookings/booking-1/driver-location').set('Authorization', 'Bearer driverToken').send({ location: { lat: 33.1, lng: -97.0, accuracy: 12 } });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(repository.savedDriverLocation.location, { lat: 33.1, lng: -97.0 });
 });

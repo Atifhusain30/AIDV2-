@@ -49,10 +49,13 @@ const DRIVER_TRANSITIONS = Object.freeze({
 });
 const CUSTOMER_TRANSITIONS = Object.freeze({ cancelled: ['pending', 'searching', 'accepted'] });
 
-function validLocation(location) {
-  return location && typeof location.address === 'string' && location.address.trim().length > 0 &&
-    Number.isFinite(location.lat) && location.lat >= -90 && location.lat <= 90 &&
+function validCoordinates(location) {
+  return Boolean(location) && Number.isFinite(location.lat) && location.lat >= -90 && location.lat <= 90 &&
     Number.isFinite(location.lng) && location.lng >= -180 && location.lng <= 180;
+}
+
+function validLocation(location) {
+  return validCoordinates(location) && typeof location.address === 'string' && location.address.trim().length > 0;
 }
 
 function validVehicle(input) {
@@ -268,10 +271,23 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   app.patch('/api/bookings/:bookingId/driver-location', authenticate, requireVerifiedDriver, async (req, res, next) => {
     try {
       const location = req.body.location;
-      if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return res.status(400).json({ error: 'Valid coordinates are required' });
-      const booking = await repository.updateDriverLocation(req.params.bookingId, req.auth.identity.id, location);
+      if (!validCoordinates(location)) return res.status(400).json({ error: 'Valid coordinates are required' });
+      const booking = await repository.updateDriverLocation(req.params.bookingId, req.auth.identity.id, { lat: location.lat, lng: location.lng });
       if (!booking) return res.status(404).json({ error: 'Active booking not found' });
       res.json(booking);
+    } catch (error) { next(error); }
+  });
+
+  // The vehicle customers should look for when the driver arrives.
+  app.patch('/api/drivers/me/vehicle', authenticate, requireRole('driver'), async (req, res, next) => {
+    try {
+      const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+      const vehicle = {
+        make: text(req.body.make, 40), model: text(req.body.model, 60),
+        color: text(req.body.color, 30), plate: text(req.body.plate, 12).toUpperCase(),
+      };
+      if (!vehicle.make || !vehicle.model) return res.status(400).json({ error: 'Vehicle make and model are required' });
+      res.json(await repository.updateDriverVehicle(req.auth.identity.id, vehicle));
     } catch (error) { next(error); }
   });
 

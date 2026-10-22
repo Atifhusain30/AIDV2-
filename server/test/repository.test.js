@@ -99,3 +99,84 @@ test('account deletion removes user-owned marketplace data in a transaction', as
   assert.match(queries.map((query) => query.text).join('\n'), /delete from public\.vehicles/i);
   assert.equal(queries.at(-1).text, 'commit');
 });
+
+const PARTY_ROW = {
+  id: 'booking-9', customer_id: 'customer-1', driver_id: 'driver-1', service_type: 'towing', service_name: 'Towing', status: 'en_route',
+  location_address: '500 Elm St', location_lat: 33.21, location_lng: -97.13,
+  dropoff_address: "Joe's Garage", dropoff_lat: 33.05, dropoff_lng: -96.99,
+  estimated_price_cents: 15215, payment_status: 'pending', notes: 'Hazards on', created_at: new Date('2026-01-01T00:00:00Z'),
+  vehicle_id: 'veh-1', vehicle_label: '2020 Honda Civic', vehicle_plate: 'ABC123', vehicle_color: 'Blue',
+  driver_lat: 33.1, driver_lng: -97.0, driver_location_at: new Date('2026-01-01T00:05:00Z'),
+  party_customer_first_name: 'Casey', party_customer_last_name: 'Customer', party_customer_phone: '555-0100',
+  party_driver_first_name: 'Marcus', party_driver_last_name: 'Thompson', party_driver_phone: '555-0199',
+  party_driver_rating: '4.90', party_driver_total_jobs: 212,
+  party_driver_vehicle_make: 'Ford', party_driver_vehicle_model: 'F-550 Flatbed', party_driver_vehicle_color: 'White', party_driver_vehicle_plate: 'TOW-77',
+};
+
+test('customer sees the assigned driver, their vehicle and live location during a job', async () => {
+  let sql = '';
+  const repository = new PostgresRepository(poolWith(async (text) => { sql = text; return { rows: [PARTY_ROW] }; }));
+  const booking = await repository.getBooking('booking-9', 'customer-1', 'customer');
+  assert.match(sql, /left join public\.profiles d on d\.id ?= ?b\.driver_id/i);
+  assert.deepEqual(booking.driver, {
+    id: 'driver-1', name: 'Marcus T.', firstName: 'Marcus', phone: '555-0199', rating: 4.9, totalJobs: 212,
+    vehicle: { make: 'Ford', model: 'F-550 Flatbed', color: 'White', plate: 'TOW-77' },
+  });
+  assert.deepEqual(booking.driverLocation, { lat: 33.1, lng: -97.0, updatedAt: '2026-01-01T00:05:00.000Z' });
+  assert.equal(booking.customer, undefined, 'customer does not need their own contact card');
+});
+
+test('driver sees the customer contact, notes, tow destination and plate during a job', async () => {
+  const repository = new PostgresRepository(poolWith(async () => ({ rows: [PARTY_ROW] })));
+  const booking = await repository.getActiveBooking('driver-1', 'driver');
+  assert.deepEqual(booking.customer, { name: 'Casey C.', firstName: 'Casey', phone: '555-0100' });
+  assert.equal(booking.notes, 'Hazards on');
+  assert.equal(booking.dropoffLocation.address, "Joe's Garage");
+  assert.equal(booking.vehicle.plate, 'ABC123');
+  assert.equal(booking.vehicle.color, 'Blue');
+  assert.equal(booking.driver, undefined);
+});
+
+test('phone numbers and live location are hidden once a job is over', async () => {
+  const repository = new PostgresRepository(poolWith(async () => ({ rows: [{ ...PARTY_ROW, status: 'completed' }] })));
+  const forCustomer = await repository.getBooking('booking-9', 'customer-1', 'customer');
+  assert.equal(forCustomer.driver.name, 'Marcus T.');
+  assert.equal(forCustomer.driver.phone, undefined);
+  assert.equal(forCustomer.driverLocation, undefined);
+  const forDriver = await repository.getBooking('booking-9', 'driver-1', 'driver');
+  assert.equal(forDriver.customer.phone, undefined);
+});
+
+test('no driver card is shown before a driver accepts', async () => {
+  const row = { ...PARTY_ROW, status: 'searching', driver_id: null, party_driver_first_name: null, party_driver_last_name: null, party_driver_phone: null, party_driver_rating: null, party_driver_total_jobs: null, party_driver_vehicle_make: null, driver_lat: null, driver_lng: null, driver_location_at: null };
+  const repository = new PostgresRepository(poolWith(async () => ({ rows: [row] })));
+  const booking = await repository.getBooking('booking-9', 'customer-1', 'customer');
+  assert.equal(booking.driver, undefined);
+  assert.equal(booking.driverLocation, undefined);
+});
+
+test('accepting and status changes return the booking with both parties', async () => {
+  const queries = [];
+  const repository = new PostgresRepository(poolWith(async (text) => { queries.push(text); return { rows: [PARTY_ROW] }; }));
+  const accepted = await repository.acceptBooking('booking-9', 'driver-1');
+  assert.equal(accepted.customer.phone, '555-0100');
+  const updated = await repository.updateBookingStatus('booking-9', 'customer-1', 'customer', 'cancelled', ['accepted']);
+  assert.equal(updated.driver.name, 'Marcus T.');
+});
+
+test('driver location updates record when the location was taken', async () => {
+  const queries = [];
+  const repository = new PostgresRepository(poolWith(async (text) => { queries.push(text); return { rows: [PARTY_ROW] }; }));
+  await repository.updateDriverLocation('booking-9', 'driver-1', { lat: 33.1, lng: -97.0 });
+  assert.match(queries.join('\n'), /driver_location_at\s*=\s*now\(\)/i);
+  assert.match(queries.join('\n'), /status\s*=\s*any/i);
+});
+
+test('drivers can save the vehicle customers should look for', async () => {
+  let captured;
+  const repository = new PostgresRepository(poolWith(async (text, values) => { captured = { text, values }; return { rows: [{ vehicle_make: 'Ford', vehicle_model: 'F-550', vehicle_color: 'White', vehicle_plate: 'TOW-77' }] }; }));
+  const vehicle = await repository.updateDriverVehicle('driver-1', { make: 'Ford', model: 'F-550', color: 'White', plate: 'TOW-77' });
+  assert.match(captured.text, /update public\.driver_profiles set vehicle_make/i);
+  assert.deepEqual(captured.values, ['driver-1', 'Ford', 'F-550', 'White', 'TOW-77']);
+  assert.deepEqual(vehicle, { make: 'Ford', model: 'F-550', color: 'White', plate: 'TOW-77' });
+});

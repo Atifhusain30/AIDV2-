@@ -28,6 +28,7 @@ function mapProfile(row) {
       rating: Number(row.rating || 0),
       totalJobs: row.total_jobs || 0,
       specializations: row.specializations || [],
+      driverVehicle: row.vehicle_make ? { make: row.vehicle_make, model: row.vehicle_model, color: row.vehicle_color, plate: row.vehicle_plate } : null,
     } : {}),
   };
 }
@@ -127,12 +128,62 @@ function mapBooking(row) {
   return booking;
 }
 
+// Contact details and live location are shared only while a job is in progress.
+const CONTACT_STATUSES = new Set(['accepted', 'en_route', 'arrived', 'in_progress']);
+const PARTY_SELECT = `
+  select b.*, concat_ws(' ', v.year, v.make, v.model) as vehicle_label, v.license_plate as vehicle_plate, v.color as vehicle_color,
+    c.first_name as party_customer_first_name, c.last_name as party_customer_last_name, c.phone as party_customer_phone,
+    d.first_name as party_driver_first_name, d.last_name as party_driver_last_name, d.phone as party_driver_phone,
+    dp.rating as party_driver_rating, dp.total_jobs as party_driver_total_jobs,
+    dp.vehicle_make as party_driver_vehicle_make, dp.vehicle_model as party_driver_vehicle_model,
+    dp.vehicle_color as party_driver_vehicle_color, dp.vehicle_plate as party_driver_vehicle_plate
+  from public.bookings b
+  left join public.vehicles v on v.id = b.vehicle_id
+  left join public.profiles c on c.id = b.customer_id
+  left join public.profiles d on d.id = b.driver_id
+  left join public.driver_profiles dp on dp.profile_id = b.driver_id`;
+
+const shortName = (first, last) => [first, last && last.trim() ? `${last.trim()[0].toUpperCase()}.` : ''].filter(Boolean).join(' ');
+
+function mapParticipantBooking(row, role) {
+  const booking = mapBooking(row);
+  if (!booking) return null;
+  const live = CONTACT_STATUSES.has(row.status);
+  if (booking.vehicle && row.vehicle_color) booking.vehicle.color = row.vehicle_color;
+  if (!live) delete booking.driverLocation;
+  else if (booking.driverLocation && row.driver_location_at) booking.driverLocation.updatedAt = new Date(row.driver_location_at).toISOString();
+
+  if ((role === 'customer' || role === 'admin') && row.driver_id && row.party_driver_first_name != null) {
+    booking.driver = {
+      id: row.driver_id,
+      name: shortName(row.party_driver_first_name, row.party_driver_last_name),
+      firstName: row.party_driver_first_name,
+      ...(live && row.party_driver_phone ? { phone: row.party_driver_phone } : {}),
+      rating: Number(row.party_driver_rating || 0),
+      totalJobs: row.party_driver_total_jobs || 0,
+      vehicle: row.party_driver_vehicle_make ? {
+        make: row.party_driver_vehicle_make, model: row.party_driver_vehicle_model,
+        color: row.party_driver_vehicle_color, plate: row.party_driver_vehicle_plate,
+      } : null,
+    };
+  }
+  if ((role === 'driver' || role === 'admin') && row.party_customer_first_name != null) {
+    booking.customer = {
+      name: shortName(row.party_customer_first_name, row.party_customer_last_name),
+      firstName: row.party_customer_first_name,
+      ...(live && row.party_customer_phone ? { phone: row.party_customer_phone } : {}),
+    };
+  }
+  return booking;
+}
+
 class PostgresRepository {
   constructor(pool) { this.pool = pool; }
 
   async getProfile(userId) {
     const result = await this.pool.query(`
-      select p.*, dp.verification_status, dp.credentials_valid_until, dp.is_online, dp.rating, dp.total_jobs, dp.specializations
+      select p.*, dp.verification_status, dp.credentials_valid_until, dp.is_online, dp.rating, dp.total_jobs, dp.specializations,
+        dp.vehicle_make, dp.vehicle_model, dp.vehicle_color, dp.vehicle_plate
       from public.profiles p left join public.driver_profiles dp on dp.profile_id = p.id
       where p.id = $1
     `, [userId]);
@@ -402,24 +453,25 @@ class PostgresRepository {
 
   async listBookings(userId, role) {
     const column = role === 'driver' ? 'b.driver_id' : 'b.customer_id';
-    const result = await this.pool.query(`
-      select b.*, concat_ws(' ', v.year, v.make, v.model) as vehicle_label, v.license_plate as vehicle_plate
-      from public.bookings b left join public.vehicles v on v.id=b.vehicle_id
-      where ${column}=$1 order by b.created_at desc limit 100
-    `, [userId]);
-    return result.rows.map(mapBooking);
+    const result = await this.pool.query(`${PARTY_SELECT} where ${column}=$1 order by b.created_at desc limit 100`, [userId]);
+    return result.rows.map((row) => mapParticipantBooking(row, role));
+  }
+
+  async selectParticipantBooking(bookingId, role) {
+    const result = await this.pool.query(`${PARTY_SELECT} where b.id=$1`, [bookingId]);
+    return mapParticipantBooking(result.rows[0], role);
   }
 
   async getBooking(bookingId, userId, role) {
     const condition = role === 'admin' ? 'true' : role === 'driver' ? 'b.driver_id=$2' : 'b.customer_id=$2';
-    const result = await this.pool.query(`select b.* from public.bookings b where b.id=$1 and ${condition}`, [bookingId, userId]);
-    return mapBooking(result.rows[0]);
+    const result = await this.pool.query(`${PARTY_SELECT} where b.id=$1 and ${condition}`, [bookingId, userId]);
+    return mapParticipantBooking(result.rows[0], role);
   }
 
   async getActiveBooking(userId, role) {
-    const column = role === 'driver' ? 'driver_id' : 'customer_id';
-    const result = await this.pool.query(`select * from public.bookings where ${column}=$1 and status=any($2::text[]) order by created_at desc limit 1`, [userId, ACTIVE_STATUSES]);
-    return mapBooking(result.rows[0]);
+    const column = role === 'driver' ? 'b.driver_id' : 'b.customer_id';
+    const result = await this.pool.query(`${PARTY_SELECT} where ${column}=$1 and b.status=any($2::text[]) order by b.created_at desc limit 1`, [userId, ACTIVE_STATUSES]);
+    return mapParticipantBooking(result.rows[0], role);
   }
 
   async listAvailableBookings() {
@@ -450,9 +502,9 @@ class PostgresRepository {
   async acceptBooking(bookingId, driverId) {
     const result = await this.pool.query(`
       update public.bookings set driver_id=$2, status='accepted', accepted_at=now()
-      where id=$1 and status = 'searching' and driver_id is null returning *
+      where id=$1 and status = 'searching' and driver_id is null returning id
     `, [bookingId, driverId]);
-    return mapBooking(result.rows[0]);
+    return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, 'driver') : null;
   }
 
   async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrentStatuses) {
@@ -463,9 +515,9 @@ class PostgresRepository {
         started_at=case when $3='in_progress' then now() else started_at end,
         completed_at=case when $3='completed' then now() else completed_at end,
         cancelled_at=case when $3='cancelled' then now() else cancelled_at end
-      where id=$1 and ${ownership} and status=any($4::text[]) returning *
+      where id=$1 and ${ownership} and status=any($4::text[]) returning id
     `, [bookingId, actorId, nextStatus, allowedCurrentStatuses]);
-    return mapBooking(result.rows[0]);
+    return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, role) : null;
   }
 
   async updateDriverOnlineStatus(driverId, isOnline) {
@@ -475,10 +527,21 @@ class PostgresRepository {
 
   async updateDriverLocation(bookingId, driverId, location) {
     const result = await this.pool.query(`
-      update public.bookings set driver_lat=$3, driver_lng=$4 where id=$1 and driver_id=$2 and status=any($5::text[]) returning *
-    `, [bookingId, driverId, location.lat, location.lng, ACTIVE_STATUSES]);
+      update public.bookings set driver_lat=$3, driver_lng=$4, driver_location_at = now()
+      where id=$1 and driver_id=$2 and status = any($5::text[]) returning id
+    `, [bookingId, driverId, location.lat, location.lng, [...CONTACT_STATUSES]]);
+    if (!result.rows[0]) return null;
     await this.pool.query('update public.driver_profiles set current_lat=$2, current_lng=$3 where profile_id=$1', [driverId, location.lat, location.lng]);
-    return mapBooking(result.rows[0]);
+    return this.selectParticipantBooking(result.rows[0].id, 'driver');
+  }
+
+  async updateDriverVehicle(driverId, vehicle) {
+    const result = await this.pool.query(`
+      update public.driver_profiles set vehicle_make=$2, vehicle_model=$3, vehicle_color=$4, vehicle_plate=$5, updated_at=now()
+      where profile_id=$1 returning vehicle_make, vehicle_model, vehicle_color, vehicle_plate
+    `, [driverId, vehicle.make, vehicle.model, vehicle.color, vehicle.plate]);
+    const row = result.rows[0];
+    return row ? { make: row.vehicle_make, model: row.vehicle_model, color: row.vehicle_color, plate: row.vehicle_plate } : null;
   }
 
   async setPaymentIntent(bookingId, customerId, paymentIntentId) {
@@ -501,4 +564,4 @@ class PostgresRepository {
   }
 }
 
-module.exports = { PostgresRepository, mapProfile, mapVehicle, mapBooking, ACTIVE_STATUSES };
+module.exports = { PostgresRepository, mapProfile, mapVehicle, mapBooking, mapParticipantBooking, ACTIVE_STATUSES, CONTACT_STATUSES };
