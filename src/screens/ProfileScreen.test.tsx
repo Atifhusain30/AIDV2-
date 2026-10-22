@@ -50,3 +50,38 @@ describe('customer account', () => {
     await waitFor(() => expect(apiService.deleteAccount).toHaveBeenCalled())
   })
 })
+
+describe('account garage states (F5)', () => {
+  const signIn = () => useAuthStore.setState({ isAuthenticated: true, token: 'token', user: {
+    id: 'customer-1', email: 'alex@example.com', phone: '', firstName: 'Alex', lastName: 'Morgan', role: 'customer', createdAt: new Date(), savedAddresses: [], vehicles: [], paymentMethods: [],
+  } })
+
+  it('shows the person (initials, real name and email) and a placeholder while the garage loads', () => {
+    vi.mocked(apiService.listVehicles).mockReturnValue(new Promise(() => undefined))
+    signIn()
+    render(<ProfileScreen />)
+    expect(screen.getByText('Alex Morgan')).toBeTruthy()
+    expect(screen.getAllByText('alex@example.com').length).toBeGreaterThan(0)
+    expect(screen.getByRole('status', { name: 'Loading your vehicles' })).toBeTruthy()
+  })
+
+  it('says when the garage could not load and retries', async () => {
+    vi.mocked(apiService.listVehicles).mockResolvedValueOnce({ success: false, error: 'Unable to reach AID.' })
+    vi.mocked(apiService.listVehicles).mockResolvedValueOnce({ success: true, data: [{ id: 'v1', make: 'Honda', model: 'Civic', year: 2020, color: 'Blue', plate: 'ABC123', createdAt: '' }] })
+    signIn()
+    render(<ProfileScreen />)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Couldn't load your garage/)
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }))
+    const use = await screen.findByRole('button', { name: /2020 Honda Civic/ })
+    expect(use.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('Default')).toBeTruthy()
+  })
+
+  it('offers to add the first vehicle when the garage is empty', async () => {
+    vi.mocked(apiService.listVehicles).mockResolvedValue({ success: true, data: [] })
+    signIn()
+    render(<ProfileScreen />)
+    fireEvent.click(await screen.findByRole('button', { name: /Add your first vehicle/ }))
+    expect(screen.getByRole('dialog', { name: 'Add a vehicle' })).toBeTruthy()
+  })
+})

@@ -29,6 +29,7 @@ import { SafetyMenuItem } from './components/safety/Safety'
 import RatingSheet from './components/rating/RatingSheet'
 import PendingRatingReminder from './components/rating/PendingRatingReminder'
 import { markRatingSkipped, type PendingRating } from './lib/ratings'
+import { applyHistoryResult, markHistoryLoading } from './lib/bookingHistory'
 
 // Customer Screens
 import HomeScreen from './screens/HomeScreen'
@@ -463,14 +464,14 @@ function App() {
         return
       }
 
+      markHistoryLoading()
       const [history, active] = await Promise.all([apiService.listBookings(), apiService.getActiveBooking()])
       if (cancelled) return
       const store = useAppStore.getState()
       const previous = store.activeBooking
-      if (history.success && history.data) {
-        store.clearBookings()
-        history.data.slice().reverse().forEach((booking) => store.addToBookingHistory(booking))
-      }
+      // F5: Activity shows a skeleton until this answers, then the list or an error with Try again.
+      if (history.success && history.data) store.clearBookings()
+      applyHistoryResult(history)
       // If the request this device was following ended while the app was closed (e.g. it expired
       // with no driver), say so rather than silently dropping it.
       if (active.success) await settleStaleActiveBooking(previous, active.data || null)

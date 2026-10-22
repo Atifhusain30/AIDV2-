@@ -2,44 +2,36 @@
  * B18 Help & Support for customers (Account) and drivers (Settings): report a problem, follow your
  * reports, short FAQ about how AID works today, Safety / 911. A support email or phone appears only
  * when the server has one configured (SUPPORT_EMAIL / SUPPORT_PHONE) — none is invented here.
+ * F5: My reports shows a skeleton while loading, an error with Try again, and an honest empty state.
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import Dialog from '../components/ui/Dialog'
-import { ArrowLeft, ChevronDown, ChevronRight, Mail, MessageSquareWarning, Phone, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronLeft, Inbox, Mail, MessageSquareWarning, Phone } from 'lucide-react'
 import { apiService } from '../services/api'
-import ReportProblemForm, { type ReportableJob } from '../components/support/ReportProblemForm'
+import ReportProblemSheet, { type ReportableJob } from '../components/support/ReportProblemForm'
 import { SafetyMenuItem } from '../components/safety/Safety'
+import { List, ListRow } from '../components/ui/ListRow'
+import SectionHeader from '../components/ui/SectionHeader'
+import { SkeletonRows } from '../components/ui/Skeleton'
+import { EmptyState, ErrorState } from '../components/ui/States'
 import { FAQ, REPORT_STATUS_LABELS, type SupportAudience, type SupportConfig, type SupportReport } from '../lib/support'
 
 const shortDate = (value: string | Date) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-
-function ReportSheet({ audience, jobs, onSent, onClose }: { audience: SupportAudience; jobs: ReportableJob[]; onSent: () => void; onClose: () => void }) {
-  return (
-    <Dialog labelledBy="report-problem-title" onClose={onClose}>
-      <ReportProblemForm audience={audience} jobs={jobs} titleId="report-problem-title" onSent={onSent} onClose={onClose} closeLabel="Cancel" />
-    </Dialog>
-  )
-}
+const STATUS_TONE: Record<SupportReport['status'], string> = { open: 'brand', in_review: 'warning', resolved: 'success' }
 
 export function MyReports({ reports, error, onRetry }: { reports: SupportReport[] | null; error: string | null; onRetry: () => void }) {
-  if (error) {
-    return (
-      <div className="support-empty" role="alert">
-        <p>{error}</p>
-        <button type="button" className="support-retry" onClick={onRetry}><RefreshCw size={15} aria-hidden="true" /> Try again</button>
-      </div>
-    )
+  if (error) return <ErrorState compact title="Couldn't load your reports" body={error} onRetry={onRetry} />
+  if (!reports) return <SkeletonRows count={2} label="Loading your reports" />
+  if (reports.length === 0) {
+    return <EmptyState compact headingLevel={3} icon={<Inbox size={22} />} title="No reports yet" body="Anything you report shows up here with its status." />
   }
-  if (!reports) return <p className="support-empty" role="status">Loading your reports…</p>
-  if (reports.length === 0) return <p className="support-empty">No reports yet. Anything you report shows up here with its status.</p>
   return (
-    <ul className="support-reports" aria-label="My reports">
+    <ul className="ui-list support-reports" aria-label="My reports">
       {reports.map((report) => (
         <li key={report.id} className="support-report">
           <div className="support-report__top">
             <strong>{report.categoryLabel}</strong>
-            <span className={`support-status support-status--${report.status}`}>{REPORT_STATUS_LABELS[report.status]}</span>
+            <span className={`ui-chip ui-chip--${STATUS_TONE[report.status] ?? 'brand'}`}>{REPORT_STATUS_LABELS[report.status]}</span>
           </div>
           <small>
             Sent {shortDate(report.createdAt)}
@@ -83,54 +75,53 @@ export default function HelpSupportScreen({ audience, onBack }: { audience: Supp
   const phone = config?.contact.phone
 
   return (
-    <div className="account-screen support-screen">
-      <button type="button" className="support-back" onClick={onBack}><ArrowLeft size={18} aria-hidden="true" /> Back</button>
-      <header className="account-header"><p>{audience === 'driver' ? 'For AID drivers' : 'Questions and problems'}</p><h1>Help &amp; Support</h1></header>
+    <div className="ui-screen support-screen">
+      <button type="button" className="ui-back" onClick={onBack}><ChevronLeft size={22} aria-hidden="true" /> Back</button>
+      <header className="ui-screen-title">
+        <h1>Help &amp; Support</h1>
+        <p>{audience === 'driver' ? 'For AID drivers' : 'Questions and problems'}</p>
+      </header>
 
-      <section className="account-section" aria-labelledby="support-report-title">
-        <div className="account-section__heading"><div><p>SOMETHING WRONG?</p><h2 id="support-report-title">Report a problem</h2></div></div>
-        <div className="account-menu">
-          <button type="button" aria-haspopup="dialog" onClick={() => setReporting(true)}>
-            <span className="account-menu__icon"><MessageSquareWarning size={20} aria-hidden="true" /></span>
-            <span><strong>Report a problem</strong><small>About a job, a payment, the app or anything else</small></span>
-            <ChevronRight size={18} aria-hidden="true" />
-          </button>
+      <section className="ui-section" aria-labelledby="support-report-title">
+        <SectionHeader id="support-report-title" title="Get help" />
+        <List>
+          <ListRow icon={<MessageSquareWarning size={19} />} title="Report a problem" subtitle="A job, a payment or the app" hasPopup onClick={() => setReporting(true)} />
           <SafetyMenuItem audience={audience} />
           {email && (
-            <a href={`mailto:${email}`}>
-              <span className="account-menu__icon"><Mail size={20} aria-hidden="true" /></span>
-              <span><strong>Email support</strong><small>{email}</small></span>
-              <span aria-hidden="true" />
+            <a className="ui-row" href={`mailto:${email}`}>
+              <span className="ui-row__icon" aria-hidden="true"><Mail size={19} /></span>
+              <span className="ui-row__text"><strong>Email support</strong><small>{email}</small></span>
             </a>
           )}
           {phone && (
-            <a href={`tel:${phone.replace(/[^+\d]/g, '')}`}>
-              <span className="account-menu__icon"><Phone size={20} aria-hidden="true" /></span>
-              <span><strong>Call support</strong><small>{phone}</small></span>
-              <span aria-hidden="true" />
+            <a className="ui-row" href={`tel:${phone.replace(/[^+\d]/g, '')}`}>
+              <span className="ui-row__icon" aria-hidden="true"><Phone size={19} /></span>
+              <span className="ui-row__text"><strong>Call support</strong><small>{phone}</small></span>
             </a>
           )}
-        </div>
+        </List>
       </section>
 
-      <section className="account-section" aria-labelledby="support-mine-title">
-        <div className="account-section__heading"><div><p>STATUS</p><h2 id="support-mine-title">My reports</h2></div></div>
+      <section className="ui-section" aria-labelledby="support-mine-title">
+        <SectionHeader id="support-mine-title" title="My reports" />
         <MyReports reports={reports} error={reportsError} onRetry={() => void loadReports()} />
       </section>
 
-      <section className="account-section" aria-labelledby="support-faq-title">
-        <div className="account-section__heading"><div><p>HOW AID WORKS</p><h2 id="support-faq-title">Common questions</h2></div></div>
-        <div className="support-faq">
+      <section className="ui-section" aria-labelledby="support-faq-title">
+        <SectionHeader id="support-faq-title" title="Common questions" />
+        <div className="ui-list support-faq">
           {FAQ[audience].map((item) => (
             <details key={item.q}>
-              <summary><span>{item.q}</span><ChevronDown size={17} aria-hidden="true" /></summary>
+              <summary><span>{item.q}</span><ChevronDown size={18} aria-hidden="true" /></summary>
               <p>{item.a}</p>
             </details>
           ))}
         </div>
       </section>
 
-      {reporting && <ReportSheet audience={audience} jobs={jobs} onSent={() => void loadReports()} onClose={() => setReporting(false)} />}
+      {reporting && (
+        <ReportProblemSheet audience={audience} jobs={jobs} titleId="report-problem-title" onSent={() => void loadReports()} onClose={() => setReporting(false)} closeLabel="Cancel" />
+      )}
     </div>
   )
 }

@@ -85,6 +85,13 @@ describe('Help & Support (B18)', () => {
     expect(within(items[1]).getByText(/Towing job/)).toBeTruthy()
   })
 
+  it('shows placeholders while my reports load (F5)', () => {
+    api.listSupportReports.mockReturnValue(new Promise(() => undefined))
+    render(<HelpSupportScreen audience="customer" onBack={() => {}} />)
+    expect(screen.getByRole('status', { name: 'Loading your reports' })).toBeTruthy()
+    expect(screen.queryByText(/No reports yet/)).toBeNull()
+  })
+
   it('says so when reports fail to load, with a retry', async () => {
     api.listSupportReports.mockResolvedValueOnce({ success: false, error: 'Unable to reach AID.' })
     render(<HelpSupportScreen audience="driver" onBack={() => {}} />)

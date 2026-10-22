@@ -17,8 +17,6 @@ const tsx = import.meta.glob(['./**/*.tsx', '!./**/*.test.tsx'], { query: '?raw'
 /** Screens not yet moved onto the design system. Shrinks to empty as each area is migrated. */
 const NOT_YET_MIGRATED: string[] = [
   './App.tsx',
-  './screens/ProfileScreen.tsx',
-  './components/modals/BookingDetailModal.tsx',
 ]
 
 describe('one colour system (F2)', () => {

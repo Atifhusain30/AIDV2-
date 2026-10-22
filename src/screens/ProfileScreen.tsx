@@ -1,91 +1,112 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import Dialog from '../components/ui/Dialog'
-import {
-  Car,
-  Check,
-  ChevronRight,
-  LifeBuoy,
-  LogOut,
-  Mail,
-  MapPin,
-  Phone,
-  Plus,
-  ShieldCheck,
-  Trash2,
-  UserRound,
-  X,
-} from 'lucide-react'
+/**
+ * Customer Account: who you are, your garage (the saved vehicle makes the next request two taps),
+ * help & safety, contact details, sign out and account deletion. Only real data — nothing is
+ * invented when a field is empty. F5: the garage shows a skeleton while loading, an error with
+ * Try again, and an honest empty state.
+ */
+
+import { useCallback, useEffect, useId, useState, type FormEvent } from 'react'
+import { AlertCircle, Car, LifeBuoy, LogOut, Mail, MapPin, Phone, Plus, Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiService } from '../services/api'
 import { signOut } from '../auth/signOut'
 import { SafetyMenuItem } from '../components/safety/Safety'
+import BottomSheet from '../components/ui/BottomSheet'
+import Button from '../components/ui/Button'
+import { List, ListRow } from '../components/ui/ListRow'
+import PersonAvatar from '../components/ui/PersonAvatar'
+import SectionHeader from '../components/ui/SectionHeader'
+import { SkeletonRows } from '../components/ui/Skeleton'
+import { ErrorState } from '../components/ui/States'
 import HelpSupportScreen from './HelpSupportScreen'
 
 const emptyVehicle = { make: '', model: '', year: '', color: '', plate: '' }
 
+function AddVehicleSheet({ onClose, onSave }: { onClose: () => void; onSave: (input: { make: string; model: string; year: number; color: string; plate: string }) => Promise<string | null> }) {
+  const [form, setForm] = useState(emptyVehicle)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const formId = useId()
+  const set = (key: keyof typeof emptyVehicle) => (event: { target: { value: string } }) => setForm({ ...form, [key]: event.target.value })
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const year = Number(form.year)
+    if (!form.make.trim() || !form.model.trim() || !year) { setError('Add the make, model and year.'); return }
+    setSaving(true)
+    setError(null)
+    const failure = await onSave({
+      make: form.make.trim(),
+      model: form.model.trim(),
+      year,
+      color: form.color.trim() || 'Not specified',
+      plate: form.plate.trim() || 'Not added',
+    })
+    setSaving(false)
+    if (failure) setError(failure)
+  }
+
+  return (
+    <BottomSheet title="Add a vehicle" titleId="add-vehicle-title" subtitle="Saved to your garage for faster requests." onClose={onClose} dismissible={!saving} closeLabel="Close vehicle form"
+      footer={(
+        <>
+          {error && <p className="ui-alert ui-alert--danger" role="alert"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}
+          <Button type="submit" form={formId} block size="lg" loading={saving} loadingLabel="Saving…">Save vehicle</Button>
+        </>
+      )}>
+      <form id={formId} aria-labelledby="add-vehicle-title" onSubmit={(event) => void submit(event)} className="sheet-grid">
+        <label className="ui-field"><span>Make</span><input className="ui-input" required value={form.make} onChange={set('make')} placeholder="Toyota" autoComplete="off" /></label>
+        <label className="ui-field"><span>Model</span><input className="ui-input" required value={form.model} onChange={set('model')} placeholder="Camry" autoComplete="off" /></label>
+        <label className="ui-field"><span>Year</span><input className="ui-input" required inputMode="numeric" value={form.year} onChange={set('year')} placeholder="2024" /></label>
+        <label className="ui-field"><span>Color</span><input className="ui-input" value={form.color} onChange={set('color')} placeholder="Black" /></label>
+        <label className="ui-field sheet-grid__wide"><span>License plate</span><input className="ui-input" value={form.plate} onChange={set('plate')} placeholder="ABC-1234" autoCapitalize="characters" /></label>
+      </form>
+    </BottomSheet>
+  )
+}
+
 export default function ProfileScreen() {
-  const {
-    user: profile,
-    vehicles,
-    activeVehicleId,
-    addVehicle,
-    removeVehicle,
-    setActiveVehicle,
-    setVehicles,
-    setActiveModal,
-  } = useAppStore()
+  const { user: profile, vehicles, activeVehicleId, addVehicle, removeVehicle, setActiveVehicle, setVehicles, setActiveModal } = useAppStore()
   const { user: authUser, isAuthenticated, token } = useAuthStore()
   const [showVehicleForm, setShowVehicleForm] = useState(false)
-  const [vehicleForm, setVehicleForm] = useState(emptyVehicle)
+  const [garage, setGarage] = useState<'loading' | 'ready' | 'error'>(token ? 'loading' : 'ready')
+  const [garageError, setGarageError] = useState<string | null>(null)
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false)
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
 
-  useEffect(() => {
+  const loadVehicles = useCallback(async () => {
     if (!token) return
-    void apiService.listVehicles().then((result) => {
-      if (result.success && result.data) setVehicles(result.data)
-    })
+    setGarage('loading')
+    const result = await apiService.listVehicles()
+    if (result.success && result.data) { setVehicles(result.data); setGarage('ready') }
+    else { setGarageError(result.error || 'Unable to load your vehicles.'); setGarage('error') }
   }, [token, setVehicles])
+  useEffect(() => { void loadVehicles() }, [loadVehicles])
 
   const name = profile?.name || (authUser ? `${authUser.firstName} ${authUser.lastName}`.trim() : '')
   const email = profile?.email || authUser?.email
   const phone = profile?.phone || authUser?.phone
 
-  const submitVehicle = async (event: FormEvent) => {
-    event.preventDefault()
-    const year = Number(vehicleForm.year)
-    if (!vehicleForm.make.trim() || !vehicleForm.model.trim() || !year) return
-    const input = {
-      make: vehicleForm.make.trim(),
-      model: vehicleForm.model.trim(),
-      year,
-      color: vehicleForm.color.trim() || 'Not specified',
-      plate: vehicleForm.plate.trim() || 'Not added',
-    }
+  const saveVehicle = async (input: { make: string; model: string; year: number; color: string; plate: string }) => {
     if (token) {
       const result = await apiService.createVehicle(input)
-      if (!result.success || !result.data) {
-        window.alert(result.error || 'Unable to save vehicle.')
-        return
-      }
+      if (!result.success || !result.data) return result.error || 'Unable to save vehicle.'
       setVehicles([result.data, ...vehicles])
     } else {
       addVehicle(input)
     }
-    setVehicleForm(emptyVehicle)
     setShowVehicleForm(false)
+    return null
   }
 
   const handleRemoveVehicle = async (vehicleId: string) => {
+    setGarageError(null)
     if (token) {
       const result = await apiService.deleteVehicle(vehicleId)
-      if (!result.success) {
-        window.alert(result.error || 'Unable to remove vehicle.')
-        return
-      }
+      if (!result.success) { setGarageError(result.error || 'Unable to remove vehicle.'); return }
       setVehicles(vehicles.filter((vehicle) => vehicle.id !== vehicleId))
       return
     }
@@ -111,91 +132,89 @@ export default function ProfileScreen() {
 
   if (showHelp) return <HelpSupportScreen audience="customer" onBack={() => setShowHelp(false)} />
 
-  return (
-    <div className="account-screen">
-      <header className="account-header"><p>Profile and preferences</p><h1>Account</h1></header>
-
-      <section className="account-identity" aria-label="Account profile">
-        <span>{name ? name.charAt(0).toUpperCase() : <UserRound size={25} />}</span>
-        <div><strong>{name || 'Guest account'}</strong><small>{email || phone || 'Your roadside settings are saved on this device'}</small></div>
-        <ShieldCheck size={19} />
-      </section>
-
-      <section className="account-section" aria-labelledby="account-garage-title">
-        <div className="account-section__heading"><div><p>VEHICLES</p><h2 id="account-garage-title">Your garage</h2></div><button type="button" onClick={() => setShowVehicleForm(true)}><Plus size={16} /> Add vehicle</button></div>
-        {vehicles.length > 0 ? (
-          <div className="account-vehicles">
+  const garageBody = vehicles.length === 0 && garage === 'loading'
+    ? <SkeletonRows count={1} label="Loading your vehicles" />
+    : vehicles.length === 0 && garage === 'error'
+      ? <ErrorState compact title="Couldn't load your garage" body={garageError} onRetry={() => void loadVehicles()} />
+      : vehicles.length === 0
+        ? (
+          <List>
+            <ListRow icon={<Plus size={20} />} tone="brand" title="Add your first vehicle" subtitle="Skip make, model and year next time" hasPopup onClick={() => setShowVehicleForm(true)} />
+          </List>
+        )
+        : (
+          <ul className="ui-list garage-list" aria-label="Your vehicles">
             {vehicles.map((vehicle) => {
               const active = vehicle.id === activeVehicleId || (!activeVehicleId && vehicle.id === vehicles[0].id)
+              const label = `${vehicle.year} ${vehicle.make} ${vehicle.model}`
               return (
-                <div className={`account-vehicle ${active ? 'is-active' : ''}`} key={vehicle.id}>
-                  <button type="button" className="account-vehicle__select" onClick={() => setActiveVehicle(vehicle.id)} aria-label={`Use ${vehicle.year} ${vehicle.make} ${vehicle.model} for requests`}>
-                    <span><Car size={21} /></span>
-                    <div><strong>{vehicle.year} {vehicle.make} {vehicle.model}</strong><small>{vehicle.color} · {vehicle.plate}</small></div>
-                    {active ? <span className="account-vehicle__active"><Check size={14} /> ACTIVE</span> : <ChevronRight size={18} />}
+                <li className={`garage-row${active ? ' is-active' : ''}`} key={vehicle.id}>
+                  <button type="button" className="ui-row garage-row__select" onClick={() => setActiveVehicle(vehicle.id)} aria-pressed={active}>
+                    <span className="ui-row__icon" aria-hidden="true"><Car size={20} /></span>
+                    <span className="ui-row__text"><strong>{label}</strong><small>{[vehicle.color, vehicle.plate].filter(Boolean).join(' · ')}</small></span>
+                    {active && <span className="ui-chip ui-chip--brand">Default</span>}
                   </button>
-                  <button type="button" className="account-vehicle__remove" aria-label={`Remove ${vehicle.make} ${vehicle.model}`} onClick={() => void handleRemoveVehicle(vehicle.id)}><Trash2 size={16} /></button>
-                </div>
+                  <button type="button" className="garage-row__remove" aria-label={`Remove ${vehicle.make} ${vehicle.model}`} onClick={() => void handleRemoveVehicle(vehicle.id)}>
+                    <Trash2 size={18} aria-hidden="true" />
+                  </button>
+                </li>
               )
             })}
-          </div>
-        ) : (
-          <button type="button" className="account-empty-vehicle" onClick={() => setShowVehicleForm(true)}>
-            <span><Car size={24} /></span><div><strong>Add your first vehicle</strong><p>Skip make, model, and year entry when you request help.</p></div><ChevronRight size={18} />
-          </button>
-        )}
-      </section>
+          </ul>
+        )
 
-      <section className="account-section" aria-labelledby="help-safety-title">
-        <div className="account-section__heading"><div><p>HELP & SAFETY</p><h2 id="help-safety-title">Help &amp; safety</h2></div></div>
-        <div className="account-menu">
-          <button type="button" onClick={() => setShowHelp(true)}><span className="account-menu__icon"><LifeBuoy size={20} /></span><span><strong>Help &amp; Support</strong><small>Report a problem, your reports, common questions</small></span><ChevronRight size={18} /></button>
-          <SafetyMenuItem audience="customer" />
-          <button type="button" onClick={() => setActiveModal('locationConfirm')}><span className="account-menu__icon"><MapPin size={20} /></span><span><strong>Location preferences</strong><small>Confirm where assistance should arrive</small></span><ChevronRight size={18} /></button>
+  return (
+    <div className="ui-screen account-screen">
+      <header className="ui-screen-title"><h1>Account</h1></header>
+
+      <section className="account-identity" aria-label="Account profile">
+        <PersonAvatar name={name} size="lg" />
+        <div>
+          <strong>{name || 'Guest account'}</strong>
+          {!email && !phone && <small>Your roadside settings are saved on this device</small>}
+          {email && <small><Mail size={13} aria-hidden="true" /> {email}</small>}
+          {phone && <small><Phone size={13} aria-hidden="true" /> {phone}</small>}
         </div>
       </section>
 
-      {(email || phone) && (
-        <section className="account-section" aria-labelledby="details-title">
-          <div className="account-section__heading"><div><p>CONTACT</p><h2 id="details-title">Account details</h2></div></div>
-          <div className="account-contact">
-            {email && <div><Mail size={18} /><span><small>Email</small><strong>{email}</strong></span></div>}
-            {phone && <div><Phone size={18} /><span><small>Phone</small><strong>{phone}</strong></span></div>}
-          </div>
-        </section>
-      )}
+      <section className="ui-section" aria-labelledby="account-garage-title">
+        <SectionHeader id="account-garage-title" title="Your garage" action={{ label: 'Add vehicle', onClick: () => setShowVehicleForm(true) }} />
+        {garageError && vehicles.length > 0 && <p className="ui-alert ui-alert--danger garage-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {garageError}</p>}
+        {garageBody}
+      </section>
+
+      <section className="ui-section" aria-labelledby="help-safety-title">
+        <SectionHeader id="help-safety-title" title="Help & safety" />
+        <List>
+          <ListRow icon={<LifeBuoy size={19} />} title="Help & Support" subtitle="Report a problem, get answers" onClick={() => setShowHelp(true)} />
+          <SafetyMenuItem audience="customer" />
+          <ListRow icon={<MapPin size={19} />} title="Location" subtitle="Where help should arrive" hasPopup onClick={() => setActiveModal('locationConfirm')} />
+        </List>
+      </section>
 
       {isAuthenticated && (
-        <>
-          <button type="button" className="account-signout" onClick={handleLogout}><LogOut size={17} /> Sign out</button>
-          <button type="button" className="account-signout text-red-400" onClick={() => setShowDeleteConfirmation(true)}><Trash2 size={17} /> Delete account</button>
-        </>
+        <section className="ui-section" aria-label="Sign out and account deletion">
+          <List>
+            <ListRow icon={<LogOut size={19} />} title="Sign out" chevron={false} onClick={handleLogout} />
+            <ListRow icon={<Trash2 size={19} />} title="Delete account" tone="danger" chevron={false} hasPopup onClick={() => setShowDeleteConfirmation(true)} />
+          </List>
+        </section>
       )}
       <p className="account-version">AID Roadside · Version 1.0</p>
 
-      {showVehicleForm && (
-        <Dialog labelledBy="add-vehicle-title" onClose={() => setShowVehicleForm(false)}>
-          <form aria-labelledby="add-vehicle-title" onSubmit={submitVehicle}>
-            <div className="account-sheet__header"><div><small>YOUR GARAGE</small><h2 id="add-vehicle-title">Add a vehicle</h2></div><button type="button" aria-label="Close vehicle form" onClick={() => setShowVehicleForm(false)}><X size={20} /></button></div>
-            <div className="account-sheet__grid">
-              <label><span>Make</span><input required value={vehicleForm.make} onChange={(event) => setVehicleForm({ ...vehicleForm, make: event.target.value })} placeholder="Toyota" /></label>
-              <label><span>Model</span><input required value={vehicleForm.model} onChange={(event) => setVehicleForm({ ...vehicleForm, model: event.target.value })} placeholder="Camry" /></label>
-              <label><span>Year</span><input required inputMode="numeric" value={vehicleForm.year} onChange={(event) => setVehicleForm({ ...vehicleForm, year: event.target.value })} placeholder="2024" /></label>
-              <label><span>Color</span><input value={vehicleForm.color} onChange={(event) => setVehicleForm({ ...vehicleForm, color: event.target.value })} placeholder="Black" /></label>
-              <label className="account-sheet__wide"><span>License plate</span><input value={vehicleForm.plate} onChange={(event) => setVehicleForm({ ...vehicleForm, plate: event.target.value })} placeholder="ABC-1234" /></label>
-            </div>
-            <button type="submit" className="account-sheet__submit">Save vehicle</button>
-          </form>
-        </Dialog>
-      )}
+      {showVehicleForm && <AddVehicleSheet onClose={() => setShowVehicleForm(false)} onSave={saveVehicle} />}
       {showDeleteConfirmation && (
-        <Dialog labelledBy="delete-account-title" describedBy="delete-account-text" role="alertdialog" dismissible={!isDeletingAccount} onClose={() => setShowDeleteConfirmation(false)}>
-            <div className="account-sheet__header"><div><small>PERMANENT ACTION</small><h2 id="delete-account-title">Permanently delete account?</h2></div><button type="button" aria-label="Close account deletion" disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}><X size={20} aria-hidden="true" /></button></div>
-            <p id="delete-account-text">This removes your account, saved vehicles, active requests, driver documents, and marketplace history. This cannot be undone.</p>
-            {deleteError && <p role="alert" className="text-red-400">{deleteError}</p>}
-            <button type="button" className="account-sheet__submit bg-red-600" disabled={isDeletingAccount} onClick={() => void handleDeleteAccount()}>{isDeletingAccount ? 'Deleting account…' : 'Delete my account permanently'}</button>
-            <button type="button" className="account-signout" disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}>Keep my account</button>
-        </Dialog>
+        <BottomSheet title="Permanently delete account?" titleId="delete-account-title" describedBy="delete-account-text" role="alertdialog" showClose={false}
+          dismissible={!isDeletingAccount} onClose={() => setShowDeleteConfirmation(false)}
+          footer={(
+            <>
+              {deleteError && <p role="alert" className="ui-alert ui-alert--danger"><AlertCircle size={16} aria-hidden="true" /> {deleteError}</p>}
+              <Button variant="destructive" block size="lg" loading={isDeletingAccount} loadingLabel="Deleting account…" onClick={() => void handleDeleteAccount()}>Delete my account permanently</Button>
+              <Button variant="secondary" block disabled={isDeletingAccount} onClick={() => setShowDeleteConfirmation(false)}>Keep my account</Button>
+            </>
+          )}>
+          <p id="delete-account-text" className="sheet-text">This removes your account, saved vehicles, active requests, driver documents and marketplace history. This cannot be undone.</p>
+        </BottomSheet>
       )}
     </div>
   )
