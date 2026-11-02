@@ -22,14 +22,17 @@
  * (forms, open sheets, receipts), the geocoding caches (addresses looked up), chat screens (messages,
  * unsent text — component state, gone when the screen closes), the realtime stream and the GPS watch.
  *
- * Kept on sign-out: PRESERVED_LOCAL_KEYS — non-personal app preferences. There are none today.
+ * Kept on sign-out: PRESERVED_LOCAL_KEYS — non-personal keys (today only the E12 install marker).
  */
 
 export const APP_STORE_KEY = 'aid-bookings-v1'
 export const RATING_PROMPTS_PREFIX = 'aid.ratingPrompts.'
 export const LEGACY_KEYS = ['auth-storage', 'auth_token', 'user'] as const
-/** Non-personal preferences that survive sign-out (e.g. a theme setting). None exist yet. */
-export const PRESERVED_LOCAL_KEYS: readonly string[] = []
+/**
+ * Non-personal keys that survive sign-out. `aid.installMarker` (E12, src/auth/freshInstall.ts) tells a
+ * fresh install from a sign-out; it holds no personal data.
+ */
+export const PRESERVED_LOCAL_KEYS: readonly string[] = ['aid.installMarker']
 /** Browser fallback of the secure store (desktop development only). */
 export const SECURE_STORAGE_WEB_PREFIX = 'capacitor-storage_'
 

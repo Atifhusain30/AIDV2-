@@ -6,7 +6,8 @@
 
 import { create } from 'zustand'
 import type { Customer, Driver, AuthState, UserRole } from '../types'
-import { managedAuth } from '../auth/supabase'
+import { managedAuth, clearStoredSession } from '../auth/supabase'
+import { clearSessionIfFreshInstall } from '../auth/freshInstall'
 import type { AuthPayload } from '../auth/authService'
 import { claimDeviceFor, resetUserState, signOut } from '../auth/signOut'
 import { removeLegacyKeys, wipeLocalUserData } from '../auth/deviceData'
@@ -154,6 +155,8 @@ export const useAuthStore = create<AuthStore>()((set, get) => ({
   },
 
   restoreSession: async () => {
+    // E12: a reinstall must not open the previous account (the Keychain outlives the app).
+    await clearSessionIfFreshInstall({ clearSession: clearStoredSession })
     const result = await managedAuth.restore()
     if (result.success && result.data) {
       set(signedIn(result.data))

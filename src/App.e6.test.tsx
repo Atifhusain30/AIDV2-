@@ -117,6 +117,7 @@ describe('E6: signing out stops timers and returns to sign-in', () => {
     expect(mocks.calls.getBooking).toBe(afterSignOut)
     expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeTruthy()
     expect(useAppStore.getState().activeBooking).toBeNull()
-    expect(localStorage.length).toBe(0)
+    // Only the non-personal E12 install marker survives sign-out.
+    expect(Object.keys(localStorage)).toEqual(['aid.installMarker'])
   })
 })

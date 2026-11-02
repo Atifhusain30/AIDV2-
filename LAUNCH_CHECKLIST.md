@@ -79,7 +79,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | E9 | Delete test accounts before launch | 🛠 | ⬜ (the simulator test customer `sim-design-test@aid-preview.test` used for the design review was already deleted, with its vehicle and request) |
 | E10 | Backups (Supabase paid plan point-in-time recovery) | 👤 | ⬜ |
 | E11 | Final security review / penetration check | 🛠 | ⬜ |
-| E12 | Deleting the app also signs out (iPhone keeps the sign-in in the Keychain after uninstall) | 🛠 | ⬜ found on the simulator: reinstalling AID opened straight into the previous account. Fix: on the first launch after an install, clear the saved session |
+| E12 | Deleting the app also signs out (iPhone keeps the sign-in in the Keychain after uninstall) | 🛠 | ✅ fresh-install marker clears a Keychain sign-in left from a deleted copy before the session is restored (`src/auth/freshInstall.ts`); simulator: uninstall → reinstall opens the welcome screen. Existing installs are signed out once after this update |
 
 ## F. Design & accessibility (Uber/DoorDash quality)
 | # | Item | Owner | Status |
