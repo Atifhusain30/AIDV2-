@@ -101,6 +101,9 @@ case "${SECRET_KEY}" in
   *) fail "The secret key must start with sk_test_ or sk_live_. Nothing was changed." ;;
 esac
 case "${SECRET_KEY}" in *[[:space:]]*) fail "The secret key contains a space. Copy it again. Nothing was changed." ;; esac
+# Stripe's dashboard shows live secret keys masked ("sk_live_…abcd") after creation; real keys are ~100 characters.
+case "${SECRET_KEY}" in *…*|*...*|*\**) fail "That is the hidden (masked) version of the secret key, not the key itself. In Stripe, create a new secret key and copy it the moment it is shown. Nothing was changed." ;; esac
+[ "${#SECRET_KEY}" -ge 30 ] || fail "The secret key is too short — only part of it was copied. Copy the whole key. Nothing was changed."
 
 PUBLISHABLE_KEY="$(ask_hidden 'Stripe publishable key (pk_test_… or pk_live_…): ')"
 case "${PUBLISHABLE_KEY}" in
