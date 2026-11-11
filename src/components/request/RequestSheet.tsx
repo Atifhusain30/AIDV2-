@@ -30,7 +30,11 @@ import VehicleCard from '../ui/VehicleCard'
 import { InfoRow, ListRow } from '../ui/ListRow'
 import { Skeleton, SkeletonRows } from '../ui/Skeleton'
 import ChunkBoundary from '../ui/ChunkBoundary'
+import { RequestPaymentRow, usePaymentMethods } from '../payment/PaymentMethods'
 import { lazyWithRetry } from '../../lib/lazyWithRetry'
+
+/** One id per Request tap: a retried tap reuses the same card hold instead of placing a second one. */
+const newRequestId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`)
 
 // Leaflet (the map) downloads only when the location step is shown (F6).
 const MapPinPicker = lazyWithRetry(() => import('../ui/MapPinPicker'))
@@ -159,6 +163,8 @@ export default function RequestSheet() {
     setCurrentScreen('chat')
   }, [hasActiveRequest, isOpen, submitting, resetServiceFormData, setActiveModal, setActiveRequestRedirect, setCurrentScreen])
   const [error, setError] = useState<string | null>(null)
+  // C2: the saved card the price is held on (when card payments are on).
+  const payment = usePaymentMethods()
   const [quote, setQuote] = useState<PriceQuote | null>(null)
   const [quoteError, setQuoteError] = useState<string | null>(null)
   const titleId = useId()
@@ -227,6 +233,8 @@ export default function RequestSheet() {
   const rates = service?.pricing
   const rateText = rates ? `${formatPrice(rates.hookup)} includes the first ${rates.includedMiles} miles, then ${formatPrice(rates.perMile)} per mile.` : ''
   const question = service ? QUESTIONS[service.id] : undefined
+  const needsCard = payment.enabled && !payment.selectedId
+  const cardsLoading = payment.status === 'loading' && !payment.cards.length
   const step = !serviceFormData.selectedService ? 0 : modalStep >= STEP_DETAILS && hasLocation ? STEP_DETAILS : STEP_LOCATION
 
   const searchLocation = () => {
@@ -286,6 +294,8 @@ export default function RequestSheet() {
         locationLabel: userLocationLabel,
         locationCoords: { lat: userCoords.lat, lng: userCoords.lng },
         dropoffLocation: service.requiresDropoff && dropoff ? dropoff : undefined,
+        paymentMethodId: payment.enabled ? payment.selectedId ?? undefined : undefined,
+        requestId: newRequestId(),
       })
       setActiveModal(null)
       resetServiceFormData()
@@ -315,14 +325,14 @@ export default function RequestSheet() {
   } else if (catalog && service && step === STEP_DETAILS) {
     footer = (
       <>
-        <Button size="lg" block disabled={submitting || needsDropoff || price === null} loading={submitting} loadingLabel="Finding a driver…" onClick={() => void submit()}>
-          {price === null ? `Find a driver · from ${formatPrice(service.basePrice)}` : `Find a driver · ${formatPrice(price)}`}
+        <Button size="lg" block disabled={submitting || needsDropoff || price === null || needsCard || cardsLoading} loading={submitting} loadingLabel="Finding a driver…" onClick={() => void submit()}>
+          {needsCard ? 'Add a card to request' : price === null ? `Find a driver · from ${formatPrice(service.basePrice)}` : `Find a driver · ${formatPrice(price)}`}
         </Button>
         <p>
           {distancePriced
             ? quote?.distanceMiles != null ? `${quote.distanceMiles} mi tow · ${rateText}` : `Choose where the vehicle should be towed. ${rateText}`
             : `${formatPrice(service.basePrice)} estimated price.`}
-          {' '}Free to cancel until your driver arrives.
+          {' '}{payment.enabled ? 'Held on your card now, charged when the job is done. ' : ''}Free to cancel until your driver arrives.
         </p>
       </>
     )
@@ -462,6 +472,8 @@ export default function RequestSheet() {
                   value={serviceFormData.problemDescription} onChange={(event) => setServiceFormData({ problemDescription: event.target.value })} />
               </label>
             </div>
+
+            <RequestPaymentRow />
 
             {quoteError && <p className="ui-alert ui-alert--danger request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {quoteError}</p>}
             {error && <p className="ui-alert ui-alert--danger request-error" role="alert"><AlertCircle size={16} aria-hidden="true" /> {error}</p>}

@@ -104,7 +104,7 @@ export interface RequestOutcome {
  * becomes the active one in the app and is returned with alreadyActive, rather than an error.
  */
 export async function requestAndStartBooking(
-  input: CreateBookingInput & { dropoffLocation?: { address: string; lat: number; lng: number } }
+  input: CreateBookingInput & { dropoffLocation?: { address: string; lat: number; lng: number }; paymentMethodId?: string; requestId?: string }
 ): Promise<RequestOutcome> {
   const { activeVehicleId } = useAppStore.getState()
   const result = await apiService.createBooking({
@@ -117,6 +117,8 @@ export async function requestAndStartBooking(
     },
     dropoffLocation: input.dropoffLocation,
     notes: input.notes,
+    paymentMethodId: input.paymentMethodId,
+    requestId: input.requestId,
   })
   if (!result.success && result.code === ACTIVE_REQUEST_CODE) {
     const active = await apiService.getActiveBooking()

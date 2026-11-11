@@ -6,7 +6,7 @@
  */
 
 import { useState } from 'react'
-import { AlertCircle, LifeBuoy, LogOut, MapPin, Settings, Trash2 } from 'lucide-react'
+import { AlertCircle, CreditCard, LifeBuoy, LogOut, MapPin, Settings, Trash2 } from 'lucide-react'
 import AidBrand from '../components/brand/AidBrand'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
@@ -22,6 +22,7 @@ import SectionHeader from '../components/ui/SectionHeader'
 import { SkeletonRows } from '../components/ui/Skeleton'
 import ChunkBoundary from '../components/ui/ChunkBoundary'
 import { lazyWithRetry } from '../lib/lazyWithRetry'
+import { PaymentMethodsSheet, paymentSummary, usePaymentMethods } from '../components/payment/PaymentMethods'
 
 // F6: Help & Support downloads only when it's opened.
 const HelpSupportScreen = lazyWithRetry(() => import('./HelpSupportScreen'))
@@ -36,6 +37,8 @@ export default function ProfileScreen() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showPayment, setShowPayment] = useState(false)
+  const payments = usePaymentMethods()
 
   const name = profile?.name || (authUser ? `${authUser.firstName} ${authUser.lastName}`.trim() : '')
   const email = profile?.email || authUser?.email
@@ -94,9 +97,12 @@ export default function ProfileScreen() {
         <GarageList garage={garage} onAdd={() => setShowVehicleForm(true)} />
       </section>
 
-      {/* No "Payment methods" row: card payments aren't live, and AID never shows a fake card. */}
       <section className="ui-section" aria-label="Help, safety and settings">
         <List>
+          {/* C2: only when card payments are on (AID never shows a fake card). */}
+          {isAuthenticated && payments.enabled && (
+            <ListRow icon={<CreditCard size={19} />} title="Payment" subtitle={paymentSummary(payments.cards)} hasPopup onClick={() => setShowPayment(true)} />
+          )}
           <ListRow icon={<LifeBuoy size={19} />} title="Help & support" subtitle="Report a problem, get answers" onClick={() => setShowHelp(true)} />
           <SafetyMenuItem audience="customer" />
           <ListRow icon={<Settings size={19} />} title="Settings" subtitle={isAuthenticated ? 'Location, delete account' : 'Location'} hasPopup onClick={() => setShowSettings(true)} />
@@ -123,6 +129,7 @@ export default function ProfileScreen() {
         </BottomSheet>
       )}
 
+      {showPayment && <PaymentMethodsSheet onClose={() => setShowPayment(false)} />}
       {showVehicleForm && <AddVehicleSheet onClose={() => setShowVehicleForm(false)} onSave={saveVehicle} />}
       {showDeleteConfirmation && (
         <BottomSheet title="Permanently delete account?" titleId="delete-account-title" describedBy="delete-account-text" role="alertdialog" showClose={false}

@@ -5,6 +5,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { apiService } from '../../services/api'
 import * as bookingService from '../../services/bookingService'
 import { searchAddressSuggestions } from '../../services/locationService'
+import { usePaymentStore } from '../../store/usePaymentStore'
 
 vi.mock('../../services/api', () => ({ apiService: { listServices: vi.fn(), quoteBooking: vi.fn() } }))
 vi.mock('../../services/bookingService', () => ({ requestAndStartBooking: vi.fn() }))
@@ -54,7 +55,52 @@ beforeEach(() => {
   vi.mocked(bookingService.requestAndStartBooking).mockResolvedValue({ id: 'booking-1' } as never)
   vi.mocked(apiService.quoteBooking).mockResolvedValue({ success: true, data: { serviceType: 'towing', price: 162.5, distanceMiles: 20 } as never })
 })
-afterEach(() => cleanup())
+afterEach(() => { cleanup(); usePaymentStore.getState().reset() })
+
+const VISA = { id: 'pm_visa', brand: 'visa', last4: '4242', expMonth: 12, expYear: 2030 }
+const MASTERCARD = { id: 'pm_mc', brand: 'mastercard', last4: '4444', expMonth: 1, expYear: 2031 }
+
+describe('C2: paying for a request', () => {
+  it('holds the price on the saved card, sending a fresh request id', async () => {
+    usePaymentStore.setState({ enabled: true, status: 'ready', cards: [VISA], selectedId: 'pm_visa' })
+    const sheet = open('battery_jump')
+    await confirmLocation(sheet)
+    expect(within(sheet).getByText('Visa •••• 4242')).toBeTruthy()
+    expect(within(sheet).getByText(/held on your card now, charged when the job is done/i)).toBeTruthy()
+    fireEvent.click(await within(sheet).findByRole('button', { name: /find a driver · \$69/i }))
+    await waitFor(() => expect(bookingService.requestAndStartBooking).toHaveBeenCalledWith(expect.objectContaining({
+      paymentMethodId: 'pm_visa', requestId: expect.stringMatching(/^[A-Za-z0-9-]{8,64}$/),
+    })))
+  })
+
+  it('without a saved card, asks for one instead of requesting', async () => {
+    usePaymentStore.setState({ enabled: true, status: 'ready', cards: [], selectedId: null })
+    const sheet = open('battery_jump')
+    await confirmLocation(sheet)
+    const request = within(sheet).getByRole('button', { name: /add a card to request/i }) as HTMLButtonElement
+    expect(request.disabled).toBe(true)
+    expect(within(sheet).getByRole('button', { name: /^add a card.*needed to request help/i })).toBeTruthy()
+  })
+
+  it('lets the customer pay with a different saved card', async () => {
+    usePaymentStore.setState({ enabled: true, status: 'ready', cards: [VISA, MASTERCARD], selectedId: 'pm_visa' })
+    const sheet = open('battery_jump')
+    await confirmLocation(sheet)
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Change' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /mastercard •••• 4444/i }))
+    expect(within(sheet).getByText('Mastercard •••• 4444')).toBeTruthy()
+    fireEvent.click(within(sheet).getByRole('button', { name: /find a driver/i }))
+    await waitFor(() => expect(bookingService.requestAndStartBooking).toHaveBeenCalledWith(expect.objectContaining({ paymentMethodId: 'pm_mc' })))
+  })
+
+  it('when card payments are off, no card is asked for or sent', async () => {
+    const sheet = open('battery_jump')
+    await confirmLocation(sheet)
+    expect(within(sheet).queryByText(/pay with/i)).toBeNull()
+    fireEvent.click(within(sheet).getByRole('button', { name: /find a driver · \$69/i }))
+    await waitFor(() => expect(bookingService.requestAndStartBooking).toHaveBeenCalledWith(expect.objectContaining({ paymentMethodId: undefined })))
+  })
+})
 
 describe('request flow (Location → Details → Driver → Complete)', () => {
   it('confirms the location, then requests the service there for the server price', async () => {

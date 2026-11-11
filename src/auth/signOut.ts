@@ -24,6 +24,7 @@
 
 import { useAuthStore } from '../store/useAuthStore'
 import { useAppStore } from '../store/useAppStore'
+import { usePaymentStore } from '../store/usePaymentStore'
 import { useDriverStore } from '../store/useDriverStore'
 import { apiService } from '../services/api'
 import { stopWatchLocation } from '../services/location'
@@ -60,6 +61,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined>
 export function resetUserState(): void {
   useDriverStore.getState().reset()
   useAppStore.getState().resetUserData()
+  usePaymentStore.getState().reset()
   clearGeocodingCache()
 }
 

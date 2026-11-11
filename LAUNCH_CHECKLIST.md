@@ -50,7 +50,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 | # | Item | Owner | Status |
 |---|---|---|---|
 | C1 | Stripe account (business verified) + test keys | 👤 | ✅ test keys saved on this Mac (server/.env + .env.local, owner-only, Git-ignored); Stripe accepts them (test mode). Live keys go only on the hosted live server at launch (J). Webhook secret comes with hosting (H) |
-| C2 | Card hold at request, charge on completion; Apple Pay / Google Pay | 🛠 | 🟡 server ✅ (`server/payments.js`): saved cards via Stripe (one Stripe customer per account), hold for the server price before drivers see a request, charge on completion, release on cancel/expiry, retry sweep; live test-mode E2E passes. Next: in-app Add card screen + card on the request sheet. Apple Pay needs the Apple Developer account (merchant ID) + Stripe native plugin; Google Pay needs the Play account |
+| C2 | Card hold at request, charge on completion; Apple Pay / Google Pay | 🛠 | 🟡 server ✅ (`server/payments.js`): saved cards via Stripe, hold for the server price before drivers see a request, charge on completion, release on cancel/expiry, retry sweep; live test-mode E2E passes. App ✅: Account → Payment (add/remove cards, Stripe's secure form), request sheet shows "Pay with Visa •••• 4242 · Change" and asks for a card when none is saved. Left: Apple Pay (needs Apple Developer account merchant ID + Stripe native plugin), Google Pay (Play account) |
 | C3 | Cancellation fees, refunds, disputes handling, webhook hardening | 🛠 | 🟡 |
 | C4 | Stripe Connect Express for driver payouts + 1099s | 🤝 | ⬜ |
 | C5 | Sales tax review for services in your state | 👤 accountant | ⬜ |

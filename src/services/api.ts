@@ -127,6 +127,10 @@ export interface CreateBookingPayload {
   location: { address: string; lat: number; lng: number }
   dropoffLocation?: { address: string; lat: number; lng: number }
   notes?: string
+  /** C2: the saved card to hold the price on (required when card payments are on). */
+  paymentMethodId?: string
+  /** One per Request tap, so a retried tap never places a second hold. */
+  requestId?: string
 }
 
 export async function createBooking(payload: CreateBookingPayload): Promise<ApiResponse<Booking>> {
@@ -268,6 +272,28 @@ export async function createRealtimeTicket(): Promise<TicketResult> {
   return { ok: false }
 }
 
+/** C2: a saved card (Stripe keeps the number; AID only ever sees brand and last four digits). */
+export interface SavedCard {
+  id: string
+  brand: string
+  last4: string
+  expMonth: number | null
+  expYear: number | null
+}
+
+export async function listPaymentMethods(): Promise<ApiResponse<{ enabled: boolean; methods: SavedCard[] }>> {
+  return apiFetch('/payments/methods')
+}
+
+/** Starts Stripe's secure "save a card" form; the secret is only used by Stripe's form. */
+export async function createCardSetup(): Promise<ApiResponse<{ clientSecret: string }>> {
+  return apiFetch('/payments/setup-intent', { method: 'POST', body: JSON.stringify({}) })
+}
+
+export async function removePaymentMethod(paymentMethodId: string): Promise<ApiResponse<void>> {
+  return apiFetch(`/payments/methods/${encodeURIComponent(paymentMethodId)}`, { method: 'DELETE' })
+}
+
 export async function createPaymentIntent(bookingId: string) {
   return apiFetch<{ id: string; clientSecret: string; amount: number; currency: string; status: string }>('/payments/create-intent', {
     method: 'POST', body: JSON.stringify({ bookingId }),
@@ -292,6 +318,7 @@ export const apiService = {
   listPendingRatings, submitRating, getSupportConfig, createSupportReport, listSupportReports,
   listJobMessages, sendJobMessage, markJobMessagesRead, blockJobParty,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, updateDriverVehicle, createPaymentIntent,
+  listPaymentMethods, createCardSetup, removePaymentMethod,
   createRealtimeTicket,
 }
 

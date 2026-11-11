@@ -1116,3 +1116,16 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 .rating-done-icon { background: rgba(242, 196, 109, .12); color: var(--aid-warning); }
 .rating-done-icon svg { fill: var(--aid-warning); }
 .rating-comment { margin-top: 18px; }
+
+/* C2: payment — card on the request sheet, add-card sheet, saved cards */
+.request-pay { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; }
+.request-pay__text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.request-pay__text strong { font-size: .9375rem; }
+.request-pay__text small { color: var(--aid-muted); font-size: .8125rem; line-height: 1.35; }
+.request-pay--add { border: 1px dashed rgba(139,92,246,.55); background: rgba(139,92,246,.08); }
+.request-pay--add .request-pay__text strong { color: #d9cff0; }
+.add-card__form { min-height: 150px; padding: 4px 0 8px; }
+.add-card__note { display: flex; gap: 7px; align-items: flex-start; margin-top: 10px; color: var(--aid-muted); font-size: .8125rem; line-height: 1.45; }
+.add-card__note svg { flex: none; margin-top: 2px; }
+.pay-choices { display: grid; gap: 8px; }
+.pay-remove { color: #ff9a91; }
