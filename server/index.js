@@ -8,7 +8,8 @@ const { PostgresRepository } = require('./repository');
 const { databaseSslConfig } = require('./config');
 const { expiryConfigFromEnv } = require('./lifecycle');
 const { startExpirySweep } = require('./expiry');
-const { createPayments } = require('./payments');
+const { createPayments, paymentConfigFromEnv } = require('./payments');
+const { createPayouts, createStripeV2 } = require('./payouts');
 const { createLogger, securityConfigFromEnv } = require('./security');
 const { rateLimitsFromEnv } = require('./rateLimit');
 const { serializeError } = require('./redact');
@@ -89,9 +90,16 @@ const documentStorage = {
 const realtimeConfig = realtimeConfigFromEnv(process.env);
 const realtime = createRealtimeHub({ ...realtimeConfig, radiusMiles: radiusFromEnv(process.env), logger });
 // C2: one payments service for the API and the background sweep (settles card holds on ended jobs).
-const payments = createPayments({ stripe, repository, logger });
+const paymentConfig = paymentConfigFromEnv();
+const payments = createPayments({ stripe, repository, logger, config: paymentConfig });
+// C4: driver payouts. PUBLIC_API_URL is where Stripe sends drivers back after payout setup.
+const publicUrl = (process.env.PUBLIC_API_URL || `http://127.0.0.1:${process.env.PORT || 3001}`).replace(/\/$/, '');
+const stripeV2 = stripe ? createStripeV2(stripeKey) : null;
+const payouts = createPayouts({ stripe, stripeV2, repository, logger, config: paymentConfig, publicUrl });
 const app = createApp({
   payments,
+  payouts,
+  paymentConfig,
   realtime,
   realtimeEnabled: realtimeConfig.enabled,
   auth,
@@ -113,6 +121,7 @@ const host = process.env.HOST || '127.0.0.1';
 const server = app.listen(port, host, () => {
   logger.info({ msg: `AID API listening on http://${host}:${port}` });
   logger.info({ msg: `Postgres pool configured | Stripe: ${stripe ? 'configured' : 'not configured'}` });
+  logger.info({ msg: 'payments', cancellationFee: paymentConfig.cancellationFeeCents / 100, freeCancelMinutes: paymentConfig.freeCancelMinutes, driverPayoutPercent: paymentConfig.driverPayoutPercent, payoutReturnUrl: `${publicUrl}/payouts/done` });
   logger.info({ msg: `Requests expire after ${expiryConfig.requestExpiryMinutes} min without a driver; silent jobs are released after ${expiryConfig.staleJobMinutes} min; sweep every ${expiryConfig.sweepSeconds} s` });
   logger.info({
     msg: 'security', corsOrigins: security.corsOrigin, trustProxy: security.trustProxy, hsts: security.hsts.enabled,
@@ -127,6 +136,7 @@ const expirySweep = startExpirySweep({
   repository,
   onExpired: async (result) => {
     await payments.settle([...result.expired, ...result.released]); // release holds on jobs that ended on their own
+    await payouts.processPending();
     await notifyEnded(realtime, repository, result);
   },
   intervalMs: expiryConfig.sweepSeconds * 1000,
@@ -135,7 +145,9 @@ const expirySweep = startExpirySweep({
 void expirySweep.tick();
 // C2: retry any charge or release that failed earlier (Stripe outage, network). Idempotent.
 const paymentSweep = payments.enabled ? setInterval(() => {
-  payments.settle().catch((error) => logger.warn({ msg: 'payment sweep failed', error: error && error.message }));
+  payments.settle()
+    .then(() => payouts.processPending()) // drivers who just finished payout setup get their waiting earnings
+    .catch((error) => logger.warn({ msg: 'payment sweep failed', error: error && error.message }));
 }, expiryConfig.sweepSeconds * 1000) : null;
 if (paymentSweep && typeof paymentSweep.unref === 'function') paymentSweep.unref();
 

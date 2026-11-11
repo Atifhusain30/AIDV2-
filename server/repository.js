@@ -145,6 +145,7 @@ function mapBooking(row) {
       status: row.payment_status,
       amount: dollars(row.final_price_cents || row.estimated_price_cents),
       ...(row.payment_card_last4 ? { brand: row.payment_card_brand || 'card', last4: row.payment_card_last4 } : {}),
+      ...(row.refunded_cents ? { refunded: dollars(row.refunded_cents) } : {}),
     } : undefined,
     driverLocation: row.driver_lat == null ? undefined : { lat: row.driver_lat, lng: row.driver_lng },
     createdAt: row.created_at,
@@ -156,6 +157,7 @@ function mapBooking(row) {
     expiredAt: row.expired_at || undefined,
   };
   if (row.cancelled_by) booking.cancelledBy = row.cancelled_by;
+  if (row.cancellation_fee_cents) booking.cancellationFee = dollars(row.cancellation_fee_cents);
   // Why the server ended it on its own (E4): 'no_driver_found' (expired) or 'driver_unresponsive'.
   if (row.system_end_reason) booking.endReason = row.system_end_reason;
   if (row.dropoff_address) booking.dropoffLocation = { address: row.dropoff_address, lat: row.dropoff_lat, lng: row.dropoff_lng };
@@ -819,7 +821,7 @@ class PostgresRepository {
    * customer/driver), stamping the matching *_at column and writing an audit event atomically.
    * Ending a job (completed/cancelled) clears the driver's last shared position on the booking.
    */
-  async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrentStatuses, { reason = null } = {}) {
+  async updateBookingStatus(bookingId, actorId, role, nextStatus, allowedCurrentStatuses, { reason = null, cancellationFeeCents = 0 } = {}) {
     const ownership = role === 'customer' ? 'customer_id=$2' : 'driver_id=$2';
     const result = await this.pool.query(`
       with prev as (
@@ -831,6 +833,7 @@ class PostgresRepository {
           started_at=case when $3='in_progress' then now() else b.started_at end,
           completed_at=case when $3='completed' then now() else b.completed_at end,
           cancelled_at=case when $3='cancelled' then now() else b.cancelled_at end,
+          cancellation_fee_cents=case when $3='cancelled' and $6::int > 0 then $6::int else b.cancellation_fee_cents end,
           driver_lat=case when $3 in ('completed','cancelled') then null else b.driver_lat end,
           driver_lng=case when $3 in ('completed','cancelled') then null else b.driver_lng end
         from prev where b.id=prev.id
@@ -840,7 +843,9 @@ class PostgresRepository {
         select id, $2, 'status_changed', from_status, $3, $5::jsonb from upd
       )
       select id from upd
-    `, [bookingId, actorId, nextStatus, allowedCurrentStatuses, JSON.stringify(reason ? { role, reason } : { role })]);
+    `, [bookingId, actorId, nextStatus, allowedCurrentStatuses,
+      JSON.stringify({ role, ...(reason ? { reason } : {}), ...(cancellationFeeCents > 0 ? { cancellationFeeCents } : {}) }),
+      Math.max(0, Math.round(cancellationFeeCents || 0))]);
     return result.rows[0] ? this.selectParticipantBooking(result.rows[0].id, role) : null;
   }
 
@@ -1270,13 +1275,16 @@ class PostgresRepository {
 
   /**
    * Record a payment state from Stripe (webhook or settlement). Final states never move back to an
-   * earlier one when events arrive out of order: succeeded only to refunded; canceled/refunded never.
+   * earlier one when events arrive out of order: succeeded only to refunded/disputed, disputed back to
+   * succeeded (won) or refunded (lost); canceled/refunded never.
    */
   async updatePaymentStatus(paymentIntentId, paymentStatus) {
     const result = await this.pool.query(`
       update public.bookings set payment_status=$2
       where payment_intent_id=$1
-        and (payment_status not in ('succeeded','canceled','refunded') or (payment_status='succeeded' and $2::text in ('succeeded','refunded')))
+        and (payment_status not in ('succeeded','canceled','refunded','disputed')
+          or (payment_status='succeeded' and $2::text in ('succeeded','refunded','disputed'))
+          or (payment_status='disputed' and $2::text in ('succeeded','refunded')))
       returning *
     `, [paymentIntentId, paymentStatus]);
     return mapBooking(result.rows[0]);
@@ -1299,13 +1307,122 @@ class PostgresRepository {
   /** C2: card holds on jobs that have ended (charge if completed, release otherwise). */
   async listUnsettledPayments(bookingIds = null) {
     const result = await this.pool.query(`
-      select id, status, payment_intent_id from public.bookings
+      select id, status, payment_intent_id, driver_id, cancellation_fee_cents from public.bookings
       where payment_status='authorized' and payment_intent_id is not null
         and status in ('completed','cancelled','expired')
         and ($1::uuid[] is null or id = any($1::uuid[]))
       order by updated_at nulls first limit 100
     `, [bookingIds]);
-    return result.rows.map((row) => ({ bookingId: row.id, status: row.status, intentId: row.payment_intent_id }));
+    return result.rows.map((row) => ({
+      bookingId: row.id, status: row.status, intentId: row.payment_intent_id, driverId: row.driver_id || null,
+      cancellationFeeCents: row.cancellation_fee_cents || 0,
+    }));
+  }
+
+  /** C3/C4: a charge went through — store it and queue the driver's share (when there is a driver). */
+  async recordCapture(paymentIntentId, { capturedCents, chargeId, payoutCents }) {
+    const result = await this.pool.query(`
+      update public.bookings set payment_status='succeeded', final_price_cents=$2::int,
+        payment_charge_id=coalesce($3::text, payment_charge_id),
+        payout_status=case when $4::int > 0 and driver_id is not null and payout_status='none' then 'pending' else payout_status end,
+        payout_amount_cents=case when $4::int > 0 and driver_id is not null and payout_status='none' then $4::int else payout_amount_cents end
+      where payment_intent_id=$1 and payment_status in ('authorized','processing','pending','failed')
+      returning id
+    `, [paymentIntentId, capturedCents, chargeId, payoutCents]);
+    return result.rows[0] ? result.rows[0].id : null;
+  }
+
+  /** Server-only money facts for one booking (refunds). */
+  async getChargeDetails(bookingId) {
+    const result = await this.pool.query(`
+      select payment_intent_id, payment_status, final_price_cents, refunded_cents, payout_status, payout_amount_cents, payout_transfer_id
+      from public.bookings where id=$1
+    `, [bookingId]);
+    const row = result.rows[0];
+    return row ? {
+      intentId: row.payment_intent_id, paymentStatus: row.payment_status, capturedCents: row.final_price_cents || 0,
+      refundedCents: row.refunded_cents || 0, payoutStatus: row.payout_status, payoutAmountCents: row.payout_amount_cents || 0,
+      payoutTransferId: row.payout_transfer_id,
+    } : null;
+  }
+
+  /** Record a refund; the driver's share is reduced by what was taken back (or never sent). */
+  async recordRefund(bookingId, { amountCents, full, payoutReductionCents }) {
+    const result = await this.pool.query(`
+      update public.bookings set refunded_cents=refunded_cents + $2::int,
+        payment_status=case when $3::boolean then 'refunded' else payment_status end,
+        payout_amount_cents=case when payout_amount_cents is null then null else greatest(0, payout_amount_cents - $4::int) end,
+        payout_status=case when payout_status='pending' and coalesce(payout_amount_cents, 0) - $4::int <= 0 then 'none'
+                           when payout_status='paid' and $3::boolean and $4::int > 0 then 'reversed' else payout_status end
+      where id=$1 returning id
+    `, [bookingId, amountCents, full, payoutReductionCents || 0]);
+    if (!result.rows[0]) return null;
+    await this.pool.query(`insert into public.booking_events (booking_id, actor_id, event_type, from_status, to_status, metadata)
+      select id, null, 'payment_refunded', status, status, jsonb_build_object('amountCents', $2::int, 'full', $3::boolean) from public.bookings where id=$1`,
+    [bookingId, amountCents, full]).catch(() => {});
+    return this.selectParticipantBooking(bookingId, 'customer');
+  }
+
+  /** C4: the driver's Stripe payout account. */
+  async getDriverStripeAccount(driverId) {
+    const result = await this.pool.query('select stripe_account_id, payouts_ready from public.driver_profiles where profile_id=$1', [driverId]);
+    return { accountId: result.rows[0]?.stripe_account_id || null, ready: Boolean(result.rows[0]?.payouts_ready) };
+  }
+
+  async setDriverStripeAccount(driverId, accountId) {
+    const result = await this.pool.query(`
+      update public.driver_profiles set stripe_account_id=coalesce(stripe_account_id, $2) where profile_id=$1 returning stripe_account_id
+    `, [driverId, accountId]);
+    return result.rows[0]?.stripe_account_id || null;
+  }
+
+  async setPayoutsReady(driverId, ready) {
+    await this.pool.query('update public.driver_profiles set payouts_ready=$2 where profile_id=$1', [driverId, Boolean(ready)]);
+  }
+
+  async listPendingPayouts(limit = 100) {
+    const result = await this.pool.query(`
+      select b.id, b.driver_id, b.payout_amount_cents, b.payment_charge_id, dp.stripe_account_id, dp.payouts_ready
+      from public.bookings b join public.driver_profiles dp on dp.profile_id=b.driver_id
+      where b.payout_status='pending' and b.payment_status='succeeded'
+      order by b.completed_at nulls last limit $1
+    `, [limit]);
+    return result.rows.map((row) => ({
+      bookingId: row.id, driverId: row.driver_id, amountCents: row.payout_amount_cents || 0, chargeId: row.payment_charge_id,
+      stripeAccountId: row.stripe_account_id, payoutsReady: Boolean(row.payouts_ready),
+    }));
+  }
+
+  async recordPayout(bookingId, { status, transferId }) {
+    await this.pool.query(`
+      update public.bookings set payout_status=$2, payout_transfer_id=coalesce($3, payout_transfer_id), payout_at=case when $2='paid' then now() else payout_at end
+      where id=$1 and payout_status='pending'
+    `, [bookingId, status, transferId || null]);
+  }
+
+  /** What a driver has earned: totals and the last 50 paid jobs (amounts are the driver's share). */
+  async listDriverEarnings(driverId) {
+    const [totals, jobs] = await Promise.all([
+      this.pool.query(`
+        select coalesce(sum(payout_amount_cents) filter (where payout_status='pending'), 0)::int as pending,
+               coalesce(sum(payout_amount_cents) filter (where payout_status='paid'), 0)::int as paid,
+               coalesce(sum(payout_amount_cents) filter (where payout_status in ('pending','paid') and coalesce(completed_at, cancelled_at) >= date_trunc('week', now())), 0)::int as week
+        from public.bookings where driver_id=$1
+      `, [driverId]),
+      this.pool.query(`
+        select id, service_name, status, payout_status, payout_amount_cents, coalesce(completed_at, cancelled_at) as finished_at
+        from public.bookings where driver_id=$1 and payout_status <> 'none'
+        order by coalesce(completed_at, cancelled_at) desc nulls last limit 50
+      `, [driverId]),
+    ]);
+    const t = totals.rows[0] || { pending: 0, paid: 0, week: 0 };
+    return {
+      pending: dollars(t.pending) || 0, paid: dollars(t.paid) || 0, thisWeek: dollars(t.week) || 0,
+      jobs: jobs.rows.map((row) => ({
+        bookingId: row.id, service: row.service_name, jobStatus: row.status, payoutStatus: row.payout_status,
+        amount: dollars(row.payout_amount_cents) || 0, finishedAt: row.finished_at,
+      })),
+    };
   }
 }
 

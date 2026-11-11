@@ -5,7 +5,8 @@ const {
   todayIso, parseIsoDate, cleanNotes, verificationReadiness, credentialsCurrent,
 } = require('./verification');
 const { quoteService, PricingError, TOWING } = require('./pricing');
-const { createPayments, PaymentError } = require('./payments');
+const { createPayments, PaymentError, DEFAULT_PAYMENT_CONFIG } = require('./payments');
+const { createPayouts } = require('./payouts');
 const { checkRequest, checkTransition, DEFAULT_REQUEST_EXPIRY_MINUTES } = require('./lifecycle');
 const {
   MESSAGE_MAX, REPORTS_PER_HOUR, STATUS_FILTERS, ALL_CATEGORIES, categoriesFor, cleanReport, checkAdminUpdate, supportContactFromEnv,
@@ -94,7 +95,7 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: injectedPayments, documentStorage, accountAdmin, corsOrigin = DEFAULT_CORS_ORIGINS, requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now(),
+function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: injectedPayments, payouts: injectedPayouts, stripeV2, paymentConfig = DEFAULT_PAYMENT_CONFIG, publicUrl, documentStorage, accountAdmin, corsOrigin = DEFAULT_CORS_ORIGINS, requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now(),
   logger = silentLogger, rateLimits = rateLimitsFromEnv(), rateLimitStore, trustProxy = false, hsts = { enabled: false },
   jsonBodyLimit = '100kb', documentMaxBytes = 10 * 1024 * 1024, realtime, realtimeEnabled = true }) {
   const app = express();
@@ -102,8 +103,17 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
   const hub = realtime || createRealtimeHub({ clock, radiusMiles: requestRadiusMiles, logger });
   app.locals.realtime = hub;
   // C2: card holds and settlement (payments.js). index.js shares one with the background sweep.
-  const payments = injectedPayments || createPayments({ stripe, repository, logger });
+  const payments = injectedPayments || createPayments({ stripe, repository, logger, config: paymentConfig });
   app.locals.payments = payments;
+  // C4: drivers' share of each charged job, sent to their Stripe payout account.
+  const payouts = injectedPayouts || createPayouts({ stripe, stripeV2, repository, logger, config: payments.config || paymentConfig, publicUrl });
+  app.locals.payouts = payouts;
+  /** Charge/release ended jobs, then pay drivers whatever became payable. Never throws. */
+  const settleAndPay = async (bookingIds) => {
+    const settled = await payments.settle(bookingIds);
+    if (settled.some((item) => item.status === 'succeeded')) await payouts.processPending();
+    return settled;
+  };
   // A realtime signal must never break or slow down the write that caused it.
   const notify = (fn) => {
     try { fn(); } catch (error) { logger.warn({ msg: 'realtime notify failed', error: error && error.message }); }
@@ -113,7 +123,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
     const result = await repository.expireStaleBookings(scope);
     if (result && ((result.expired && result.expired.length) || (result.released && result.released.length))) {
       // C2: the card hold on a job that ended on its own is released.
-      await payments.settle([...(result.expired || []), ...(result.released || [])]);
+      await settleAndPay([...(result.expired || []), ...(result.released || [])]);
       notifyEnded(hub, repository, result).catch((error) => logger.warn({ msg: 'realtime expiry notify failed', error: error && error.message }));
     }
     return result;
@@ -143,6 +153,14 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
   app.use(securityHeaders({ hsts }));
   app.use(corsGuard(corsOrigin));
   app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+  // C4: where Stripe sends a driver after payout setup (no data here; the app re-checks with Stripe).
+  const PAYOUT_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+  const payoutPage = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#050406;color:#f5f1fa;font:16px/1.5 -apple-system,system-ui,sans-serif;text-align:center;padding:24px}
+a{display:inline-block;margin-top:18px;padding:14px 22px;border-radius:14px;background:#7c3aed;color:#fff;text-decoration:none;font-weight:700}</style></head>
+<body><main><h1>${title}</h1><p>${body}</p><a href="com.aid.roadside://payouts">Back to AID</a></main></body></html>`;
+  app.get('/payouts/done', (_req, res) => res.set('Content-Security-Policy', PAYOUT_PAGE_CSP).type('html').send(payoutPage('Payout setup saved', 'Return to the AID app. Your earnings are sent to your bank once Stripe finishes checking your details.')));
+  app.get('/payouts/refresh', (_req, res) => res.set('Content-Security-Policy', PAYOUT_PAGE_CSP).type('html').send(payoutPage('Link expired', 'Open AID and tap “Set up payouts” again to continue where you left off.')));
   // E3: per-IP ceiling on everything below (health checks above are never limited).
   app.use(limit.global);
 
@@ -155,6 +173,18 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
       if (event.type === 'payment_intent.processing') await repository.updatePaymentStatus(event.data.object.id, 'processing');
       if (event.type === 'payment_intent.amount_capturable_updated') await repository.updatePaymentStatus(event.data.object.id, 'authorized');
       if (event.type === 'payment_intent.canceled') await repository.updatePaymentStatus(event.data.object.id, 'canceled');
+      // C3: refunds made in the Stripe dashboard, and chargebacks (customer's bank disputes the charge).
+      const intentOf = (object) => (typeof object.payment_intent === 'string' ? object.payment_intent : object.payment_intent && object.payment_intent.id);
+      if (event.type === 'charge.refunded' && event.data.object.refunded && intentOf(event.data.object)) {
+        await repository.updatePaymentStatus(intentOf(event.data.object), 'refunded');
+      }
+      if (event.type === 'charge.dispute.created' && intentOf(event.data.object)) {
+        await repository.updatePaymentStatus(intentOf(event.data.object), 'disputed');
+        logger.warn({ msg: 'payment disputed — respond in the Stripe dashboard', paymentIntent: intentOf(event.data.object) });
+      }
+      if (event.type === 'charge.dispute.closed' && intentOf(event.data.object)) {
+        await repository.updatePaymentStatus(intentOf(event.data.object), event.data.object.status === 'won' ? 'succeeded' : 'refunded');
+      }
       res.json({ received: true });
     } catch (_error) {
       res.status(400).json({ error: 'Invalid webhook signature' });
@@ -222,6 +252,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
   app.delete('/api/me', authenticate, limit.accountChange, async (req, res, next) => {
     try {
       if (!accountAdmin) return res.status(503).json({ error: 'Account deletion is not configured' });
+      await payments.forgetCustomer(req.auth.identity); // saved cards go with the account
       await accountAdmin.deleteUser(req.auth.identity.id);
       res.status(204).end();
     } catch (error) { next(error); }
@@ -475,7 +506,10 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
           : { error: verdict.error });
       }
       // Compare-and-set on the exact status we validated, so a concurrent change is a 409, never a skipped step.
-      let booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, role, nextStatus, [verdict.from], { reason: verdict.reason });
+      // C3: a customer cancelling after the free window pays the cancellation fee (server-computed).
+      const cancellationFeeCents = role === 'customer' && nextStatus === 'cancelled' && current.payment?.status === 'authorized'
+        ? payments.cancellationFeeCents(current, clock()) : 0;
+      let booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, role, nextStatus, [verdict.from], { reason: verdict.reason, cancellationFeeCents });
       if (!booking) {
         const latest = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
         return res.status(409).json({ error: 'This job was just updated. Showing the latest status.', currentStatus: latest?.status, booking: latest });
@@ -483,7 +517,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
       // C2: completed → charge the hold; cancelled → release it. Never blocks the status change
       // (settle() logs failures and the background sweep retries).
       if (payments.enabled && (nextStatus === 'completed' || nextStatus === 'cancelled') && booking.payment?.status === 'authorized') {
-        if ((await payments.settle([booking.id])).length) {
+        if ((await settleAndPay([booking.id])).length) {
           booking = (await repository.getBooking(booking.id, req.auth.identity.id, role)) || booking;
         }
       }
@@ -915,7 +949,7 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
   app.get('/api/payments/methods', authenticate, requireRole('customer'), async (req, res, next) => {
     try {
       if (!payments.enabled) return res.json({ enabled: false, methods: [] });
-      res.json({ enabled: true, methods: await payments.listCards(req.auth.identity) });
+      res.json({ enabled: true, methods: await payments.listCards(req.auth.identity), policy: payments.policy() });
     } catch (error) { next(error); }
   });
   app.post('/api/payments/setup-intent', authenticate, requireRole('customer'), limit.accountChange, async (req, res, next) => {
@@ -929,6 +963,34 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: in
       if (!payments.enabled) return res.status(503).json({ error: 'Payments are not configured' });
       if (!await payments.removeCard(req.auth.identity, req.params.paymentMethodId)) return res.status(404).json({ error: 'Card not found' });
       res.status(204).end();
+    } catch (error) { next(error); }
+  });
+
+  // ---- C3: refunds (admin, from Stripe-side records; the driver's share shrinks in proportion) ----
+  app.post('/api/admin/bookings/:bookingId/refund', authenticate, requireAdmin, async (req, res, next) => {
+    try {
+      if (!payments.enabled) return res.status(503).json({ error: 'Payments are not configured' });
+      const dollarsRequested = req.body.amount;
+      if (dollarsRequested != null && !(typeof dollarsRequested === 'number' && Number.isFinite(dollarsRequested))) {
+        return res.status(400).json({ error: 'Amount must be a number of dollars, or left out for a full refund.' });
+      }
+      const result = await payments.refund(req.params.bookingId, dollarsRequested == null ? null : Math.round(dollarsRequested * 100));
+      logger.info({ msg: 'refund issued', bookingId: req.params.bookingId, amountCents: result.amountCents, adminId: req.auth.identity.id });
+      res.json({ amount: result.amountCents / 100, full: result.full, payoutReversed: result.payoutReversedCents / 100, booking: result.booking });
+    } catch (error) {
+      if (error instanceof PaymentError) return res.status(error.status).json({ error: error.message, code: error.code });
+      next(error);
+    }
+  });
+
+  // ---- C4: driver payouts (Stripe hosts identity, tax and bank details) ----
+  app.get('/api/drivers/me/payouts', authenticate, requireRole('driver'), async (req, res, next) => {
+    try { res.json(await payouts.summary(req.auth.identity.id)); } catch (error) { next(error); }
+  });
+  app.post('/api/drivers/me/payouts/onboarding', authenticate, requireRole('driver'), limit.accountChange, async (req, res, next) => {
+    try {
+      if (!payouts.canOnboard) return res.status(503).json({ error: 'Payouts are not configured' });
+      res.json(await payouts.onboardingLink(req.auth.identity, req.auth.profile));
     } catch (error) { next(error); }
   });
 

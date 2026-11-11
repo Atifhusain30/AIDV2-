@@ -64,8 +64,9 @@ test('payment status cannot be downgraded after success', async () => {
   await repository.updatePaymentStatus('pi_1', 'processing');
 
   // Final states (charged, released, refunded) never move back when Stripe events arrive out of order.
-  assert.match(captured.text, /payment_status not in \('succeeded','canceled','refunded'\)/i);
-  assert.match(captured.text, /payment_status='succeeded' and \$2::text in \('succeeded','refunded'\)/i);
+  assert.match(captured.text, /payment_status not in \('succeeded','canceled','refunded','disputed'\)/i);
+  assert.match(captured.text, /payment_status='succeeded' and \$2::text in \('succeeded','refunded','disputed'\)/i);
+  assert.match(captured.text, /payment_status='disputed' and \$2::text in \('succeeded','refunded'\)/i);
 });
 
 test('C2: a booking stores its card hold and shows only brand and last four digits', async () => {
@@ -107,9 +108,9 @@ test('C2: settlement only picks up holds on jobs that have ended', async () => {
   let captured;
   const repository = new PostgresRepository(poolWith(async (text, values) => {
     captured = { text, values };
-    return { rows: [{ id: 'b-1', status: 'completed', payment_intent_id: 'pi_1' }] };
+    return { rows: [{ id: 'b-1', status: 'completed', payment_intent_id: 'pi_1', driver_id: 'd-1', cancellation_fee_cents: null }] };
   }));
-  assert.deepEqual(await repository.listUnsettledPayments(['b-1']), [{ bookingId: 'b-1', status: 'completed', intentId: 'pi_1' }]);
+  assert.deepEqual(await repository.listUnsettledPayments(['b-1']), [{ bookingId: 'b-1', status: 'completed', intentId: 'pi_1', driverId: 'd-1', cancellationFeeCents: 0 }]);
   assert.match(captured.text, /payment_status='authorized'/);
   assert.match(captured.text, /status in \('completed','cancelled','expired'\)/);
   assert.deepEqual(captured.values, [['b-1']]);
@@ -227,7 +228,7 @@ test('status changes are compare-and-set, timestamped, audited and stop location
   assert.match(text, /driver_lat=case when \$3 in \('completed','cancelled'\) then null/);
   assert.match(text, /insert into public\.booking_events \(booking_id, actor_id, event_type, from_status, to_status, metadata\)/);
   assert.match(text, /select id, \$2, 'status_changed', from_status, \$3, \$5::jsonb from upd/);
-  assert.deepEqual(values, ['booking-9', 'driver-1', 'cancelled', ['arrived'], JSON.stringify({ role: 'driver', reason: 'cannot_reach_customer' })]);
+  assert.deepEqual(values, ['booking-9', 'driver-1', 'cancelled', ['arrived'], JSON.stringify({ role: 'driver', reason: 'cannot_reach_customer' }), 0]);
 
   await repository.updateBookingStatus('booking-9', 'customer-1', 'customer', 'cancelled', ['accepted']);
   assert.match(calls[2].text, /customer_id=\$2/);
@@ -413,4 +414,41 @@ test('driver position: stored with a timestamp, ignored when stale, forgotten wh
   await repository.updateDriverOnlineStatus('driver-1', false);
   assert.match(calls[2].text, /current_lat = case when \$2 then current_lat end/);
   assert.match(calls[2].text, /current_location_at = case when \$2 then current_location_at end/);
+});
+
+test('C3: a customer cancellation fee is stored with the cancel and noted on the audit event', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => { calls.push({ text, values }); return { rows: [PARTY_ROW] }; }));
+  await repository.updateBookingStatus('booking-9', 'customer-1', 'customer', 'cancelled', ['en_route'], { reason: 'wait_too_long', cancellationFeeCents: 1000 });
+  assert.match(calls[0].text, /cancellation_fee_cents=case when \$3='cancelled' and \$6::int > 0 then \$6::int/);
+  assert.equal(calls[0].values[5], 1000);
+  assert.deepEqual(JSON.parse(calls[0].values[4]), { role: 'customer', reason: 'wait_too_long', cancellationFeeCents: 1000 });
+});
+
+test('C4: a capture stores the charge and queues the driver share only once', async () => {
+  let captured;
+  const repository = new PostgresRepository(poolWith(async (text, values) => { captured = { text, values }; return { rows: [{ id: 'b-1' }] }; }));
+  assert.equal(await repository.recordCapture('pi_1', { capturedCents: 6900, chargeId: 'ch_1', payoutCents: 5520 }), 'b-1');
+  assert.deepEqual(captured.values, ['pi_1', 6900, 'ch_1', 5520]);
+  assert.match(captured.text, /payout_status='none' then 'pending'/);
+  assert.match(captured.text, /payment_status in \('authorized','processing','pending','failed'\)/);
+});
+
+test('C4: pending payouts join the driver payout account; payouts are recorded once', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => {
+    calls.push({ text, values });
+    return { rows: [{ id: 'b-1', driver_id: 'd-1', payout_amount_cents: 5520, payment_charge_id: 'ch_1', stripe_account_id: 'acct_1', payouts_ready: true }] };
+  }));
+  assert.deepEqual(await repository.listPendingPayouts(), [{ bookingId: 'b-1', driverId: 'd-1', amountCents: 5520, chargeId: 'ch_1', stripeAccountId: 'acct_1', payoutsReady: true }]);
+  await repository.recordPayout('b-1', { status: 'paid', transferId: 'tr_1' });
+  assert.match(calls[1].text, /where id=\$1 and payout_status='pending'/);
+});
+
+test('C3: a refund reduces the driver share and logs an event', async () => {
+  const calls = [];
+  const repository = new PostgresRepository(poolWith(async (text, values) => { calls.push({ text, values }); return { rows: [{ id: 'b-1', ...PARTY_ROW }] }; }));
+  await repository.recordRefund('b-1', { amountCents: 3450, full: false, payoutReductionCents: 2760 });
+  assert.deepEqual(calls[0].values, ['b-1', 3450, false, 2760]);
+  assert.match(calls[1].text, /'payment_refunded'/);
 });

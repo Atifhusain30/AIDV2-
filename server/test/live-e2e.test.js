@@ -366,6 +366,20 @@ test('live Supabase customer → verified driver → document → completed book
       assert.equal(customerBooking.payment.status, 'succeeded', 'completing the job charges the card');
       const charged = await stripe.paymentIntents.retrieve(customerBooking.payment.intentId);
       assert.deepEqual([charged.status, charged.amount_received], ['succeeded', 9500]);
+      // C4: 80% of the charge waits for the driver (no payout account yet), tied to the charge.
+      const payout = (await pool.query('select payout_status, payout_amount_cents, payment_charge_id, final_price_cents from public.bookings where id=$1', [bookingId])).rows[0];
+      assert.deepEqual([payout.payout_status, payout.payout_amount_cents, payout.final_price_cents], ['pending', 7600, 9500]);
+      assert.match(payout.payment_charge_id, /^(ch|py)_/);
+      const earnings = await (await api('/drivers/me/payouts', driver.token)).json();
+      assert.deepEqual([earnings.hasAccount, earnings.ready, earnings.payoutPercent, earnings.pending], [false, false, 80, 76]);
+      // C3: an admin refunds $10 of it; Stripe refunds and the driver's waiting share shrinks by 80% of that.
+      assert.equal((await api(`/admin/bookings/${bookingId}/refund`, customer.token, { method: 'POST', body: JSON.stringify({ amount: 10 }) })).status, 403);
+      const refund = await api(`/admin/bookings/${bookingId}/refund`, reviewer.token, { method: 'POST', body: JSON.stringify({ amount: 10 }) });
+      assert.equal(refund.status, 200);
+      assert.deepEqual(await refund.json().then((r) => [r.amount, r.full]), [10, false]);
+      assert.equal((await stripe.paymentIntents.retrieve(customerBooking.payment.intentId, { expand: ['latest_charge'] })).latest_charge.amount_refunded, 1000);
+      const afterRefund = (await pool.query('select refunded_cents, payout_amount_cents, payment_status from public.bookings where id=$1', [bookingId])).rows[0];
+      assert.deepEqual([afterRefund.refunded_cents, afterRefund.payout_amount_cents, afterRefund.payment_status], [1000, 6800, 'succeeded']);
     }
     assert.equal(customerBooking.driver.phone, undefined, 'driver phone is hidden after the job');
     assert.equal(customerBooking.driverLocation, undefined, 'live location is hidden after the job');
@@ -601,6 +615,23 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal(await (await api('/bookings/active', driver.token)).json(), null, 'the driver no longer holds the job');
     const releaseEvent = await pool.query("select actor_id, from_status, metadata from public.booking_events where booking_id=$1 and to_status='cancelled'", [silentId]);
     assert.deepEqual(releaseEvent.rows[0], { actor_id: null, from_status: 'accepted', metadata: { role: 'system', reason: 'driver_unresponsive', afterMinutes: 60 } });
+
+    // C3: cancelling well after a driver accepted charges only the $10 cancellation fee.
+    if (stripe) {
+      const lateResponse = await api('/bookings', customer.token, { method: 'POST', body: jump('C3 late cancel') });
+      assert.equal(lateResponse.status, 201);
+      const lateId = (await lateResponse.json()).id;
+      e4BookingIds.push(lateId);
+      assert.equal((await api(`/bookings/${lateId}/accept`, driver.token, { method: 'POST' })).status, 200);
+      await pool.query("update public.bookings set accepted_at = now() - interval '10 minutes' where id=$1", [lateId]);
+      const lateCancel = await api(`/bookings/${lateId}/status`, customer.token, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled', reason: 'wait_too_long' }) });
+      assert.equal(lateCancel.status, 200);
+      const lateBody = await lateCancel.json();
+      assert.deepEqual([lateBody.status, lateBody.cancellationFee, lateBody.payment.status], ['cancelled', 10, 'succeeded']);
+      const feeIntent = await stripe.paymentIntents.retrieve(lateBody.payment.intentId);
+      assert.deepEqual([feeIntent.status, feeIntent.amount_received], ['succeeded', 1000], 'only the fee was charged');
+      assert.equal((await pool.query('select payout_amount_cents from public.bookings where id=$1', [lateId])).rows[0].payout_amount_cents, 800, 'the driver gets 80% of the fee');
+    }
 
     // One job per driver, guaranteed by the database too: a second job can't be attached, even directly.
     const holdResponse = await api('/bookings', otherCustomer.token, { method: 'POST', body: jump('E4 driver hold') });

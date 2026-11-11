@@ -9,7 +9,10 @@
  *      settle() is idempotent and retried by the background sweep, so a Stripe hiccup never loses money
  *      or leaves a hold on a customer's card.
  *
- * Cancellation fees and driver payouts are not here yet (C3/C4: need the owner's policy and pay split).
+ * C3: a customer who cancels after the free window (default 5 minutes after a driver accepts) pays the
+ * cancellation fee (default $10, never more than the job): only that part of the hold is captured.
+ * Refunds (admin) and disputes (webhook) are recorded on the booking; payouts.js sends the driver's share.
+ * Amounts are configurable (paymentConfigFromEnv); drivers and customers are told the same numbers.
  */
 
 class PaymentError extends Error {
@@ -22,6 +25,39 @@ class PaymentError extends Error {
 }
 
 const TERMINAL_FOR_PAYMENT = Object.freeze(['completed', 'cancelled', 'expired']);
+// Statuses in which a customer's cancellation can carry the fee (a driver is assigned and on the way).
+const FEE_STATUSES = Object.freeze(['accepted', 'en_route']);
+
+const DEFAULT_PAYMENT_CONFIG = Object.freeze({ cancellationFeeCents: 1000, freeCancelMinutes: 5, driverPayoutPercent: 80 });
+function numberFromEnv(value, fallback, min, max) {
+  const number = Number(value);
+  return value != null && value !== '' && Number.isFinite(number) && number >= min && number <= max ? number : fallback;
+}
+/** CANCELLATION_FEE (dollars, 0–50), CANCELLATION_FREE_MINUTES (0–60), DRIVER_PAYOUT_PERCENT (50–95). */
+function paymentConfigFromEnv(env = process.env) {
+  return {
+    cancellationFeeCents: Math.round(numberFromEnv(env.CANCELLATION_FEE, DEFAULT_PAYMENT_CONFIG.cancellationFeeCents / 100, 0, 50) * 100),
+    freeCancelMinutes: numberFromEnv(env.CANCELLATION_FREE_MINUTES, DEFAULT_PAYMENT_CONFIG.freeCancelMinutes, 0, 60),
+    driverPayoutPercent: numberFromEnv(env.DRIVER_PAYOUT_PERCENT, DEFAULT_PAYMENT_CONFIG.driverPayoutPercent, 50, 95),
+  };
+}
+
+/** The fee (cents) a customer pays for cancelling `booking` at `nowMs`: 0 inside the free window. */
+function cancellationFeeCents(booking, nowMs, config = DEFAULT_PAYMENT_CONFIG) {
+  if (!booking || !FEE_STATUSES.includes(booking.status) || !booking.acceptedAt || !config.cancellationFeeCents) return 0;
+  const acceptedMs = new Date(booking.acceptedAt).getTime();
+  if (!Number.isFinite(acceptedMs) || nowMs - acceptedMs < config.freeCancelMinutes * 60000) return 0;
+  return Math.min(config.cancellationFeeCents, Math.round(Number(booking.estimatedPrice || 0) * 100));
+}
+
+/** When the free window ends (ISO), or null when no fee can apply. */
+function freeCancelUntil(booking, config = DEFAULT_PAYMENT_CONFIG) {
+  if (!booking || !FEE_STATUSES.includes(booking.status) || !booking.acceptedAt || !config.cancellationFeeCents) return null;
+  const acceptedMs = new Date(booking.acceptedAt).getTime();
+  return Number.isFinite(acceptedMs) ? new Date(acceptedMs + config.freeCancelMinutes * 60000).toISOString() : null;
+}
+
+const driverShareCents = (capturedCents, config) => Math.floor((capturedCents * config.driverPayoutPercent) / 100);
 
 /** Stripe PaymentIntent status → bookings.payment_status. */
 function paymentStatusOf(intent) {
@@ -62,7 +98,7 @@ function cardOf(paymentMethod) {
   };
 }
 
-function createPayments({ stripe, repository, logger = { warn() {}, info() {} } }) {
+function createPayments({ stripe, repository, logger = { warn() {}, info() {} }, config = DEFAULT_PAYMENT_CONFIG }) {
   const enabled = Boolean(stripe);
 
   async function customerIdFor(identity, profile, { create }) {
@@ -136,6 +172,8 @@ function createPayments({ stripe, repository, logger = { warn() {}, info() {} } 
       intent = await stripe.paymentIntents.create({
         amount: amountCents, currency: 'usd', customer: owned.customer, payment_method: paymentMethodId,
         payment_method_types: ['card'], capture_method: 'manual', confirm: true, off_session: true,
+        // Stripe emails the receipt when the charge is captured (live mode).
+        ...(identity.email ? { receipt_email: identity.email } : {}),
         description, metadata: { ...metadata, customerId: identity.id },
       }, { idempotencyKey: `aid-hold-${identity.id}-${key}` });
     } catch (error) {
@@ -149,8 +187,18 @@ function createPayments({ stripe, repository, logger = { warn() {}, info() {} } 
     return { intentId: intent.id, status: 'authorized', brand: card.brand, last4: card.last4 };
   }
 
+  /** Save a captured charge: amount, charge id and (when a driver did the work) their share to pay out. */
+  async function recordCaptured(row, intent) {
+    const capturedCents = intent.amount_received ?? intent.amount ?? 0;
+    const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id || null;
+    await repository.recordCapture(row.intentId, {
+      capturedCents, chargeId, payoutCents: row.driverId && capturedCents > 0 ? driverShareCents(capturedCents, config) : 0,
+    });
+  }
+
   /**
-   * Charge or release every hold whose job has ended (all of them when `bookingIds` is null).
+   * Charge or release every hold whose job has ended (all of them when `bookingIds` is null):
+   * completed → capture all; cancelled with a fee → capture just the fee; otherwise release.
    * Never throws: failures are logged and the next sweep tries again.
    */
   async function settle(bookingIds = null) {
@@ -164,13 +212,15 @@ function createPayments({ stripe, repository, logger = { warn() {}, info() {} } 
     }
     const settled = [];
     for (const row of rows) {
-      const capture = row.status === 'completed';
+      const fee = row.status === 'cancelled' ? Number(row.cancellationFeeCents || 0) : 0;
+      const capture = row.status === 'completed' || fee > 0;
       try {
         const intent = capture
-          ? await stripe.paymentIntents.capture(row.intentId, {}, { idempotencyKey: `aid-capture-${row.intentId}` })
+          ? await stripe.paymentIntents.capture(row.intentId, fee > 0 ? { amount_to_capture: fee } : {}, { idempotencyKey: `aid-capture-${row.intentId}` })
           : await stripe.paymentIntents.cancel(row.intentId, {}, { idempotencyKey: `aid-release-${row.intentId}` });
         const status = paymentStatusOf(intent);
-        await repository.updatePaymentStatus(row.intentId, status);
+        if (status === 'succeeded') await recordCaptured(row, intent);
+        else await repository.updatePaymentStatus(row.intentId, status);
         settled.push({ bookingId: row.bookingId, status });
       } catch (error) {
         // Already settled elsewhere (dashboard, a retry) or the hold lapsed: record what Stripe says is true.
@@ -178,7 +228,8 @@ function createPayments({ stripe, repository, logger = { warn() {}, info() {} } 
           const intent = await stripe.paymentIntents.retrieve(row.intentId);
           const status = paymentStatusOf(intent);
           if (status !== 'authorized') {
-            await repository.updatePaymentStatus(row.intentId, status);
+            if (status === 'succeeded') await recordCaptured(row, intent);
+            else await repository.updatePaymentStatus(row.intentId, status);
             settled.push({ bookingId: row.bookingId, status });
             continue;
           }
@@ -189,7 +240,66 @@ function createPayments({ stripe, repository, logger = { warn() {}, info() {} } 
     return settled;
   }
 
-  return { enabled, startCardSetup, listCards, removeCard, hold, release, settle };
+  /**
+   * C3: refund part or all of a charged job (admin). The driver's share shrinks in proportion:
+   * a payout still waiting is reduced; one already sent is partly reversed from the driver's account.
+   */
+  async function refund(bookingId, amountCents = null) {
+    const charge = await repository.getChargeDetails(bookingId);
+    if (!charge || !charge.intentId || !['succeeded', 'disputed'].includes(charge.paymentStatus) || !charge.capturedCents) {
+      throw new PaymentError('This job has no charge to refund.', 'nothing_to_refund', 409);
+    }
+    const refundable = charge.capturedCents - charge.refundedCents;
+    const amount = amountCents == null ? refundable : Math.round(amountCents);
+    if (!Number.isInteger(amount) || amount <= 0 || amount > refundable) {
+      throw new PaymentError(`Refund between $0.01 and $${(refundable / 100).toFixed(2)}.`, 'invalid_refund_amount', 400);
+    }
+    const created = await stripe.refunds.create({
+      payment_intent: charge.intentId, amount, reason: 'requested_by_customer', metadata: { bookingId },
+    }, { idempotencyKey: `aid-refund-${bookingId}-${charge.refundedCents}-${amount}` });
+    const full = charge.refundedCents + amount >= charge.capturedCents;
+    // The driver gives back the same fraction of their share.
+    const payoutBack = charge.payoutAmountCents ? Math.min(charge.payoutAmountCents, Math.round((charge.payoutAmountCents * amount) / charge.capturedCents)) : 0;
+    let reversed = 0;
+    if (payoutBack > 0 && charge.payoutStatus === 'paid' && charge.payoutTransferId) {
+      try {
+        await stripe.transfers.createReversal(charge.payoutTransferId, { amount: payoutBack, metadata: { bookingId } },
+          { idempotencyKey: `aid-reversal-${bookingId}-${charge.refundedCents}-${amount}` });
+        reversed = payoutBack;
+      } catch (error) {
+        logger.warn({ msg: 'payout reversal failed; review in Stripe', bookingId, error: error && error.message });
+      }
+    }
+    const updated = await repository.recordRefund(bookingId, {
+      amountCents: amount, full,
+      payoutReductionCents: charge.payoutStatus === 'pending' ? payoutBack : reversed,
+    });
+    return { refundId: created.id, amountCents: amount, full, payoutReversedCents: reversed, booking: updated };
+  }
+
+  /** Account deletion: remove the Stripe customer and its saved cards (best effort). */
+  async function forgetCustomer(identity) {
+    if (!enabled) return;
+    try {
+      const customer = await repository.getStripeCustomerId(identity.id);
+      if (customer) await stripe.customers.del(customer);
+    } catch (error) {
+      logger.warn({ msg: 'Stripe customer deletion failed', error: error && error.message });
+    }
+  }
+
+  const policy = () => ({
+    cancellationFee: config.cancellationFeeCents / 100, freeCancelMinutes: config.freeCancelMinutes,
+  });
+
+  return {
+    enabled, config, policy, startCardSetup, listCards, removeCard, hold, release, settle, refund, forgetCustomer,
+    cancellationFeeCents: (booking, nowMs) => cancellationFeeCents(booking, nowMs, config),
+    freeCancelUntil: (booking) => freeCancelUntil(booking, config),
+  };
 }
 
-module.exports = { createPayments, PaymentError, paymentStatusOf, TERMINAL_FOR_PAYMENT };
+module.exports = {
+  createPayments, PaymentError, paymentStatusOf, paymentConfigFromEnv, cancellationFeeCents, freeCancelUntil, driverShareCents,
+  DEFAULT_PAYMENT_CONFIG, TERMINAL_FOR_PAYMENT,
+};
