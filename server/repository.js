@@ -144,6 +144,7 @@ function mapBooking(row) {
       intentId: row.payment_intent_id,
       status: row.payment_status,
       amount: dollars(row.final_price_cents || row.estimated_price_cents),
+      ...(row.payment_card_last4 ? { brand: row.payment_card_brand || 'card', last4: row.payment_card_last4 } : {}),
     } : undefined,
     driverLocation: row.driver_lat == null ? undefined : { lat: row.driver_lat, lng: row.driver_lng },
     createdAt: row.created_at,
@@ -588,13 +589,17 @@ class PostgresRepository {
       result = await this.pool.query(`
         insert into public.bookings (
           customer_id, vehicle_id, service_type, service_name, location_address, location_lat, location_lng,
-          dropoff_address, dropoff_lat, dropoff_lng, estimated_price_cents, notes
-        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *
+          dropoff_address, dropoff_lat, dropoff_lng, estimated_price_cents, notes,
+          payment_intent_id, payment_status, payment_card_brand, payment_card_last4
+        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,coalesce($14,'pending'),$15,$16) returning *
       `, [
         input.customerId, input.vehicleId, input.service.id, input.service.name,
         input.location.address, input.location.lat, input.location.lng,
         dropoff?.address || null, dropoff?.lat ?? null, dropoff?.lng ?? null,
         Math.round(input.estimatedPrice * 100), input.notes,
+        input.payment?.intentId || null, input.payment?.status || null,
+        input.payment?.brand ? String(input.payment.brand).slice(0, 20) : null,
+        input.payment?.last4 ? String(input.payment.last4).slice(0, 4) : null,
       ]);
     } catch (error) {
       if (error?.code === '23505' && error.constraint === ONE_ACTIVE_INDEX) throw new ActiveBookingExistsError();
@@ -1263,13 +1268,44 @@ class PostgresRepository {
     return mapBooking(result.rows[0]);
   }
 
+  /**
+   * Record a payment state from Stripe (webhook or settlement). Final states never move back to an
+   * earlier one when events arrive out of order: succeeded only to refunded; canceled/refunded never.
+   */
   async updatePaymentStatus(paymentIntentId, paymentStatus) {
     const result = await this.pool.query(`
       update public.bookings set payment_status=$2
-      where payment_intent_id=$1 and (payment_status <> 'succeeded' or $2 in ('succeeded','refunded'))
+      where payment_intent_id=$1
+        and (payment_status not in ('succeeded','canceled','refunded') or (payment_status='succeeded' and $2::text in ('succeeded','refunded')))
       returning *
     `, [paymentIntentId, paymentStatus]);
     return mapBooking(result.rows[0]);
+  }
+
+  /** C2: the customer's Stripe Customer id (server-only; never in an API answer). */
+  async getStripeCustomerId(userId) {
+    const result = await this.pool.query('select stripe_customer_id from public.profiles where id=$1', [userId]);
+    return result.rows[0]?.stripe_customer_id || null;
+  }
+
+  /** Store it once; a racing second setup keeps the first id. Returns the stored id. */
+  async setStripeCustomerId(userId, customerId) {
+    const result = await this.pool.query(`
+      update public.profiles set stripe_customer_id=coalesce(stripe_customer_id, $2) where id=$1 returning stripe_customer_id
+    `, [userId, customerId]);
+    return result.rows[0]?.stripe_customer_id || null;
+  }
+
+  /** C2: card holds on jobs that have ended (charge if completed, release otherwise). */
+  async listUnsettledPayments(bookingIds = null) {
+    const result = await this.pool.query(`
+      select id, status, payment_intent_id from public.bookings
+      where payment_status='authorized' and payment_intent_id is not null
+        and status in ('completed','cancelled','expired')
+        and ($1::uuid[] is null or id = any($1::uuid[]))
+      order by updated_at nulls first limit 100
+    `, [bookingIds]);
+    return result.rows.map((row) => ({ bookingId: row.id, status: row.status, intentId: row.payment_intent_id }));
   }
 }
 

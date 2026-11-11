@@ -5,6 +5,7 @@ const {
   todayIso, parseIsoDate, cleanNotes, verificationReadiness, credentialsCurrent,
 } = require('./verification');
 const { quoteService, PricingError, TOWING } = require('./pricing');
+const { createPayments, PaymentError } = require('./payments');
 const { checkRequest, checkTransition, DEFAULT_REQUEST_EXPIRY_MINUTES } = require('./lifecycle');
 const {
   MESSAGE_MAX, REPORTS_PER_HOUR, STATUS_FILTERS, ALL_CATEGORIES, categoriesFor, cleanReport, checkAdminUpdate, supportContactFromEnv,
@@ -93,13 +94,16 @@ function validVehicle(input) {
     Number.isInteger(input.year) && input.year >= 1900 && input.year <= 2100;
 }
 
-function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStorage, accountAdmin, corsOrigin = DEFAULT_CORS_ORIGINS, requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now(),
+function createApp({ auth, repository, stripe, stripeWebhookSecret, payments: injectedPayments, documentStorage, accountAdmin, corsOrigin = DEFAULT_CORS_ORIGINS, requestRadiusMiles = radiusFromEnv(), ratingWindowDays = RATING_WINDOW_DAYS, supportContact = supportContactFromEnv(), chatMessagesPerMinute = MESSAGES_PER_MINUTE, clock = () => Date.now(),
   logger = silentLogger, rateLimits = rateLimitsFromEnv(), rateLimitStore, trustProxy = false, hsts = { enabled: false },
   jsonBodyLimit = '100kb', documentMaxBytes = 10 * 1024 * 1024, realtime, realtimeEnabled = true }) {
   const app = express();
   // B11: realtime hub (realtime.js). One per app unless index.js passes a shared one (the expiry sweep uses it too).
   const hub = realtime || createRealtimeHub({ clock, radiusMiles: requestRadiusMiles, logger });
   app.locals.realtime = hub;
+  // C2: card holds and settlement (payments.js). index.js shares one with the background sweep.
+  const payments = injectedPayments || createPayments({ stripe, repository, logger });
+  app.locals.payments = payments;
   // A realtime signal must never break or slow down the write that caused it.
   const notify = (fn) => {
     try { fn(); } catch (error) { logger.warn({ msg: 'realtime notify failed', error: error && error.message }); }
@@ -108,6 +112,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
   const expireStale = async (scope) => {
     const result = await repository.expireStaleBookings(scope);
     if (result && ((result.expired && result.expired.length) || (result.released && result.released.length))) {
+      // C2: the card hold on a job that ended on its own is released.
+      await payments.settle([...(result.expired || []), ...(result.released || [])]);
       notifyEnded(hub, repository, result).catch((error) => logger.warn({ msg: 'realtime expiry notify failed', error: error && error.message }));
     }
     return result;
@@ -147,6 +153,8 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       if (event.type === 'payment_intent.succeeded') await repository.updatePaymentStatus(event.data.object.id, 'succeeded');
       if (event.type === 'payment_intent.payment_failed') await repository.updatePaymentStatus(event.data.object.id, 'failed');
       if (event.type === 'payment_intent.processing') await repository.updatePaymentStatus(event.data.object.id, 'processing');
+      if (event.type === 'payment_intent.amount_capturable_updated') await repository.updatePaymentStatus(event.data.object.id, 'authorized');
+      if (event.type === 'payment_intent.canceled') await repository.updatePaymentStatus(event.data.object.id, 'canceled');
       res.json({ received: true });
     } catch (_error) {
       res.status(400).json({ error: 'Invalid webhook signature' });
@@ -290,6 +298,19 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
       await expireStaleFor(req.auth);
       const existing = await repository.getActiveBooking(req.auth.identity.id, 'customer');
       if (existing) return activeRequestConflict(res, existing);
+      // C2: hold the server price on the customer's saved card before any driver sees the request.
+      let payment = null;
+      if (payments.enabled) {
+        try {
+          payment = await payments.hold({
+            identity: req.auth.identity, paymentMethodId: req.body.paymentMethodId, requestKey: req.body.requestId,
+            amountCents: Math.round(quote.price * 100), description: `AID ${service.name}`, metadata: { serviceType: service.id },
+          });
+        } catch (error) {
+          if (error instanceof PaymentError) return res.status(error.status).json({ error: error.message, code: error.code });
+          throw error;
+        }
+      }
       let booking;
       try {
         booking = await repository.createBooking({
@@ -297,8 +318,10 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
           location: cleanLocation(req.body.location),
           dropoffLocation: dropoff ? cleanLocation(dropoff) : null, estimatedPrice: quote.price,
           notes: typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 1000) : null,
+          ...(payment ? { payment } : {}),
         });
       } catch (error) {
+        if (payment) await payments.release(payment.intentId); // no request, so no hold
         if (error?.code !== ACTIVE_REQUEST_CODE) throw error;
         return activeRequestConflict(res, await repository.getActiveBooking(req.auth.identity.id, 'customer'));
       }
@@ -452,10 +475,17 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
           : { error: verdict.error });
       }
       // Compare-and-set on the exact status we validated, so a concurrent change is a 409, never a skipped step.
-      const booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, role, nextStatus, [verdict.from], { reason: verdict.reason });
+      let booking = await repository.updateBookingStatus(req.params.bookingId, req.auth.identity.id, role, nextStatus, [verdict.from], { reason: verdict.reason });
       if (!booking) {
         const latest = await repository.getBooking(req.params.bookingId, req.auth.identity.id, role);
         return res.status(409).json({ error: 'This job was just updated. Showing the latest status.', currentStatus: latest?.status, booking: latest });
+      }
+      // C2: completed → charge the hold; cancelled → release it. Never blocks the status change
+      // (settle() logs failures and the background sweep retries).
+      if (payments.enabled && (nextStatus === 'completed' || nextStatus === 'cancelled') && booking.payment?.status === 'authorized') {
+        if ((await payments.settle([booking.id])).length) {
+          booking = (await repository.getBooking(booking.id, req.auth.identity.id, role)) || booking;
+        }
       }
       notify(() => {
         hub.bookingChanged(booking, nextStatus === 'cancelled' ? 'cancelled' : 'status');
@@ -881,12 +911,35 @@ function createApp({ auth, repository, stripe, stripeWebhookSecret, documentStor
     } catch (error) { next(error); }
   });
 
+  // ---- C2: saved cards (numbers are collected and stored by Stripe, never by AID) ----
+  app.get('/api/payments/methods', authenticate, requireRole('customer'), async (req, res, next) => {
+    try {
+      if (!payments.enabled) return res.json({ enabled: false, methods: [] });
+      res.json({ enabled: true, methods: await payments.listCards(req.auth.identity) });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/payments/setup-intent', authenticate, requireRole('customer'), limit.accountChange, async (req, res, next) => {
+    try {
+      if (!payments.enabled) return res.status(503).json({ error: 'Payments are not configured' });
+      res.json(await payments.startCardSetup(req.auth.identity, req.auth.profile));
+    } catch (error) { next(error); }
+  });
+  app.delete('/api/payments/methods/:paymentMethodId', authenticate, requireRole('customer'), limit.accountChange, async (req, res, next) => {
+    try {
+      if (!payments.enabled) return res.status(503).json({ error: 'Payments are not configured' });
+      if (!await payments.removeCard(req.auth.identity, req.params.paymentMethodId)) return res.status(404).json({ error: 'Card not found' });
+      res.status(204).end();
+    } catch (error) { next(error); }
+  });
+
+  // Pay a completed job whose card charge failed (or one from before holds existed).
   app.post('/api/payments/create-intent', authenticate, requireRole('customer'), async (req, res, next) => {
     try {
       if (!stripe) return res.status(503).json({ error: 'Payments are not configured' });
       const booking = await repository.getBooking(req.body.bookingId, req.auth.identity.id, 'customer');
       if (!booking) return res.status(404).json({ error: 'Booking not found' });
       if (booking.payment?.status === 'succeeded') return res.status(409).json({ error: 'Booking is already paid' });
+      if (['authorized', 'processing'].includes(booking.payment?.status)) return res.status(409).json({ error: 'This job is already being paid with your saved card' });
       if (booking.status !== 'completed') return res.status(409).json({ error: 'Booking must be completed before payment' });
       const amount = Math.round(booking.estimatedPrice * 100);
       const previousIntentId = booking.payment?.intentId;

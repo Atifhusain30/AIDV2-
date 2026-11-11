@@ -76,7 +76,30 @@ test('live Supabase customer → verified driver → document → completed book
     });
   }
 
+  // C2: with Stripe test keys, every request needs a saved card. Each test customer gets Stripe's test
+  // Visa (as if added in the app's card form) and every POST /bookings uses it automatically.
+  const Stripe = require('stripe');
+  const stripeKey = process.env.STRIPE_SECRET_KEY || '';
+  const stripe = /^sk_test_/.test(stripeKey) ? new Stripe(stripeKey) : null;
+  const cards = new Map(); // token → payment method id
+  const stripeCustomerIds = [];
+  async function giveCard(user) {
+    if (!stripe) return null;
+    const setup = await api('/payments/setup-intent', user.token, { method: 'POST', body: '{}' });
+    assert.equal(setup.status, 200, 'card setup starts');
+    assert.match((await setup.json()).clientSecret, /^seti_/);
+    const customerId = (await pool.query('select stripe_customer_id from public.profiles where id=$1', [user.id])).rows[0].stripe_customer_id;
+    stripeCustomerIds.push(customerId);
+    const card = await stripe.paymentMethods.attach('pm_card_visa', { customer: customerId });
+    cards.set(user.token, card.id);
+    return card.id;
+  }
+
   async function api(pathname, token, options = {}) {
+    if (pathname === '/bookings' && options.method === 'POST' && cards.has(token) && typeof options.body === 'string') {
+      const body = JSON.parse(options.body);
+      options = { ...options, body: JSON.stringify({ paymentMethodId: cards.get(token), requestId: randomUUID(), ...body }) };
+    }
     const headers = new Headers(options.headers || {});
     headers.set('Authorization', `Bearer ${token}`);
     if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
@@ -88,6 +111,17 @@ test('live Supabase customer → verified driver → document → completed book
     const driver = await createUser(driverEmail, 'driver');
     const reviewer = await createUser(`e2e-admin-${suffix}@example.com`, 'customer');
     const otherCustomer = await createUser(`e2e-customer2-${suffix}@example.com`, 'customer');
+    if (stripe) {
+      // No card → no request, and nothing is created.
+      const noCard = await api('/bookings', customer.token, { method: 'POST', body: JSON.stringify({ serviceType: 'battery_jump', location: { address: '1 Elm', lat: 32.7767, lng: -96.797 } }) });
+      assert.equal(noCard.status, 402, 'a request needs a saved card');
+      assert.equal((await noCard.json()).code, 'payment_method_required');
+      await giveCard(customer);
+      await giveCard(otherCustomer);
+      const methods = await (await api('/payments/methods', customer.token)).json();
+      assert.deepEqual(methods.methods.map((m) => [m.brand, m.last4]), [['visa', '4242']]);
+      assert.equal((await api(`/payments/methods/${cards.get(otherCustomer.token)}`, customer.token, { method: 'DELETE' })).status, 404, "can't remove someone else's card");
+    }
     await pool.query("update public.profiles set role='admin' where id=$1", [reviewer.id]);
     // E5: admins need the authenticator-app step; a password-only (aal1) admin token is refused.
     assert.equal((await api('/admin/drivers', reviewer.token)).status, 403, 'aal1 admin is refused');
@@ -138,6 +172,12 @@ test('live Supabase customer → verified driver → document → completed book
     const booking = await bookingResponse.json();
     bookingId = booking.id;
     assert.equal(booking.estimatedPrice, 95); // short tow: hook-up fee covers the first 5 miles
+    if (stripe) {
+      assert.deepEqual([booking.payment.status, booking.payment.brand, booking.payment.last4], ['authorized', 'visa', '4242'], 'the price is held on the card');
+      const held = await stripe.paymentIntents.retrieve(booking.payment.intentId);
+      assert.deepEqual([held.status, held.amount, held.capture_method], ['requires_capture', 9500, 'manual']);
+      assert.equal('intentId' in booking.payment, true);
+    }
     assert.ok(booking.expiresAt, 'an open request says when it expires');
 
     // E4: one active request per customer — a second one is refused and points at the first.
@@ -322,6 +362,11 @@ test('live Supabase customer → verified driver → document → completed book
     }
     const customerBooking = await (await api(`/bookings/${bookingId}`, customer.token)).json();
     assert.equal(customerBooking.status, 'completed');
+    if (stripe) {
+      assert.equal(customerBooking.payment.status, 'succeeded', 'completing the job charges the card');
+      const charged = await stripe.paymentIntents.retrieve(customerBooking.payment.intentId);
+      assert.deepEqual([charged.status, charged.amount_received], ['succeeded', 9500]);
+    }
     assert.equal(customerBooking.driver.phone, undefined, 'driver phone is hidden after the job');
     assert.equal(customerBooking.driverLocation, undefined, 'live location is hidden after the job');
     assert.ok(customerBooking.arrivedAt && customerBooking.startedAt && customerBooking.completedAt, 'each step is timestamped');
@@ -434,6 +479,10 @@ test('live Supabase customer → verified driver → document → completed book
     const cancelled = await (await api(`/bookings/${secondBookingId}`, customer.token)).json();
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(cancelled.cancelledBy, 'driver');
+    if (stripe) {
+      assert.equal(cancelled.payment.status, 'canceled', 'a cancelled job releases the hold');
+      assert.equal((await stripe.paymentIntents.retrieve(cancelled.payment.intentId)).status, 'canceled');
+    }
     assert.ok(cancelled.cancelledAt);
     const ratedCancelled = await api(`/bookings/${secondBookingId}/rating`, customer.token, { method: 'POST', body: JSON.stringify({ stars: 1 }) });
     assert.equal(ratedCancelled.status, 409, 'a cancelled job cannot be rated');
@@ -523,6 +572,11 @@ test('live Supabase customer → verified driver → document → completed book
     const replacementBooking = await replacement.json();
     e4BookingIds.push(replacementBooking.id);
     assert.equal((await pool.query('select status from public.bookings where id=$1', [overdue.id])).rows[0].status, 'expired');
+    if (stripe) {
+      const expiredPayment = (await pool.query('select payment_status, payment_intent_id from public.bookings where id=$1', [overdue.id])).rows[0];
+      assert.equal(expiredPayment.payment_status, 'canceled', 'an expired request releases the hold');
+      assert.equal((await stripe.paymentIntents.retrieve(expiredPayment.payment_intent_id)).status, 'canceled');
+    }
 
     // The interval sweep's statement, with a per-test 1-minute window: no read needed.
     const { PostgresRepository } = require('../repository');
@@ -606,6 +660,12 @@ test('live Supabase customer → verified driver → document → completed book
     assert.equal((await pool.query('select status from public.bookings where id=$1', [blockedRequestId])).rows[0].status, 'searching');
   } finally {
     liveStreams.forEach((s) => s.close());
+    // C2: release any hold still open on a test job, then delete the test Stripe customers.
+    if (stripe) {
+      const open = await pool.query("select payment_intent_id from public.bookings where customer_id = any($1::uuid[]) and payment_status='authorized'", [createdIds]).catch(() => ({ rows: [] }));
+      for (const row of open.rows) await stripe.paymentIntents.cancel(row.payment_intent_id).catch(() => {});
+      for (const id of stripeCustomerIds) await stripe.customers.del(id).catch(() => {});
+    }
     const stored = await pool.query('select storage_path from public.driver_documents where driver_id = any($1::uuid[])', [createdIds]).catch(() => ({ rows: [] }));
     // A fresh service client: `supabase` above now carries the last test user's session.
     const storageAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } });

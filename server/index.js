@@ -8,6 +8,7 @@ const { PostgresRepository } = require('./repository');
 const { databaseSslConfig } = require('./config');
 const { expiryConfigFromEnv } = require('./lifecycle');
 const { startExpirySweep } = require('./expiry');
+const { createPayments } = require('./payments');
 const { createLogger, securityConfigFromEnv } = require('./security');
 const { rateLimitsFromEnv } = require('./rateLimit');
 const { serializeError } = require('./redact');
@@ -87,7 +88,10 @@ const documentStorage = {
 // B11: one realtime hub shared by the API routes and the expiry sweep (in-memory, single instance).
 const realtimeConfig = realtimeConfigFromEnv(process.env);
 const realtime = createRealtimeHub({ ...realtimeConfig, radiusMiles: radiusFromEnv(process.env), logger });
+// C2: one payments service for the API and the background sweep (settles card holds on ended jobs).
+const payments = createPayments({ stripe, repository, logger });
 const app = createApp({
+  payments,
   realtime,
   realtimeEnabled: realtimeConfig.enabled,
   auth,
@@ -121,15 +125,24 @@ const server = app.listen(port, host, () => {
 });
 const expirySweep = startExpirySweep({
   repository,
-  onExpired: (result) => notifyEnded(realtime, repository, result),
+  onExpired: async (result) => {
+    await payments.settle([...result.expired, ...result.released]); // release holds on jobs that ended on their own
+    await notifyEnded(realtime, repository, result);
+  },
   intervalMs: expiryConfig.sweepSeconds * 1000,
   logger: { log: (line) => logger.info({ msg: line }), error: (...parts) => logger.error({ msg: parts.map(String).join(' ') }) },
 });
 void expirySweep.tick();
+// C2: retry any charge or release that failed earlier (Stripe outage, network). Idempotent.
+const paymentSweep = payments.enabled ? setInterval(() => {
+  payments.settle().catch((error) => logger.warn({ msg: 'payment sweep failed', error: error && error.message }));
+}, expiryConfig.sweepSeconds * 1000) : null;
+if (paymentSweep && typeof paymentSweep.unref === 'function') paymentSweep.unref();
 
 async function shutdown(signal) {
   logger.info({ msg: `${signal} received; shutting down.` });
   expirySweep.stop();
+  if (paymentSweep) clearInterval(paymentSweep);
   realtime.closeAll(); // open event streams would otherwise keep server.close() waiting
   server.close(async () => {
     await pool.end();

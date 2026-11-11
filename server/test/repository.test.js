@@ -63,7 +63,56 @@ test('payment status cannot be downgraded after success', async () => {
 
   await repository.updatePaymentStatus('pi_1', 'processing');
 
-  assert.match(captured.text, /payment_status <> 'succeeded'/i);
+  // Final states (charged, released, refunded) never move back when Stripe events arrive out of order.
+  assert.match(captured.text, /payment_status not in \('succeeded','canceled','refunded'\)/i);
+  assert.match(captured.text, /payment_status='succeeded' and \$2::text in \('succeeded','refunded'\)/i);
+});
+
+test('C2: a booking stores its card hold and shows only brand and last four digits', async () => {
+  let captured;
+  const repository = new PostgresRepository(poolWith(async (text, values) => {
+    captured = { text, values };
+    return { rows: [{ id: 'b-1', customer_id: 'c-1', status: 'searching', service_type: 'battery_jump', service_name: 'Battery Jump',
+      location_address: 'A', location_lat: 33, location_lng: -97, estimated_price_cents: 6900,
+      payment_intent_id: 'pi_1', payment_status: 'authorized', payment_card_brand: 'visa', payment_card_last4: '4242', created_at: new Date() }] };
+  }));
+  const booking = await repository.createBooking({
+    customerId: 'c-1', vehicleId: null, service: { id: 'battery_jump', name: 'Battery Jump' }, location: { address: 'A', lat: 33, lng: -97 },
+    dropoffLocation: null, estimatedPrice: 69, notes: null, payment: { intentId: 'pi_1', status: 'authorized', brand: 'visa', last4: '4242' },
+  });
+  assert.match(captured.text, /payment_intent_id, payment_status, payment_card_brand, payment_card_last4/);
+  assert.deepEqual(captured.values.slice(12), ['pi_1', 'authorized', 'visa', '4242']);
+  assert.equal(booking.payment.status, 'authorized');
+  assert.equal(booking.payment.brand, 'visa');
+  assert.equal(booking.payment.last4, '4242');
+});
+
+test('C2: without a hold the booking keeps the default pending payment state', async () => {
+  let captured;
+  const repository = new PostgresRepository(poolWith(async (text, values) => { captured = { text, values }; return { rows: [] }; }));
+  await repository.createBooking({ customerId: 'c-1', vehicleId: null, service: { id: 'battery_jump', name: 'Battery Jump' },
+    location: { address: 'A', lat: 33, lng: -97 }, dropoffLocation: null, estimatedPrice: 69, notes: null }).catch(() => {});
+  assert.match(captured.text, /coalesce\(\$14,'pending'\)/);
+  assert.deepEqual(captured.values.slice(12), [null, null, null, null]);
+});
+
+test('C2: the Stripe customer id is stored once (a racing second setup keeps the first)', async () => {
+  let captured;
+  const repository = new PostgresRepository(poolWith(async (text, values) => { captured = { text, values }; return { rows: [{ stripe_customer_id: 'cus_first' }] }; }));
+  assert.equal(await repository.setStripeCustomerId('c-1', 'cus_second'), 'cus_first');
+  assert.match(captured.text, /coalesce\(stripe_customer_id, \$2\)/);
+});
+
+test('C2: settlement only picks up holds on jobs that have ended', async () => {
+  let captured;
+  const repository = new PostgresRepository(poolWith(async (text, values) => {
+    captured = { text, values };
+    return { rows: [{ id: 'b-1', status: 'completed', payment_intent_id: 'pi_1' }] };
+  }));
+  assert.deepEqual(await repository.listUnsettledPayments(['b-1']), [{ bookingId: 'b-1', status: 'completed', intentId: 'pi_1' }]);
+  assert.match(captured.text, /payment_status='authorized'/);
+  assert.match(captured.text, /status in \('completed','cancelled','expired'\)/);
+  assert.deepEqual(captured.values, [['b-1']]);
 });
 
 test('booking acceptance uses a conditional update to prevent double assignment', async () => {
