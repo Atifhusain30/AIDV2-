@@ -53,7 +53,7 @@ function CardForm({ onClose, onSaved }: AddCardSheetProps) {
           <Button size="lg" block disabled={!stripe || !elements} loading={saving} loadingLabel="Saving card…" onClick={() => void save()}>Save card</Button>
         </>
       )}>
-      <div className="add-card__form"><PaymentElement options={{ layout: 'tabs', wallets: { applePay: 'never', googlePay: 'never' } }} /></div>
+      <div className="add-card__form"><PaymentElement options={{ layout: 'tabs', wallets: { applePay: 'never', googlePay: 'never', link: 'never' } }} /></div>
       <p className="add-card__note"><Lock size={14} aria-hidden="true" /> Your card is stored securely by Stripe. When you request help, the price is held on it and charged only when the job is done.</p>
     </BottomSheet>
   )
