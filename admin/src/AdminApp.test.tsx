@@ -24,6 +24,7 @@ vi.mock('./api', () => ({
     getReport: vi.fn(),
     updateReport: vi.fn(),
     getReportChat: vi.fn(),
+    refundBooking: vi.fn(),
   },
 }))
 
@@ -52,6 +53,7 @@ function reportDetail(extra: Partial<ReportDetail> = {}): ReportDetail {
       price: 95, createdAt: '2026-10-22T08:00:00Z', acceptedAt: null, completedAt: null, cancelledAt: null, expiredAt: null,
       customer: { id: 'customer-1', name: 'Casey Customer', email: 'casey@aid.test', phone: '+1 214 555 0100' },
       driver: { id: 'driver-1', name: 'Dana Driver', email: 'dana@aid.test', phone: '' },
+      payment: null,
     },
     events: [],
     ...extra,
@@ -378,6 +380,36 @@ describe('AID admin reports inbox (B18)', () => {
     await waitFor(() => expect(api.updateReport).toHaveBeenLastCalledWith('rep-1', { note: 'Called the customer' }))
     expect(await within(view).findByText('Called the customer')).toBeTruthy()
     expect((await screen.findByRole('status')).textContent).toMatch(/note added/i)
+  })
+
+  it('C3: shows what the job charged and refunds part of it after confirming', async () => {
+    const base = reportDetail()
+    api.getReport.mockResolvedValue({ ...base, booking: { ...base.booking!, payment: { status: 'succeeded', charged: 95, refunded: 0, card: 'visa •••• 4242', cancellationFee: null, payout: { status: 'pending', amount: 76 } } } })
+    api.refundBooking.mockResolvedValue({ amount: 20, full: false, payoutReversed: 0 })
+    await openInbox()
+    fireEvent.click(await screen.findByRole('button', { name: /open safety concern report/i }))
+    const view = await screen.findByRole('region', { name: 'Safety concern' })
+    expect(await within(view).findByRole('heading', { name: 'Payment' })).toBeTruthy()
+    expect(within(view).getAllByText('Charged').length).toBeGreaterThan(0)
+    expect(within(view).getByText('visa •••• 4242')).toBeTruthy()
+    expect(within(view).getByText(/waiting to send · \$76\.00/i)).toBeTruthy()
+    fireEvent.change(within(view).getByLabelText(/refund amount/i), { target: { value: '120' } })
+    expect((within(view).getByRole('button', { name: 'Refund…' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(within(view).getByLabelText(/refund amount/i), { target: { value: '20' } })
+    fireEvent.click(within(view).getByRole('button', { name: 'Refund…' }))
+    expect(api.refundBooking).not.toHaveBeenCalled()
+    fireEvent.click(within(view).getByRole('button', { name: 'Yes, refund $20.00' }))
+    await waitFor(() => expect(api.refundBooking).toHaveBeenCalledWith('job-1', 20))
+    expect(await within(view).findByText(/refunded \$20\.00/i)).toBeTruthy()
+  })
+
+  it('C3: a disputed charge tells the admin to respond in Stripe', async () => {
+    const base = reportDetail()
+    api.getReport.mockResolvedValue({ ...base, booking: { ...base.booking!, payment: { status: 'disputed', charged: 95, refunded: 0, card: null, cancellationFee: null, payout: { status: 'paid', amount: 76 } } } })
+    await openInbox()
+    fireEvent.click(await screen.findByRole('button', { name: /open safety concern report/i }))
+    const view = await screen.findByRole('region', { name: 'Safety concern' })
+    expect(await within(view).findByText(/disputed this charge/i)).toBeTruthy()
   })
 
   it('B12: shows the chat of the reported job, with who sent what and any block', async () => {

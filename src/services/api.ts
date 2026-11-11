@@ -281,7 +281,7 @@ export interface SavedCard {
   expYear: number | null
 }
 
-export async function listPaymentMethods(): Promise<ApiResponse<{ enabled: boolean; methods: SavedCard[] }>> {
+export async function listPaymentMethods(): Promise<ApiResponse<{ enabled: boolean; methods: SavedCard[]; policy?: { cancellationFee: number; freeCancelMinutes: number } }>> {
   return apiFetch('/payments/methods')
 }
 
@@ -292,6 +292,27 @@ export async function createCardSetup(): Promise<ApiResponse<{ clientSecret: str
 
 export async function removePaymentMethod(paymentMethodId: string): Promise<ApiResponse<void>> {
   return apiFetch(`/payments/methods/${encodeURIComponent(paymentMethodId)}`, { method: 'DELETE' })
+}
+
+/** C4: the driver's earnings and payout setup state. Amounts are the driver's share, in dollars. */
+export interface DriverEarnings {
+  enabled: boolean
+  hasAccount: boolean
+  ready: boolean
+  payoutPercent: number | null
+  pending: number
+  paid: number
+  thisWeek: number
+  jobs: { bookingId: string; service?: string; jobStatus?: string; payoutStatus: string; amount: number; finishedAt?: string }[]
+}
+
+export async function getDriverEarnings(): Promise<ApiResponse<DriverEarnings>> {
+  return apiFetch('/drivers/me/payouts')
+}
+
+/** Stripe's hosted payout setup page (opened in the browser). */
+export async function startPayoutSetup(): Promise<ApiResponse<{ url: string }>> {
+  return apiFetch('/drivers/me/payouts/onboarding', { method: 'POST', body: JSON.stringify({}) })
 }
 
 export async function createPaymentIntent(bookingId: string) {
@@ -318,7 +339,7 @@ export const apiService = {
   listPendingRatings, submitRating, getSupportConfig, createSupportReport, listSupportReports,
   listJobMessages, sendJobMessage, markJobMessagesRead, blockJobParty,
   getServiceRequests, acceptServiceRequest, updateDriverLocation, updateDriverOnlineStatus, updateDriverVehicle, createPaymentIntent,
-  listPaymentMethods, createCardSetup, removePaymentMethod,
+  listPaymentMethods, createCardSetup, removePaymentMethod, getDriverEarnings, startPayoutSetup,
   createRealtimeTicket,
 }
 

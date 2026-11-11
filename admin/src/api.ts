@@ -209,6 +209,11 @@ export const adminApi = {
     call<{ reports: ReportSummary[]; counts: ReportCounts }>(`/admin/reports?status=${encodeURIComponent(filter)}${category ? `&category=${encodeURIComponent(category)}` : ''}`),
   getReport: (reportId: string) => call<ReportDetail>(`/admin/reports/${encodeURIComponent(reportId)}`),
   getReportChat: (reportId: string) => call<ReportChat>(`/admin/reports/${encodeURIComponent(reportId)}/messages`),
+  /** C3: refund part (dollars) or all (amount omitted) of a charged job. */
+  refundBooking: (bookingId: string, amount?: number) =>
+    call<{ amount: number; full: boolean; payoutReversed: number }>(`/admin/bookings/${encodeURIComponent(bookingId)}/refund`, {
+      method: 'POST', body: JSON.stringify(amount == null ? {} : { amount }),
+    }),
   updateReport: (reportId: string, change: { status?: ReportStatus; note?: string }) =>
     call<ReportDetail>(`/admin/reports/${encodeURIComponent(reportId)}`, { method: 'PATCH', body: JSON.stringify(change) }),
 }

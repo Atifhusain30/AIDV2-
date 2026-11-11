@@ -27,10 +27,13 @@ export type BookingStatus =
 // Payment Status
 export type PaymentStatus = 
   | 'pending'
+  | 'authorized'   // C2: price held on the card; charged when the job is done
   | 'processing'
   | 'succeeded'
+  | 'canceled'     // hold released, nothing charged
   | 'failed'
   | 'refunded'
+  | 'disputed'     // the customer's bank opened a chargeback
 
 // User Roles
 export type UserRole = 'customer' | 'driver' | 'admin'
@@ -261,7 +264,14 @@ export interface Booking {
     intentId: string
     status: PaymentStatus
     amount: number
+    /** Card the job was held/charged on (brand + last four only). */
+    brand?: string
+    last4?: string
+    /** Dollars refunded so far. */
+    refunded?: number
   }
+  /** C3: what the customer paid for cancelling after the free window. */
+  cancellationFee?: number
   driverLocation?: Location & { updatedAt?: string }
   /** Server-estimated arrival from the driver's last shared position (approximate; until arrival). */
   driverEta?: DriverEta

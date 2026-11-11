@@ -1129,3 +1129,19 @@ a.ui-row:active, .ui-segmented button:active, .choice:active { background: var(-
 .add-card__note svg { flex: none; margin-top: 2px; }
 .pay-choices { display: grid; gap: 8px; }
 .pay-remove { color: #ff9a91; }
+
+.receipt-lines__refund span:last-child { color: #34d399; }
+
+/* C4: driver earnings */
+.earnings-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 14px; }
+.earnings-totals div { padding: 12px; border: 1px solid var(--aid-line); border-radius: 14px; background: var(--aid-panel); }
+.earnings-totals small { display: block; color: var(--aid-muted); font-size: .75rem; }
+.earnings-totals strong { font-size: 1.125rem; font-weight: 700; }
+.earnings-setup { display: flex; gap: 12px; margin-bottom: 12px; padding: 14px; border-radius: 16px; background: rgba(139,92,246,.12); border: 1px solid rgba(139,92,246,.35); }
+.earnings-setup > svg { flex: none; color: #c4b5fd; margin-top: 2px; }
+.earnings-setup div { display: grid; gap: 8px; flex: 1; }
+.earnings-setup p { color: #d9cff0; font-size: .875rem; line-height: 1.45; }
+.earnings-ready { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; color: #6ee7b7; font-size: .875rem; }
+.earnings-split { margin-bottom: 8px; color: var(--aid-muted); font-size: .8125rem; }
+.earnings-amount { font-weight: 700; }
+.earnings-setup__title { font-size: 1rem; font-weight: 700; }

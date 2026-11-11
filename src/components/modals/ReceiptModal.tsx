@@ -18,6 +18,7 @@ import PersonAvatar from '../ui/PersonAvatar'
 import { formatPrice } from '../../lib/money'
 import { apiService } from '../../services/api'
 import { markRatingSkipped, shouldAutoAsk, type PendingRating } from '../../lib/ratings'
+import { cardLabel } from '../../store/usePaymentStore'
 
 // F6: Stripe and the rating sheet download only when they're opened.
 const PaymentCheckout = lazyWithRetry(() => import('../payment/PaymentCheckout'))
@@ -68,8 +69,12 @@ export default function ReceiptModal() {
   const created = new Date(booking.createdAt)
   const date = created.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   const time = created.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
-  const paid = booking.payment?.status === 'succeeded'
-  const processing = booking.payment?.status === 'processing'
+  const paymentStatus = booking.payment?.status
+  const paid = paymentStatus === 'succeeded' || paymentStatus === 'refunded' || paymentStatus === 'disputed'
+  // C2: held on the saved card and charged automatically — nothing for the customer to do.
+  const processing = paymentStatus === 'processing' || paymentStatus === 'authorized'
+  const card = booking.payment?.last4 ? cardLabel({ brand: booking.payment.brand || 'card', last4: booking.payment.last4 }) : null
+  const refunded = booking.payment?.refunded ?? 0
 
   const handleDone = () => {
     updateBookingInHistory(booking.id, { receiptViewed: true })
@@ -184,13 +189,14 @@ export default function ReceiptModal() {
             <p><span>{booking.service.name}</span><span>{formatPrice(grandTotal)}</span></p>
           )}
           <p className="receipt-lines__total"><span>{isFinal ? 'Total' : 'Quoted total'}</span><span>{formatPrice(grandTotal)}</span></p>
+          {refunded > 0 && <p className="receipt-lines__refund"><span>Refunded{paymentStatus === 'refunded' ? ' in full' : ''}</span><span>−{formatPrice(refunded)}</span></p>}
         </section>
 
         <div className="receipt-payment">
           <CreditCard size={18} aria-hidden="true" />
           <div>
-            <strong>{paid ? 'Paid securely with Stripe' : processing ? 'Payment is processing' : 'Payment required'}</strong>
-            <small>Card details are entered only in Stripe's hosted form.</small>
+            <strong>{paid ? `Paid${card ? ` with ${card}` : ' securely with Stripe'}` : processing ? `Charging ${card ?? 'your card'}…` : 'Payment required'}</strong>
+            <small>{paymentStatus === 'disputed' ? 'Your bank is reviewing this charge.' : refunded > 0 ? 'Refunds reach your card in 5–10 business days.' : 'Card details are handled only by Stripe.'}</small>
           </div>
         </div>
         {paymentError && <p className="ui-alert ui-alert--danger" role="alert">{paymentError}</p>}

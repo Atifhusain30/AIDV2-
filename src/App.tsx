@@ -55,17 +55,18 @@ const DriverOnboardingScreen = lazyWithRetry(() => import('./screens/driver/Driv
 const DriverJobScreen = lazyWithRetry(() => import('./screens/driver/DriverJobScreen'))
 const DriverVehicleScreen = lazyWithRetry(() => import('./screens/driver/DriverVehicleScreen'))
 const DriverSettingsScreen = lazyWithRetry(() => import('./screens/driver/DriverSettingsScreen'))
+const DriverEarningsScreen = lazyWithRetry(() => import('./screens/driver/DriverEarningsScreen'))
 
 /** Shown for the moment a screen's code is loading (shapes only — F5). */
 const screenFallback = <SkeletonRows count={4} />
 
 // App modes
 type AppMode = 'select' | 'customer' | 'driver'
-type DriverView = 'home' | 'onboarding' | 'job' | 'settings' | 'vehicle' | 'help'
+type DriverView = 'home' | 'onboarding' | 'job' | 'settings' | 'vehicle' | 'help' | 'earnings'
 
 const CUSTOMER_TITLES: Record<string, string> = { home: 'Home', history: 'Activity', chat: 'Updates', garage: 'Garage', profile: 'Account' }
 const DRIVER_TITLES: Record<DriverView, string> = {
-  home: 'Driver home', onboarding: 'Verification', job: 'Active job', settings: 'Settings', vehicle: 'Vehicle & equipment', help: 'Help & Support',
+  home: 'Driver home', onboarding: 'Verification', job: 'Active job', settings: 'Settings', vehicle: 'Vehicle & equipment', help: 'Help & Support', earnings: 'Earnings',
 }
 
 /** Sets document.title as "<screen> · AID" while the screen is shown. */
@@ -315,6 +316,14 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
         </motion.main>
       )}
 
+      {currentView === 'earnings' && (
+        <motion.main key="earnings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="ui-screen driver-settings safe-top">
+          <ChunkBoundary fallback={screenFallback}>
+            <DriverEarningsScreen onBack={() => setCurrentView('settings')} />
+          </ChunkBoundary>
+        </motion.main>
+      )}
+
       {currentView === 'settings' && (
         <motion.main
           key="settings"
@@ -329,6 +338,7 @@ function DriverApp({ onLogout }: { onLogout: () => void }) {
               onOpenDocuments={() => setCurrentView('onboarding')}
               onOpenVehicle={() => openVehicle('settings')}
               onOpenHelp={() => setCurrentView('help')}
+              onOpenEarnings={() => setCurrentView('earnings')}
               onLogout={onLogout}
             />
           </ChunkBoundary>

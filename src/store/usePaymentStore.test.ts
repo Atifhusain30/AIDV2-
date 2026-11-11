@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cardLabel, usePaymentStore } from './usePaymentStore'
+import { cancellationNotice, cardLabel, usePaymentStore } from './usePaymentStore'
 import { apiService } from '../services/api'
 import { resetUserState } from '../auth/signOut'
 
@@ -40,5 +40,24 @@ describe('saved cards (C2)', () => {
     usePaymentStore.setState({ enabled: true, status: 'ready', cards: [VISA], selectedId: 'pm_visa' })
     resetUserState()
     expect(usePaymentStore.getState()).toMatchObject({ enabled: false, cards: [], selectedId: null, status: 'idle' })
+  })
+})
+
+describe('cancellation fee notice (C3, mirrors the server rule)', () => {
+  const policy = { cancellationFee: 10, freeCancelMinutes: 5 }
+  const now = Date.parse('2026-11-11T12:00:00Z')
+  const job = (extra = {}) => ({ status: 'en_route', acceptedAt: '2026-11-11T11:58:00Z', estimatedPrice: 69, payment: { status: 'authorized' }, ...extra })
+
+  it('inside the free window it says how long cancelling stays free', () => {
+    expect(cancellationNotice(job(), policy, now)).toEqual({ fee: 0, text: expect.stringMatching(/free to cancel for 3 more minutes\. after that, a \$10 cancellation fee/i) })
+  })
+  it('after the window it states the fee that will be charged', () => {
+    expect(cancellationNotice(job({ acceptedAt: '2026-11-11T11:50:00Z' }), policy, now)).toEqual({ fee: 10, text: expect.stringMatching(/a \$10 cancellation fee will be charged/i) })
+  })
+  it('never more than the job, and nothing before a driver accepts or without a card hold', () => {
+    expect(cancellationNotice(job({ acceptedAt: '2026-11-11T11:50:00Z', estimatedPrice: 7.5 }), policy, now)?.fee).toBe(7.5)
+    expect(cancellationNotice(job({ status: 'searching', acceptedAt: undefined }), policy, now)).toBeNull()
+    expect(cancellationNotice(job({ payment: undefined }), policy, now)).toBeNull()
+    expect(cancellationNotice(job(), null, now)).toBeNull()
   })
 })

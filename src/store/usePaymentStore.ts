@@ -6,8 +6,15 @@
 import { create } from 'zustand'
 import { apiService, type SavedCard } from '../services/api'
 
+/** C3: the cancellation rules the server applies (shown before a customer cancels). */
+export interface CancellationPolicy {
+  cancellationFee: number
+  freeCancelMinutes: number
+}
+
 interface PaymentState {
   enabled: boolean
+  policy: CancellationPolicy | null
   cards: SavedCard[]
   /** The card new requests are held on (defaults to the first saved card). */
   selectedId: string | null
@@ -19,7 +26,7 @@ interface PaymentState {
   reset: () => void
 }
 
-const initial = { enabled: false, cards: [] as SavedCard[], selectedId: null as string | null, status: 'idle' as const, error: null as string | null }
+const initial = { enabled: false, policy: null as CancellationPolicy | null, cards: [] as SavedCard[], selectedId: null as string | null, status: 'idle' as const, error: null as string | null }
 
 export const usePaymentStore = create<PaymentState>((set, get) => ({
   ...initial,
@@ -31,10 +38,10 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
       set({ status: 'error', error: result.error || 'Unable to load your cards.' })
       return
     }
-    const { enabled, methods } = result.data
+    const { enabled, methods, policy } = result.data
     const previous = get().selectedId
     set({
-      enabled, cards: methods, status: 'ready',
+      enabled, cards: methods, status: 'ready', policy: policy ?? null,
       selectedId: methods.some((card) => card.id === previous) ? previous : methods[0]?.id ?? null,
     })
   },
@@ -56,6 +63,27 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
 }))
 
 const BRANDS: Record<string, string> = { visa: 'Visa', mastercard: 'Mastercard', amex: 'Amex', discover: 'Discover', diners: 'Diners', jcb: 'JCB', unionpay: 'UnionPay' }
+
+/**
+ * C3: what cancelling right now costs, in words — mirrors the server rule (payments.js): a fee only
+ * once a driver is on the way and the free window since acceptance has passed; never above the price.
+ */
+export function cancellationNotice(
+  booking: { status: string; acceptedAt?: Date | string; estimatedPrice: number; payment?: { status: string } },
+  policy: CancellationPolicy | null,
+  nowMs = Date.now(),
+): { fee: number; text: string } | null {
+  if (!policy || !policy.cancellationFee || booking.payment?.status !== 'authorized') return null
+  if (!['accepted', 'en_route'].includes(booking.status) || !booking.acceptedAt) return null
+  const fee = Math.min(policy.cancellationFee, booking.estimatedPrice)
+  const feeText = `$${fee % 1 === 0 ? fee.toFixed(0) : fee.toFixed(2)}`
+  const freeUntil = new Date(booking.acceptedAt).getTime() + policy.freeCancelMinutes * 60000
+  const minutesLeft = Math.ceil((freeUntil - nowMs) / 60000)
+  if (minutesLeft > 0) {
+    return { fee: 0, text: `Free to cancel for ${minutesLeft} more minute${minutesLeft === 1 ? '' : 's'}. After that, a ${feeText} cancellation fee applies because your driver is on the way.` }
+  }
+  return { fee, text: `A ${feeText} cancellation fee will be charged to your card, because your driver is already on the way. The rest of the hold is released.` }
+}
 
 /** "Visa •••• 4242" */
 export function cardLabel(card: Pick<SavedCard, 'brand' | 'last4'>): string {

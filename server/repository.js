@@ -1029,6 +1029,8 @@ class PostgresRepository {
       row.booking_id ? this.pool.query(`
         select b.id, b.service_name, b.status, b.location_address, b.dropoff_address, b.estimated_price_cents, b.final_price_cents,
           b.created_at, b.accepted_at, b.completed_at, b.cancelled_at, b.expired_at,
+          b.payment_status, b.payment_intent_id, b.payment_card_brand, b.payment_card_last4, b.refunded_cents, b.cancellation_fee_cents,
+          b.payout_status, b.payout_amount_cents,
           b.customer_id, c.first_name as c_first, c.last_name as c_last, c.phone as c_phone, cu.email as c_email,
           b.driver_id, d.first_name as d_first, d.last_name as d_last, d.phone as d_phone, du.email as d_email
         from public.bookings b
@@ -1051,6 +1053,13 @@ class PostgresRepository {
         cancelledAt: job.cancelled_at || null, expiredAt: job.expired_at || null,
         customer: party(job.customer_id, job.c_first, job.c_last, job.c_email, job.c_phone),
         driver: party(job.driver_id, job.d_first, job.d_last, job.d_email, job.d_phone),
+        // C3: money facts for support (refund button). Card: brand + last four only.
+        payment: job.payment_intent_id ? {
+          status: job.payment_status, charged: dollars(job.final_price_cents) ?? 0, refunded: dollars(job.refunded_cents) ?? 0,
+          card: job.payment_card_last4 ? `${job.payment_card_brand || 'card'} •••• ${job.payment_card_last4}` : null,
+          cancellationFee: dollars(job.cancellation_fee_cents) ?? null,
+          payout: { status: job.payout_status, amount: dollars(job.payout_amount_cents) ?? 0 },
+        } : null,
       } : null,
       events: events.rows.map((event) => ({
         id: String(event.id), action: event.action, fromStatus: event.from_status || null, toStatus: event.to_status || null, note: event.note || null,

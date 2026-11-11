@@ -28,6 +28,8 @@ import StepProgress from '../../components/ui/StepProgress'
 import { List, ListRow } from '../../components/ui/ListRow'
 import { TrackLayout, TripStops } from '../../components/tracking/TrackLayout'
 import { useAnnounceOnChange, useAnnouncer, useEtaAnnouncement } from '../../lib/announce'
+import { usePaymentMethods } from '../../components/payment/PaymentMethods'
+import { cancellationNotice } from '../../store/usePaymentStore'
 
 // F6: chat downloads only when it's opened.
 const JobChat = lazyWithRetry(() => import('../../components/chat/JobChat'))
@@ -53,6 +55,8 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
   const { setActiveBooking, updateBookingInHistory, setCurrentScreen } = useAppStore()
   const [now, setNow] = useState(() => Date.now())
   const [sheet, setSheet] = useState<'more' | 'safety' | '911' | 'cancel' | 'report' | null>(null)
+  // C3: the cancellation fee rule, shown before the customer confirms.
+  const { policy } = usePaymentMethods()
   // "I'm with my driver": a local acknowledgement only — the driver starts the service on their side.
   const [withDriver, setWithDriver] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -256,7 +260,7 @@ export default function CustomerTrackingScreen({ booking }: { booking: Booking }
         <ConfirmSheet
           id="cancel-request" tone="danger" busy={busy}
           title="Cancel this request?"
-          text={customerCancelText(booking.status, firstName)}
+          text={[customerCancelText(booking.status, firstName), cancellationNotice(booking, policy, now)?.text].filter(Boolean).join(' ')}
           reasons={CUSTOMER_CANCEL_REASONS}
           confirmLabel="Yes, cancel request" busyLabel="Cancelling…" keepLabel="Keep request"
           onConfirm={(reason) => void cancel(reason)} onClose={() => setSheet(null)}

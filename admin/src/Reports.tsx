@@ -193,6 +193,7 @@ function ReportView({ reportId, onBack, onChanged, notify }: { reportId: string;
               </dl>
             ) : <p className="muted">Not about a specific job.</p>}
           </div>
+          {job?.payment && <PaymentCard bookingId={job.id} payment={job.payment} onRefunded={() => void load()} />}
           {job && <ReportChatCard reportId={report.id} />}
         </div>
 
@@ -347,6 +348,77 @@ export default function ReportsInbox({ notify, onCounts }: { notify: (text: stri
         )}
         </div>
       </div>
+    </div>
+  )
+}
+
+const PAYMENT_STATUS: Record<string, string> = {
+  authorized: 'Held on card', succeeded: 'Charged', refunded: 'Refunded in full', canceled: 'Hold released (not charged)',
+  failed: 'Charge failed', disputed: 'Disputed by the bank', pending: 'Not charged', processing: 'Processing',
+}
+const PAYOUT_STATUS: Record<string, string> = { none: 'None', pending: 'Waiting to send', paid: 'Sent to driver', failed: 'Failed', reversed: 'Reversed' }
+
+/** C3: what was charged for this job, and a refund (part or all). The driver's share shrinks in proportion. */
+function PaymentCard({ bookingId, payment, onRefunded }: {
+  bookingId: string
+  payment: NonNullable<NonNullable<ReportDetail['booking']>['payment']>
+  onRefunded: () => void
+}) {
+  const amountId = useId()
+  const [amount, setAmount] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const refundable = Math.round((payment.charged - payment.refunded) * 100) / 100
+  const canRefund = ['succeeded', 'disputed'].includes(payment.status) && refundable > 0
+  const parsed = amount.trim() === '' ? refundable : Number(amount)
+  const valid = Number.isFinite(parsed) && parsed > 0 && parsed <= refundable
+
+  const refund = async () => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await adminApi.refundBooking(bookingId, amount.trim() === '' ? undefined : parsed)
+      setMessage({ tone: 'ok', text: `Refunded $${result.amount.toFixed(2)}${result.payoutReversed ? ` · $${result.payoutReversed.toFixed(2)} taken back from the driver's payout` : ''}. It reaches the customer's card in 5–10 business days.` })
+      setAmount('')
+      setConfirming(false)
+      onRefunded()
+    } catch (refundError) {
+      setMessage({ tone: 'error', text: errorText(refundError) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Payment</h2>
+      <dl className="report-facts">
+        <div><dt>Status</dt><dd>{PAYMENT_STATUS[payment.status] || payment.status}</dd></div>
+        <div><dt>Charged</dt><dd>${payment.charged.toFixed(2)}{payment.cancellationFee ? ' (cancellation fee)' : ''}</dd></div>
+        {payment.refunded > 0 && <div><dt>Refunded</dt><dd>${payment.refunded.toFixed(2)}</dd></div>}
+        {payment.card && <div><dt>Card</dt><dd>{payment.card}</dd></div>}
+        <div><dt>Driver payout</dt><dd>{PAYOUT_STATUS[payment.payout.status] || payment.payout.status}{payment.payout.amount ? ` · $${payment.payout.amount.toFixed(2)}` : ''}</dd></div>
+      </dl>
+      {payment.status === 'disputed' && <p className="alert alert--safety">The customer's bank disputed this charge. Respond with evidence in the Stripe dashboard (Payments → Disputes).</p>}
+      {canRefund && (
+        <div className="reason">
+          <label htmlFor={amountId}>Refund amount in dollars (leave empty to refund ${refundable.toFixed(2)})</label>
+          <input id={amountId} inputMode="decimal" value={amount} placeholder={refundable.toFixed(2)} disabled={busy}
+            onChange={(event) => { setAmount(event.target.value.replace(/[^0-9.]/g, '')); setConfirming(false) }} />
+          {!confirming ? (
+            <button type="button" className="btn btn--secondary" disabled={busy || !valid} onClick={() => setConfirming(true)}>Refund…</button>
+          ) : (
+            <div className="decision-actions">
+              <button type="button" className="btn btn--danger" disabled={busy || !valid} onClick={() => void refund()}>
+                {busy ? 'Refunding…' : `Yes, refund $${(valid ? parsed : 0).toFixed(2)}`}
+              </button>
+              <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+            </div>
+          )}
+        </div>
+      )}
+      {message && <p className={message.tone === 'ok' ? 'hint' : 'alert'} role={message.tone === 'ok' ? 'status' : 'alert'}>{message.text}</p>}
     </div>
   )
 }

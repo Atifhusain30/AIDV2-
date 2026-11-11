@@ -117,6 +117,10 @@ export interface ReportDetail extends Omit<ReportSummary, 'booking'> {
     address: string; dropoffAddress: string | null; price: number | null
     createdAt: string; acceptedAt: string | null; completedAt: string | null; cancelledAt: string | null; expiredAt: string | null
     customer: ReportParty | null; driver: ReportParty | null
+    payment: {
+      status: string; charged: number; refunded: number; card: string | null; cancellationFee: number | null
+      payout: { status: string; amount: number }
+    } | null
   } | null
   events: { id: string; action: 'status_changed' | 'note_added'; fromStatus: ReportStatus | null; toStatus: ReportStatus | null; note: string | null; actor: { id: string; name: string; role: string } | null; createdAt: string }[]
 }

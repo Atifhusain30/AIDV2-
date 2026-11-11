@@ -2,7 +2,7 @@
  * Driver settings: who is signed in, documents and vehicle, help & safety, log out. Real data only.
  */
 
-import { ChevronLeft, FileCheck2, LifeBuoy, LogOut, Truck } from 'lucide-react'
+import { Banknote, ChevronLeft, FileCheck2, LifeBuoy, LogOut, Truck } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { driverVehicleSummary } from '../../lib/driverVehicle'
 import type { Driver } from '../../types'
@@ -11,8 +11,9 @@ import { List, ListRow } from '../../components/ui/ListRow'
 import PersonAvatar from '../../components/ui/PersonAvatar'
 import SectionHeader from '../../components/ui/SectionHeader'
 
-export default function DriverSettingsScreen({ onBack, onOpenDocuments, onOpenVehicle, onOpenHelp, onLogout }: {
+export default function DriverSettingsScreen({ onBack, onOpenDocuments, onOpenVehicle, onOpenHelp, onOpenEarnings, onLogout }: {
   onBack: () => void
+  onOpenEarnings?: () => void
   onOpenDocuments: () => void
   onOpenVehicle: () => void
   onOpenHelp: () => void
@@ -41,6 +42,7 @@ export default function DriverSettingsScreen({ onBack, onOpenDocuments, onOpenVe
       <section className="ui-section" aria-labelledby="driver-settings-work">
         <SectionHeader id="driver-settings-work" title="Your work" />
         <List>
+          {onOpenEarnings && <ListRow icon={<Banknote size={19} />} title="Earnings & payouts" subtitle="What you've made and where it goes" onClick={onOpenEarnings} />}
           <ListRow icon={<FileCheck2 size={19} />} title="Documents" subtitle="Verification and renewals" onClick={onOpenDocuments} />
           <ListRow icon={<Truck size={19} />} title="Vehicle & equipment"
             subtitle={driverVehicleSummary(user?.vehicle) || 'Add the vehicle customers look for'} onClick={onOpenVehicle} />
