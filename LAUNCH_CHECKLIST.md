@@ -49,7 +49,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 ## C. Payments (Stripe)
 | # | Item | Owner | Status |
 |---|---|---|---|
-| C1 | Stripe account (business verified) + test keys | 👤 | 🟡 account ✅; key script ready `38c1371` — owner runs it in their own Terminal: `bash "/Users/agentmac/Desktop/aid app store/AIDV2-/scripts/set-stripe-keys.sh"`. It asks for the secret key, publishable key and (optional) webhook secret with hidden typing, checks they are real Stripe keys from the same mode (and asks you to type LIVE before saving live keys), saves them into the server and app settings files (other settings kept, files private and never committed) and asks Stripe whether the key works — it prints only “Stripe key OK (test mode)” or the kind of error. Left: owner runs it with test keys; then the server is restarted and payments are wired (C2+) |
+| C1 | Stripe account (business verified) + test keys | 👤 | ✅ test keys saved on this Mac (server/.env + .env.local, owner-only, Git-ignored); Stripe accepts them (test mode). Live keys go only on the hosted live server at launch (J). Webhook secret comes with hosting (H) |
 | C2 | Card hold at request, charge on completion; Apple Pay / Google Pay | 🛠 | ⬜ |
 | C3 | Cancellation fees, refunds, disputes handling, webhook hardening | 🛠 | 🟡 |
 | C4 | Stripe Connect Express for driver payouts + 1099s | 🤝 | ⬜ |
