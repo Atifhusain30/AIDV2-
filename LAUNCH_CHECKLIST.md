@@ -110,7 +110,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 ## H. Infrastructure & operations
 | # | Item | Owner | Status |
 |---|---|---|---|
-| H1 | Host the API (Render/Railway/Fly) at api.yourdomain | 🤝 | ⬜ |
+| H1 | Host the API (Render/Railway/Fly) at api.yourdomain | 🤝 | 🟡 ready to deploy: `render.yaml` (Render, Oregon next to the database, Starter plan, always on, 1 instance) + `scripts/render-deploy.cjs` (creates the service, copies settings from server/.env without showing them, connects the Stripe webhook, deploys, checks /health). Waiting on: owner's Render account + API key (Desktop → Set AID Render Key) |
 | H2 | Host admin panel (Vercel/Netlify) at admin.yourdomain, protected access | 🤝 | ⬜ |
 | H3 | Separate staging and production (Supabase + Stripe + API) | 🛠 | ⬜ |
 | H4 | Automatic checks on every push (tests, build) | 🛠 | ✅ `bc6d7d0` `6cb75f1` — GitHub runs the app tests, type check, permission/privacy check, app build, admin build and server tests on every push and pull request (no secrets needed; live database tests skip there). First green run: https://github.com/Atifhusain30/AIDV2-/actions/runs/39859877346 — badge in README. Native iOS/Android builds are not in CI yet |

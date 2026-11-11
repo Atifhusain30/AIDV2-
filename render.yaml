@@ -1,0 +1,48 @@
+# H1: the AID API on Render (https://render.com/docs/blueprint-spec).
+# Secrets are NOT in this file ("sync: false"): they are entered in Render, never committed.
+# One instance only: rate limits and live updates are in-memory (see server/rateLimit.js, server/realtime.js).
+services:
+  - type: web
+    name: aid-api
+    runtime: node
+    region: oregon            # same AWS region as the Supabase database (us-west-2) — lowest latency
+    plan: starter             # always on; the free plan sleeps, which would stop expiry and payment sweeps
+    numInstances: 1
+    branch: auth-foundation
+    rootDir: server
+    buildCommand: npm ci --omit=dev
+    startCommand: node index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "1"             # Render's proxy is one hop; client IPs then come from X-Forwarded-For (rate limits)
+      - key: HSTS_ENABLED
+        value: "true"          # Render serves HTTPS only
+      - key: LOG_LEVEL
+        value: info
+      - key: CORS_ORIGIN       # native apps + (later) the admin site's domain
+        value: capacitor://localhost,ionic://localhost,https://localhost,http://localhost
+      - key: PUBLIC_API_URL    # set to the service's https URL after the first deploy (Stripe payout return page)
+        sync: false
+      # --- secrets: entered in Render, copied from server/.env by scripts/render-deploy.cjs ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_CA
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
