@@ -122,7 +122,7 @@ Updated 2026-10-22. Detailed engineering findings live in `AID_AUDIT_CHECKLIST.m
 ## I. Store listings & review
 | # | Item | Owner | Status |
 |---|---|---|---|
-| I1 | Privacy Policy, Terms, Support URLs live on your website | 🤝 | 🟡 Pre-launch website published at https://atifhusain30.github.io/aid-website/ from separate public repo `Atifhusain30/aid-website` (`06c22be`). Privacy Policy, Terms and Support URLs are **not published yet**; add approved documents and support contact before store submission, then connect the custom domain. |
+| I1 | Privacy Policy, Terms, Support URLs live on your website | 🤝 | 🟡 Pre-launch website published at https://atifhusain30.github.io/aid-website/ from separate public repo `Atifhusain30/aid-website` (`56173b0`: actual app development captures, mobile showcase, keyboard-accessible gallery, reduced-motion animations, WCAG audit). Privacy Policy, Terms and Support URLs are **not published yet**; add approved documents and support contact before store submission, then connect the custom domain. |
 | I2 | Web page for account deletion requests (Google Play) | 🛠 | ⬜ |
 | I3 | App name, subtitle, description, keywords, category (Navigation/Travel) | 🤝 | ⬜ |
 | I4 | Screenshots (6.9" & 6.5" iPhone, Android phone) + optional preview video | 🤝 | ⬜ |
